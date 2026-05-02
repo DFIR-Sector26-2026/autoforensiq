@@ -1,0 +1,29 @@
+{
+  "tools": [
+    {
+      "name": "volatility3",
+      "order": 1,
+      "args": { "image": true }
+    },
+    {
+      "name": "tshark",
+      "order": 2,
+      "args": { "pcap": true }
+    },
+    {
+      "name": "tsk_fls",
+      "order": 3,
+      "args": { "image": true }
+    },
+    {
+      "name": "regripper",
+      "order": 4,
+      "args": { "hive": true }
+    },
+    {
+      "name": "plaso",
+      "order": 5,
+      "args": { "source": true }
+    }
+  ]
+}
