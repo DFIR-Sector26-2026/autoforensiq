@@ -1,0 +1,1663 @@
+[
+  {
+    "timestamp": "2026-05-02T16:15:35.984907Z",
+    "tool": "test_tool",
+    "command": "echo hello",
+    "status": "success",
+    "error": "",
+    "input_hashes": {},
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:51.832069Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.pslist",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:51.833267Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.pstree",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:51.837325Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.cmdline",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:51.838136Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.netstat",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:51.839017Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.malfind",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:51.839998Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.dlllist",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:52.041655Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -T fields -e ip.src -e ip.dst -e tcp.dstport -e frame.len -e frame.time_epoch -Y tcp",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:52.242137Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y dns.flags.response == 0 -T fields -e frame.time_epoch -e ip.src -e dns.qry.name",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:52.446433Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y http.request -T fields -e frame.time_epoch -e ip.src -e http.host -e http.request.uri",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:52.646343Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4444 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:52.847915Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4445 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:53.074205Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 1337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:53.277369Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 31337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:53.475747Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 8888 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:53.672924Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 9999 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:53.866588Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6667 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:54.063560Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6668 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:54.080186Z",
+    "tool": "tsk_fls",
+    "command": "fls -r -m / data/test_cases/memory.dmp",
+    "status": "failed",
+    "error": "Sector offset supplied is larger than disk image (maximum: 0)\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:26:54.092096Z",
+    "tool": "tsk_fls",
+    "command": "fls -r -m / data/test_cases/memory.dmp",
+    "status": "failed",
+    "error": "Sector offset supplied is larger than disk image (maximum: 0)\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:44.552467Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.pslist",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:44.553634Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.pstree",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:44.557674Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.cmdline",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:44.558854Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.netstat",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:44.559682Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.malfind",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:44.560475Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.dlllist",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:44.757267Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -T fields -e ip.src -e ip.dst -e tcp.dstport -e frame.len -e frame.time_epoch -Y tcp",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:44.948995Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y dns.flags.response == 0 -T fields -e frame.time_epoch -e ip.src -e dns.qry.name",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:45.150476Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y http.request -T fields -e frame.time_epoch -e ip.src -e http.host -e http.request.uri",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:45.346640Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4444 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:45.540017Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4445 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:45.733013Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 1337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:45.932489Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 31337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:46.127670Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 8888 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:27:46.321010Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 9999 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:29:30.538542Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -T fields -e ip.src -e ip.dst -e tcp.dstport -e frame.len -e frame.time_epoch -Y tcp",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:29:30.736811Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y dns.flags.response == 0 -T fields -e frame.time_epoch -e ip.src -e dns.qry.name",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:29:30.936919Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y http.request -T fields -e frame.time_epoch -e ip.src -e http.host -e http.request.uri",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:29:31.135298Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4444 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:29:31.329185Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4445 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:29:31.522806Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 1337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:29:31.723062Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 31337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:29:31.919992Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 8888 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:29:32.116572Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 9999 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:29:32.310093Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6667 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:29:32.505805Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6668 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:30:47.143761Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -T fields -e ip.src -e ip.dst -e tcp.dstport -e frame.len -e frame.time_epoch -Y tcp",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:30:47.361727Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y dns.flags.response == 0 -T fields -e frame.time_epoch -e ip.src -e dns.qry.name",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:30:47.581208Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y http.request -T fields -e frame.time_epoch -e ip.src -e http.host -e http.request.uri",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:30:47.789425Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4444 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:30:48.005126Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4445 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:30:48.217336Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 1337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:30:48.421917Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 31337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:30:48.634003Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 8888 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:30:48.842699Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 9999 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:30:49.040728Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6667 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:30:49.241536Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6668 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:31:27.008237Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -T fields -e ip.src -e ip.dst -e tcp.dstport -e frame.len -e frame.time_epoch -Y tcp",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "8fdc45a91bd36e2749a9c7e045a5c2b82229599199f32ccbcc6e3f1891ce3588"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:31:27.215584Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y dns.flags.response == 0 -T fields -e frame.time_epoch -e ip.src -e dns.qry.name",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "8fdc45a91bd36e2749a9c7e045a5c2b82229599199f32ccbcc6e3f1891ce3588"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:31:27.427467Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y http.request -T fields -e frame.time_epoch -e ip.src -e http.host -e http.request.uri",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "8fdc45a91bd36e2749a9c7e045a5c2b82229599199f32ccbcc6e3f1891ce3588"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:31:27.641653Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4444 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "8fdc45a91bd36e2749a9c7e045a5c2b82229599199f32ccbcc6e3f1891ce3588"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:31:27.858122Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4445 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "8fdc45a91bd36e2749a9c7e045a5c2b82229599199f32ccbcc6e3f1891ce3588"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:31:28.076318Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 1337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "8fdc45a91bd36e2749a9c7e045a5c2b82229599199f32ccbcc6e3f1891ce3588"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:31:28.299595Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 31337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "8fdc45a91bd36e2749a9c7e045a5c2b82229599199f32ccbcc6e3f1891ce3588"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:31:28.513738Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 8888 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "8fdc45a91bd36e2749a9c7e045a5c2b82229599199f32ccbcc6e3f1891ce3588"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:31:28.733150Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 9999 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "8fdc45a91bd36e2749a9c7e045a5c2b82229599199f32ccbcc6e3f1891ce3588"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:31:28.947214Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6667 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "8fdc45a91bd36e2749a9c7e045a5c2b82229599199f32ccbcc6e3f1891ce3588"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:31:29.167193Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6668 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "8fdc45a91bd36e2749a9c7e045a5c2b82229599199f32ccbcc6e3f1891ce3588"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:33:32.341542Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -T fields -e ip.src -e ip.dst -e tcp.dstport -e frame.len -e frame.time_epoch -Y tcp",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "6286a83f5f025dbaeb38c633eb8bcda900c9188aab8b38bf833326e2092407fb"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:33:32.542634Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y dns.flags.response == 0 -T fields -e frame.time_epoch -e ip.src -e dns.qry.name",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "6286a83f5f025dbaeb38c633eb8bcda900c9188aab8b38bf833326e2092407fb"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:33:32.736773Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y http.request -T fields -e frame.time_epoch -e ip.src -e http.host -e http.request.uri",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "6286a83f5f025dbaeb38c633eb8bcda900c9188aab8b38bf833326e2092407fb"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:33:32.940464Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4444 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "6286a83f5f025dbaeb38c633eb8bcda900c9188aab8b38bf833326e2092407fb"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:33:33.138007Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4445 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "6286a83f5f025dbaeb38c633eb8bcda900c9188aab8b38bf833326e2092407fb"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:33:33.337051Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 1337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "6286a83f5f025dbaeb38c633eb8bcda900c9188aab8b38bf833326e2092407fb"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:33:33.535627Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 31337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "6286a83f5f025dbaeb38c633eb8bcda900c9188aab8b38bf833326e2092407fb"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:33:33.736880Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 8888 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "6286a83f5f025dbaeb38c633eb8bcda900c9188aab8b38bf833326e2092407fb"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:33:33.936394Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 9999 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "6286a83f5f025dbaeb38c633eb8bcda900c9188aab8b38bf833326e2092407fb"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:33:34.134349Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6667 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "6286a83f5f025dbaeb38c633eb8bcda900c9188aab8b38bf833326e2092407fb"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:33:34.337804Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6668 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "failed",
+    "error": "tshark: The file \"data/test_cases/capture.pcap\" isn't a capture file in a format TShark understands.\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "6286a83f5f025dbaeb38c633eb8bcda900c9188aab8b38bf833326e2092407fb"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:04.486447Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -T fields -e ip.src -e ip.dst -e tcp.dstport -e frame.len -e frame.time_epoch -Y tcp",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:04.840905Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y dns.flags.response == 0 -T fields -e frame.time_epoch -e ip.src -e dns.qry.name",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:05.195045Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y http.request -T fields -e frame.time_epoch -e ip.src -e http.host -e http.request.uri",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:05.544440Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4444 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:05.898088Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4445 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:06.249477Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 1337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:06.602486Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 31337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:06.947060Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 8888 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:07.291738Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 9999 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:07.632880Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6667 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:07.977009Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6668 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:14.754684Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.pslist",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:14.757219Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.pstree",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:14.762259Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.cmdline",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:14.764242Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.netstat",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:14.766222Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.malfind",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:14.768197Z",
+    "tool": "volatility3",
+    "command": "vol -f data/test_cases/memory.dmp windows.dlllist",
+    "status": "error",
+    "error": "[Errno 2] No such file or directory: 'vol'",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:15.143551Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -T fields -e ip.src -e ip.dst -e tcp.dstport -e frame.len -e frame.time_epoch -Y tcp",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:15.496644Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y dns.flags.response == 0 -T fields -e frame.time_epoch -e ip.src -e dns.qry.name",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:15.847574Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y http.request -T fields -e frame.time_epoch -e ip.src -e http.host -e http.request.uri",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:16.201404Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4444 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:16.556059Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4445 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:16.905588Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 1337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:17.257965Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 31337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:17.611856Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 8888 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:17.960112Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 9999 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:18.310983Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6667 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:18.660123Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6668 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:18.678605Z",
+    "tool": "tsk_fls",
+    "command": "fls -r -m / data/test_cases/memory.dmp",
+    "status": "failed",
+    "error": "Sector offset supplied is larger than disk image (maximum: 0)\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:37:18.691731Z",
+    "tool": "tsk_fls",
+    "command": "fls -r -m / data/test_cases/memory.dmp",
+    "status": "failed",
+    "error": "Sector offset supplied is larger than disk image (maximum: 0)\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:22.536948Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.pslist",
+    "status": "failed",
+    "error": "\nProgress:    0.00\t\tUpdating caches for 110 files...\n\nProgress:    0.91\t\tUpdating caches for 110 files...\n\nProgress:    1.82\t\tUpdating caches for 110 files...\n\nProgress:    2.73\t\tUpdating caches for 110 files...\n\nProgress:    3.64\t\tUpdating caches for 110 files...\n\nProgress:    4.55\t\tUpdating caches for 110 files...\n\nProgress:    5.45\t\tUpdating caches for 110 files...\n\nProgress:    6.36\t\tUpdating caches for 110 files...\n\nProgress:    7.27\t\tUpdating caches for 110 files...\n\nProgress:    8.18\t\tUpd",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:22.889454Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.pstree",
+    "status": "failed",
+    "error": "\nProgress:  100.00\t\tStacking attempts finished\n\nProgress:  100.00\t\tPDB scanning finished     \nUnable to validate the plugin requirements: ['plugins.PsTree.kernel.layer_name', 'plugins.PsTree.kernel.symbol_table_name']\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:23.237459Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.cmdline",
+    "status": "failed",
+    "error": "\nProgress:  100.00\t\tStacking attempts finished\n\nProgress:  100.00\t\tPDB scanning finished     \nUnable to validate the plugin requirements: ['plugins.CmdLine.kernel.layer_name', 'plugins.CmdLine.kernel.symbol_table_name']\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:23.592564Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.netstat",
+    "status": "failed",
+    "error": "\nProgress:  100.00\t\tStacking attempts finished\n\nProgress:  100.00\t\tPDB scanning finished     \nUnable to validate the plugin requirements: ['plugins.NetStat.kernel.layer_name', 'plugins.NetStat.kernel.symbol_table_name']\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:23.929485Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.malfind",
+    "status": "failed",
+    "error": "\nProgress:  100.00\t\tStacking attempts finished\n\nProgress:  100.00\t\tPDB scanning finished     \nUnable to validate the plugin requirements: ['plugins.Malfind.kernel.layer_name', 'plugins.Malfind.kernel.symbol_table_name']\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:24.277028Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.dlllist",
+    "status": "failed",
+    "error": "\nProgress:  100.00\t\tStacking attempts finished\n\nProgress:  100.00\t\tPDB scanning finished     \nUnable to validate the plugin requirements: ['plugins.DllList.kernel.layer_name', 'plugins.DllList.kernel.symbol_table_name']\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:24.630561Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -T fields -e ip.src -e ip.dst -e tcp.dstport -e frame.len -e frame.time_epoch -Y tcp",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:24.979486Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y dns.flags.response == 0 -T fields -e frame.time_epoch -e ip.src -e dns.qry.name",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:25.330001Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y http.request -T fields -e frame.time_epoch -e ip.src -e http.host -e http.request.uri",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:25.678059Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4444 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:26.022683Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4445 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:26.367019Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 1337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:26.712327Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 31337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:27.059790Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 8888 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:27.403968Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 9999 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:27.747542Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6667 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:28.094312Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6668 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:28.119116Z",
+    "tool": "tsk_fls",
+    "command": "fls -r -m / data/test_cases/memory.dmp",
+    "status": "failed",
+    "error": "Sector offset supplied is larger than disk image (maximum: 0)\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:43:28.132509Z",
+    "tool": "tsk_fls",
+    "command": "fls -r -m / data/test_cases/memory.dmp",
+    "status": "failed",
+    "error": "Sector offset supplied is larger than disk image (maximum: 0)\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:30.771015Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.pslist",
+    "status": "failed",
+    "error": "\nProgress:  100.00\t\tStacking attempts finished\n\nProgress:  100.00\t\tPDB scanning finished     \nUnable to validate the plugin requirements: ['plugins.PsList.kernel.layer_name', 'plugins.PsList.kernel.symbol_table_name']\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:31.119416Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.pstree",
+    "status": "failed",
+    "error": "\nProgress:  100.00\t\tStacking attempts finished\n\nProgress:  100.00\t\tPDB scanning finished     \nUnable to validate the plugin requirements: ['plugins.PsTree.kernel.layer_name', 'plugins.PsTree.kernel.symbol_table_name']\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:31.474953Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.cmdline",
+    "status": "failed",
+    "error": "\nProgress:  100.00\t\tStacking attempts finished\n\nProgress:  100.00\t\tPDB scanning finished     \nUnable to validate the plugin requirements: ['plugins.CmdLine.kernel.layer_name', 'plugins.CmdLine.kernel.symbol_table_name']\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:31.828623Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.netstat",
+    "status": "failed",
+    "error": "\nProgress:  100.00\t\tStacking attempts finished\n\nProgress:  100.00\t\tPDB scanning finished     \nUnable to validate the plugin requirements: ['plugins.NetStat.kernel.layer_name', 'plugins.NetStat.kernel.symbol_table_name']\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:32.179794Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.malfind",
+    "status": "failed",
+    "error": "\nProgress:  100.00\t\tStacking attempts finished\n\nProgress:  100.00\t\tPDB scanning finished     \nUnable to validate the plugin requirements: ['plugins.Malfind.kernel.layer_name', 'plugins.Malfind.kernel.symbol_table_name']\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:32.525527Z",
+    "tool": "volatility3",
+    "command": "./venv/bin/vol -f data/test_cases/memory.dmp windows.dlllist",
+    "status": "failed",
+    "error": "\nProgress:  100.00\t\tStacking attempts finished\n\nProgress:  100.00\t\tPDB scanning finished     \nUnable to validate the plugin requirements: ['plugins.DllList.kernel.layer_name', 'plugins.DllList.kernel.symbol_table_name']\n",
+    "input_hashes": {
+      "data/test_cases/memory.dmp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:32.887718Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -T fields -e ip.src -e ip.dst -e tcp.dstport -e frame.len -e frame.time_epoch -Y tcp",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:33.243860Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y dns.flags.response == 0 -T fields -e frame.time_epoch -e ip.src -e dns.qry.name",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:33.601102Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y http.request -T fields -e frame.time_epoch -e ip.src -e http.host -e http.request.uri",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:33.958449Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4444 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:34.317321Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 4445 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:34.670226Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 1337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:35.032173Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 31337 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:35.388359Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 8888 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:35.746465Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 9999 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:36.117695Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6667 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:36.489804Z",
+    "tool": "tshark",
+    "command": "tshark -r data/test_cases/capture.pcap -Y tcp.dstport == 6668 -T fields -e frame.time_epoch -e ip.src -e ip.dst",
+    "status": "success",
+    "error": "",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:36.510774Z",
+    "tool": "tsk_fls",
+    "command": "fls -r -m / data/test_cases/disk.img",
+    "status": "failed",
+    "error": "Sector offset supplied is larger than disk image (maximum: 0)\n",
+    "input_hashes": {
+      "data/test_cases/disk.img": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:36.525219Z",
+    "tool": "tsk_fls",
+    "command": "fls -r -m / data/test_cases/disk.img",
+    "status": "failed",
+    "error": "Sector offset supplied is larger than disk image (maximum: 0)\n",
+    "input_hashes": {
+      "data/test_cases/disk.img": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:36.674689Z",
+    "tool": "regripper",
+    "command": "perl /home/yuti/regripper/rip.pl -r data/test_cases/NTUSER.DAT -p ntuser",
+    "status": "failed",
+    "error": "/home/yuti/regripper/plugins/ntuser.pl not found.\n",
+    "input_hashes": {
+      "data/test_cases/NTUSER.DAT": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:36.748163Z",
+    "tool": "regripper",
+    "command": "perl /home/yuti/regripper/rip.pl -r data/test_cases/NTUSER.DAT -p run",
+    "status": "success",
+    "error": "Launching run v.20200511\nError in /home/yuti/regripper/plugins/run.pl: Can't call method \"get_embedded_filename\" on an undefined value at /home/yuti/regripper/rip.pl line 460.\n\n",
+    "input_hashes": {
+      "data/test_cases/NTUSER.DAT": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:36.818261Z",
+    "tool": "regripper",
+    "command": "perl /home/yuti/regripper/rip.pl -r data/test_cases/NTUSER.DAT -p autoruns",
+    "status": "failed",
+    "error": "/home/yuti/regripper/plugins/autoruns.pl not found.\n",
+    "input_hashes": {
+      "data/test_cases/NTUSER.DAT": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "output_hashes": {}
+  },
+  {
+    "timestamp": "2026-05-02T16:59:37.932395Z",
+    "tool": "plaso",
+    "command": "log2timeline.py --status_view none /tmp/autoforensiq_plaso.dump data/test_cases/capture.pcap",
+    "status": "failed",
+    "error": "2026-05-02 22:29:37,344 [INFO] (MainProcess) PID:209204 <data_location> Determined data location: /usr/share/plaso\n2026-05-02 22:29:37,349 [INFO] (MainProcess) PID:209204 <artifact_definitions> Determined artifact definitions path: /usr/share/artifacts\n",
+    "input_hashes": {
+      "data/test_cases/capture.pcap": "be8173a91faf35a783b37077ea789afd8f3ea1f497e358c9687ed17c1aa9291a"
+    },
+    "output_hashes": {
+      "/tmp/autoforensiq_plaso.dump": "file_not_found"
+    }
+  }
+]
