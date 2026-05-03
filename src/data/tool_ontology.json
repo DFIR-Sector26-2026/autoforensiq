@@ -1,0 +1,120 @@
+{
+  "COMMENT": "Prototype",
+  "tools": [
+    {
+      "name": "volatility3",
+      "domains": ["memory"],
+      "input_types": ["memory_dump"],
+      "output_types": [
+        "process",
+        "process_tree",
+        "commandline",
+        "network_connection",
+        "injected_code",
+        "suspicious_dll"
+      ],
+      "plugins": [
+        "windows.pslist",
+        "windows.pstree",
+        "windows.cmdline",
+        "windows.netstat",
+        "windows.malfind",
+        "windows.dlllist"
+      ],
+      "case_relevance": {
+        "ransomware": 0.9,
+        "exfiltration": 0.75,
+        "network_intrusion": 0.7,
+        "malware_execution": 0.95,
+        "unknown": 0.6
+      },
+      "dependencies": [],
+      "default_order": 1,
+      "args_template": {
+        "image": true
+      },
+      "wrapper_status": "implemented"
+    },
+    {
+      "name": "tshark",
+      "domains": ["network"],
+      "input_types": ["pcap"],
+      "output_types": [
+        "network_connection",
+        "dns_query",
+        "http_request",
+        "suspicious_port"
+      ],
+      "case_relevance": {
+        "ransomware": 0.85,
+        "exfiltration": 0.95,
+        "network_intrusion": 0.95,
+        "malware_execution": 0.7,
+        "unknown": 0.65
+      },
+      "dependencies": [],
+      "default_order": 2,
+      "args_template": {
+        "pcap": true
+      },
+      "wrapper_status": "implemented_and_observed_working"
+    },
+    {
+      "name": "tsk_fls",
+      "domains": ["disk"],
+      "input_types": ["disk_image"],
+      "output_types": ["file_artifact", "timeline_event"],
+      "case_relevance": {
+        "ransomware": 0.9,
+        "exfiltration": 0.8,
+        "network_intrusion": 0.5,
+        "malware_execution": 0.8,
+        "unknown": 0.6
+      },
+      "dependencies": [],
+      "default_order": 3,
+      "args_template": {
+        "image": true
+      },
+      "wrapper_status": "implemented_requires_sleuthkit"
+    },
+    {
+      "name": "regripper",
+      "domains": ["registry"],
+      "input_types": ["registry_hive"],
+      "output_types": ["registry_entry"],
+      "case_relevance": {
+        "ransomware": 0.85,
+        "exfiltration": 0.65,
+        "network_intrusion": 0.55,
+        "malware_execution": 0.9,
+        "unknown": 0.55
+      },
+      "dependencies": [],
+      "default_order": 4,
+      "args_template": {
+        "hive": true
+      },
+      "wrapper_status": "implemented_requires_regripper_install"
+    },
+    {
+      "name": "plaso",
+      "domains": ["timeline"],
+      "input_types": ["disk_image", "evidence_directory"],
+      "output_types": ["timeline_event"],
+      "case_relevance": {
+        "ransomware": 0.8,
+        "exfiltration": 0.75,
+        "network_intrusion": 0.6,
+        "malware_execution": 0.75,
+        "unknown": 0.5
+      },
+      "dependencies": ["tsk_fls"],
+      "default_order": 5,
+      "args_template": {
+        "source": true
+      },
+      "wrapper_status": "implemented_requires_plaso"
+    }
+  ]
+}
