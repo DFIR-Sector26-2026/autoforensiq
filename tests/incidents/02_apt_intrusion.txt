@@ -1,0 +1,50 @@
+INCIDENT REPORT — IR-2024-1103
+Date: 2024-12-02
+Reported by: Threat Intelligence Team
+Severity: HIGH
+
+SUMMARY
+Anomalous authentication activity was detected across three internal servers over a 6-week period.
+Threat intelligence correlation indicates TTPs consistent with APT29 (Cozy Bear). The actor appears
+to have maintained persistent access since at least October 18 and has conducted lateral movement
+across the corporate network. No data exfiltration confirmed but strongly suspected.
+
+AFFECTED SYSTEMS
+- DC01 (10.0.0.2) — Primary Domain Controller
+- EXCHANGE01 (10.0.0.10) — Email server
+- DEVSERVER03 (10.0.1.55) — Internal build server
+- WORKSTATION-EXEC-04 (10.0.2.88)
+
+AVAILABLE EVIDENCE
+- Memory dump from EXCHANGE01 (exchange_memory.dmp, 32GB)
+- Network PCAP spanning October 18–November 30 (apt_traffic.pcap, 140GB)
+- Windows Event Log files from DC01 (dc01_events.evtx)
+- Disk image from DEVSERVER03 (devserver_disk.img)
+
+TIMELINE OF EVENTS
+Oct 18 — Spear-phishing email delivered to CFO mailbox containing malicious .docx with macro
+Oct 19 — Macro executed, Cobalt Strike beacon established to 94.102.49.190
+Oct 22 — Lateral movement via pass-the-hash from WORKSTATION-EXEC-04 to DC01
+Nov 01 — WMI subscription created on DC01 for persistence
+Nov 15 — EXCHANGE01 compromised; mailbox access for 3 C-suite accounts observed
+Nov 28 — DEVSERVER03 accessed; source code repositories browsed
+
+INDICATORS OF COMPROMISE
+- Cobalt Strike beacon: HTTP POST to 94.102.49.190:80 every 60 seconds
+- WMI event subscription: __EventFilter + ActiveScriptEventConsumer
+- Pass-the-hash using NTLM from WORKSTATION-EXEC-04 (4624 Event ID, logon type 3)
+- Unusual outbound HTTPS from EXCHANGE01 to 94.102.49.190 and 185.234.218.57
+- Scheduled task: "WindowsUpdateHelper" added on DC01
+
+THREAT ACTOR ATTRIBUTION
+TTPs match MITRE ATT&CK G0016 (APT29):
+- T1566.001 Spear Phishing with Attachment
+- T1055 Process Injection
+- T1021.002 SMB/Windows Admin Shares
+- T1078 Valid Accounts
+
+ACTIONS TAKEN
+- Threat intelligence notified CISO
+- DC01 password reset for all privileged accounts
+- WMI subscriptions audited and removed
+- Network segmentation applied to DEVSERVER03

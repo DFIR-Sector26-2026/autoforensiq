@@ -1,0 +1,51 @@
+INCIDENT REPORT — IR-2025-0021
+Date: 2025-01-09
+Reported by: DLP System (automated) + Security Analyst R. Osei
+Severity: HIGH
+
+SUMMARY
+The Data Loss Prevention (DLP) platform flagged a sustained spike in outbound data volume
+from a contractor workstation (CONTRACTOR-WS-12) late on January 8th. Approximately 47GB of
+data was transferred over 3 hours to an external IP address not in the approved vendor list.
+The files accessed include customer PII, internal contracts, and financial projections for Q1 2025.
+
+AFFECTED SYSTEMS
+- CONTRACTOR-WS-12 (172.16.4.22) — primary exfiltration source
+- FILESERVER02 (172.16.1.8) — accessed file share
+- PROXY01 (172.16.0.1) — egress proxy
+
+AVAILABLE EVIDENCE
+- Memory dump from CONTRACTOR-WS-12 (contractor_mem.dmp)
+- Network PCAP from PROXY01 egress interface (exfil_traffic.pcap)
+- Disk image of CONTRACTOR-WS-12 (contractor_disk.img)
+- Proxy log files from PROXY01 (proxy_jan08.log)
+
+TIMELINE OF EVENTS
+21:14 — CONTRACTOR-WS-12 authenticated to FILESERVER02 using contractor account
+21:16 — Bulk file access: 12,400 files read from \\FILESERVER02\Finance\ over 22 minutes
+21:38 — 7z.exe launched to archive files into encrypted archive "backup_q1.7z"
+21:55 — FTP session established to 203.0.113.88 (unregistered external IP, Romania)
+21:55–00:47 — 47GB uploaded via FTP over 3-hour session
+00:48 — 7z archive and temp files deleted from local disk
+
+DATA AT RISK
+- Customer PII: ~120,000 records (name, DOB, account numbers)
+- Internal contracts: 340 documents
+- Financial projections: Q1 2025 board pack
+
+INDICATORS OF COMPROMISE
+- 7z.exe execution at 21:38 (unusual for contractor role)
+- FTP connection to 203.0.113.88 (not in approved vendor list)
+- Bulk file read events on FILESERVER02 (EventID 4663, 12,400+ objects)
+- File deletion activity post-transfer (anti-forensics)
+- Large outbound data volume (47GB in single session)
+
+REGULATORY IMPLICATIONS
+Customer PII exposure may trigger PIPEDA / GDPR notification requirements.
+Legal counsel notified.
+
+ACTIONS TAKEN
+- Contractor access credentials revoked
+- CONTRACTOR-WS-12 isolated from network
+- Evidence preserved per chain-of-custody procedures
+- DLP alert escalated to CISO and Legal

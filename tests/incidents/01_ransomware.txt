@@ -1,0 +1,44 @@
+INCIDENT REPORT — IR-2024-0847
+Date: 2024-11-14
+Reported by: SOC Analyst T. Mbeki
+Severity: CRITICAL
+
+SUMMARY
+At approximately 02:13 UTC, the enterprise EDR platform triggered high-volume file modification alerts
+across 17 workstations in the Finance and HR departments. Files on shared network drives are now
+displaying the extension ".LOCKED" and a ransom note named "HOW_TO_DECRYPT.txt" has appeared on
+affected desktops. Access to the affected file shares has been suspended.
+
+AFFECTED SYSTEMS
+- WIN-FIN-001 (192.168.10.45)
+- WIN-FIN-002 (192.168.10.46)
+- WIN-HR-007  (192.168.10.112)
+- FILESERVER01 (192.168.10.5)
+
+AVAILABLE EVIDENCE
+- Memory dump captured from WIN-FIN-001 (memory.dmp, 8GB)
+- Disk image of WIN-FIN-001 C: drive (disk.img, 512GB)
+- NTUSER.DAT registry hive from WIN-FIN-001
+- Network PCAP from the Finance VLAN (2 hours pre-incident, capture.pcap)
+
+TIMELINE OF EVENTS
+02:07 — RDP login to WIN-FIN-001 from external IP 185.220.101.34 (Tor exit node)
+02:09 — cmd.exe spawned by explorer.exe; encoded PowerShell command executed
+02:11 — Outbound HTTPS connection to 45.33.32.156 (known C2 domain: black-mirror[.]top)
+02:13 — Mass file encryption begins across mapped network drives
+02:15 — Ransom note deployed via batch script
+
+RANSOM DEMAND
+The ransom note demands 3.5 Bitcoin (~$210,000 USD) within 72 hours.
+Contact email: support@black-mirror.top
+
+INITIAL INDICATORS OF COMPROMISE
+- Process: svchost.exe spawning cmd.exe (unusual parent-child)
+- Registry run key added: HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Updater
+- Outbound connections to 45.33.32.156:443
+- File extension mass-rename event (.docx → .docx.LOCKED)
+
+ACTIONS TAKEN
+- Network isolation of affected VLAN
+- Memory and disk images captured
+- EDR containment applied to WIN-FIN-001 and WIN-FIN-002
