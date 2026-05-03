@@ -1,0 +1,29 @@
+# AutoForensiq — Python dependencies
+# Install with: pip install -r requirements.txt
+
+# ── LLM APIs ──────────────────────────────────────────────────────────────────
+anthropic>=0.25.0          # Anthropic Claude SDK (P1 — classifier + report gen)
+openai>=1.30.0             # OpenAI SDK (P1 — alternate LLM provider)
+
+# ── Config & CLI ──────────────────────────────────────────────────────────────
+pyyaml>=6.0                # config.yaml parsing
+python-dotenv>=1.0.0       # load API keys from .env file
+
+# ── JSON Schema validation ────────────────────────────────────────────────────
+jsonschema>=4.21.0         # validate case_context.json against schema
+
+# ── ML / XAI (P5) ─────────────────────────────────────────────────────────────
+scikit-learn>=1.4.0        # IsolationForest anomaly detector
+shap>=0.45.0               # SHAP feature attribution
+lime>=0.2.0                # LIME local interpretability
+numpy>=1.26.0
+pandas>=2.2.0
+
+# ── Forensic tool support ─────────────────────────────────────────────────────
+volatility3>=2.5.0         # Volatility 3 memory analysis (P3)
+
+# ── Report output ─────────────────────────────────────────────────────────────
+# reportlab>=4.1.0         # (optional) PDF generation — uncomment for PDF output
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+tqdm>=4.66.0               # progress bars for long-running tool executions

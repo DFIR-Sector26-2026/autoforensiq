@@ -1,0 +1,53 @@
+INCIDENT REPORT — IR-2025-0089
+Date: 2025-02-17
+Reported by: HR Security + IT Security
+Severity: MEDIUM-HIGH
+
+SUMMARY
+Following the resignation of a senior engineer (J. Tran, employee ID E-4821) on February 14,
+IT Security conducted a routine access audit. The audit revealed that between February 10–14,
+J. Tran accessed and copied a substantial volume of proprietary source code and internal
+technical documentation to a personal USB device, and later to a personal cloud storage account.
+J. Tran's final day was February 14; access has since been revoked.
+
+AFFECTED SYSTEMS
+- DEVWS-TRAN (10.10.5.77) — employee workstation
+- GITSERVER01 (10.10.1.20) — internal Git repository server
+- SHAREPOINT01 (10.10.1.45) — internal documentation portal
+
+AVAILABLE EVIDENCE
+- Disk image of DEVWS-TRAN (tran_workstation.img)
+- NTUSER.DAT registry hive from DEVWS-TRAN
+- Windows Event Logs from DEVWS-TRAN (tran_events.evtx)
+- Network PCAP from Feb 10–14 (insider_traffic.pcap)
+
+TIMELINE OF EVENTS
+Feb 10 — J. Tran submits resignation letter (HR records)
+Feb 10 14:22 — USB device connected to DEVWS-TRAN (Kingston DataTraveler 32GB, serial: KD-1928374)
+Feb 10 14:23–16:41 — 8.2GB copied to USB device (proprietary ML model code, internal API specs)
+Feb 11 09:15 — Browser history shows login to personal Google Drive from DEVWS-TRAN
+Feb 11 09:18–10:03 — 4.1GB uploaded to drive.google.com from DEVWS-TRAN
+Feb 13 — Additional Git repository clone: full history of 3 private repos downloaded
+Feb 14 — Last day; access badge returned, accounts revoked
+
+USB DEVICE DETAILS
+- USB device registered in NTUSER.DAT (USBSTOR key)
+- First connection: Feb 10 14:22:04 UTC
+- Device serial: KD-1928374 (Kingston DataTraveler 32GB)
+
+INDICATORS OF CONCERN
+- USB device connected immediately after resignation
+- Bulk data transfer to USB within hours of resignation
+- Personal cloud storage upload from corporate device
+- Full Git repository clone (unusual volume for a single session)
+- Log clearing attempt detected: Security event log partially cleared Feb 14 at 13:47
+
+BUSINESS IMPACT
+Proprietary ML model code may be used by a competitor.
+Legal hold issued on J. Tran's accounts and devices.
+
+ACTIONS TAKEN
+- USB device recovered from J. Tran's desk
+- DEVWS-TRAN preserved and disk image captured
+- Legal hold applied to all J. Tran's cloud accounts (via legal team)
+- Competitor company (where J. Tran intends to work) notified of potential trade secret misappropriation

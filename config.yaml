@@ -1,0 +1,45 @@
+# AutoForensiq — Configuration
+# Edit this file to switch LLM providers or enable mock mode.
+
+llm:
+  # LLM provider to use for the Intent Classifier and Report Generator.
+  # Options: "anthropic" | "openai"
+  provider: "anthropic"
+
+  # Model to use per provider.
+  # Anthropic options: "claude-sonnet-4-6", "claude-haiku-4-5-20251001"
+  # OpenAI options:    "gpt-4o", "gpt-4o-mini"
+  anthropic_model: "claude-sonnet-4-6"
+  openai_model: "gpt-4o"
+
+  # Set mock_mode: true to run without a real API key.
+  # The classifier will return a deterministic mock case_context.json
+  # so you can test the full pipeline schema without spending tokens.
+  mock_mode: true
+
+  # Environment variable names where API keys are stored.
+  # Do NOT paste keys directly here — set them in your shell or .env file.
+  anthropic_api_key_env: "ANTHROPIC_API_KEY"
+  openai_api_key_env: "OPENAI_API_KEY"
+
+  # Max tokens for LLM responses (keep low — outputs are structured JSON)
+  max_tokens: 1024
+
+  # Temperature: 0.0 for deterministic structured extraction
+  temperature: 0.0
+
+paths:
+  # Where the classifier writes its output
+  case_context_output: "output/case_context.json"
+
+  # Where the tool selector writes its plan (P2 owns this)
+  execution_plan_output: "output/execution_plan.json"
+
+  # Where raw tool outputs land (P3 owns this)
+  raw_outputs_dir: "output/raw"
+
+  # Final report output (P1 report generator writes here)
+  final_report_output: "output/final_report.md"
+
+  # Audit log (P3 owns this)
+  audit_log_output: "output/audit_log.json"
