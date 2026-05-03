@@ -23,9 +23,11 @@
       ],
       "case_relevance": {
         "ransomware": 0.9,
-        "exfiltration": 0.75,
-        "network_intrusion": 0.7,
-        "malware_execution": 0.95,
+        "apt_intrusion": 0.85,
+        "data_exfiltration": 0.75,
+        "insider_threat": 0.5,
+        "malware_infection": 0.95,
+        "phishing": 0.55,
         "unknown": 0.6
       },
       "dependencies": [],
@@ -47,9 +49,11 @@
       ],
       "case_relevance": {
         "ransomware": 0.85,
-        "exfiltration": 0.95,
-        "network_intrusion": 0.95,
-        "malware_execution": 0.7,
+        "apt_intrusion": 0.95,
+        "data_exfiltration": 0.95,
+        "insider_threat": 0.75,
+        "malware_infection": 0.8,
+        "phishing": 0.75,
         "unknown": 0.65
       },
       "dependencies": [],
@@ -66,9 +70,11 @@
       "output_types": ["file_artifact", "timeline_event"],
       "case_relevance": {
         "ransomware": 0.9,
-        "exfiltration": 0.8,
-        "network_intrusion": 0.5,
-        "malware_execution": 0.8,
+        "apt_intrusion": 0.75,
+        "data_exfiltration": 0.85,
+        "insider_threat": 0.9,
+        "malware_infection": 0.8,
+        "phishing": 0.55,
         "unknown": 0.6
       },
       "dependencies": [],
@@ -85,9 +91,11 @@
       "output_types": ["registry_entry"],
       "case_relevance": {
         "ransomware": 0.85,
-        "exfiltration": 0.65,
-        "network_intrusion": 0.55,
-        "malware_execution": 0.9,
+        "apt_intrusion": 0.75,
+        "data_exfiltration": 0.55,
+        "insider_threat": 0.9,
+        "malware_infection": 0.9,
+        "phishing": 0.5,
         "unknown": 0.55
       },
       "dependencies": [],
@@ -104,9 +112,11 @@
       "output_types": ["timeline_event"],
       "case_relevance": {
         "ransomware": 0.8,
-        "exfiltration": 0.75,
-        "network_intrusion": 0.6,
-        "malware_execution": 0.75,
+        "apt_intrusion": 0.85,
+        "data_exfiltration": 0.8,
+        "insider_threat": 0.85,
+        "malware_infection": 0.75,
+        "phishing": 0.5,
         "unknown": 0.5
       },
       "dependencies": ["tsk_fls"],
