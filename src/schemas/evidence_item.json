@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "evidence_item",
+  "description": "A single piece of forensic evidence produced by a tool wrapper. All wrappers use BaseWrapper.make_evidence_item() to produce these.",
+  "type": "object",
+  "required": [
+    "artifact_id",
+    "source_tool",
+    "evidence_type",
+    "value",
+    "severity",
+    "confidence"
+  ],
+  "properties": {
+    "artifact_id": {
+      "type": "string",
+      "description": "Unique identifier for this piece of evidence within its source tool (e.g., 'proc_1234', 'conn_192.168.1.1_443')"
+    },
+    "source_tool": {
+      "type": "string",
+      "description": "Name of the tool that produced this evidence (e.g., 'volatility3', 'tshark', 'regripper')"
+    },
+    "evidence_type": {
+      "type": "string",
+      "description": "Semantic category of this evidence (e.g., 'process', 'network_connection', 'file', 'registry_key')"
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO 8601 or Unix timestamp when the evidence was created/discovered, empty if unknown"
+    },
+    "value": {
+      "type": "string",
+      "description": "Human-readable summary of the evidence (e.g., 'svchost.exe (PID:1234)')"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low"],
+      "description": "Risk/impact assessment of this evidence"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Tool-reported confidence (0.0–1.0) in the accuracy of this evidence"
+    },
+    "linked_artifacts": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Array of other artifact_ids that this evidence relates to (e.g., a process linked to a network connection)",
+      "default": []
+    }
+  }
+}
