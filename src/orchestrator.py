@@ -52,13 +52,13 @@ def run_tools(execution_plan: dict, evidence_files: dict) -> dict:
             evidence_path = evidence_files.get("browser")
 
         elif "pcap" in args:
-            evidence_path = evidence_files.get("pcap")
+            evidence_path = evidence_files.get("pcap") or args["pcap"]
 
         elif "hive" in args:
-            evidence_path = evidence_files.get("registry_hive")
+            evidence_path = evidence_files.get("registry_hive") or args["hive"]
 
         elif "source" in args:
-            evidence_path = evidence_files.get("source")
+            evidence_path = evidence_files.get("source") or args["source"]
 
         if not evidence_path:
             print(f"  [SKIP] No evidence file provided for {name}")

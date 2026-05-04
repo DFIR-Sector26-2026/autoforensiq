@@ -1,4 +1,5 @@
 import os
+import uuid
 from src.wrappers.base_wrapper import BaseWrapper
 
 SUSPICIOUS_DOMAINS = [
@@ -24,7 +25,7 @@ class BrowserWrapper(BaseWrapper):
 
                     if any(domain in lower for domain in SUSPICIOUS_DOMAINS):
                         items.append(self.make_evidence_item(
-                            artifact_id=f"url_{abs(hash(line)) % 99999}",
+                            artifact_id=f"url_{uuid.uuid4().hex[:8]}",
                             evidence_type="suspicious_url",
                             value=line.strip(),
                             severity="high",
