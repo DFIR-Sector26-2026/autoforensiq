@@ -1,0 +1,23 @@
+[
+  {
+    "artifact_id": "1",
+    "process_name": "svchost.exe",
+    "parent_process": "cmd.exe",
+    "port": 4444,
+    "has_network": true
+  },
+  {
+    "artifact_id": "2",
+    "process_name": "chrome.exe",
+    "parent_process": "explorer.exe",
+    "port": 80,
+    "has_network": true
+  },
+  {
+    "artifact_id": "3",
+    "process_name": "randomXYZ123.exe",
+    "parent_process": "winword.exe",
+    "port": 1337,
+    "has_network": true
+  }
+]
