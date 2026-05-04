@@ -249,8 +249,7 @@ def resolve_dependencies(selected_tools: list[dict[str, Any]]) -> list[dict[str,
         temporary.add(name)
         tool = by_name[name]
         for dependency in tool.get("dependencies", []):
-            # Missing dependencies are ignored because artifact filtering may have
-            # excluded them. The selector should not invent tools for unavailable evidence.
+            # Missing dependencies are ignored because artifact filtering may have excluded them. The selector should not invent tools for unavailable evidence.
             if dependency in by_name:
                 visit(dependency)
 
