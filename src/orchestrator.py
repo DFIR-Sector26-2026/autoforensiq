@@ -5,14 +5,19 @@ from src.wrappers.tshark_wrapper import TsharkWrapper
 from src.wrappers.tsk_wrapper import TSKWrapper
 from src.wrappers.regripper_wrapper import RegRipperWrapper
 from src.wrappers.plaso_wrapper import PlasoWrapper
+from src.wrappers.email_wrapper import EmailWrapper
+from src.wrappers.browser_wrapper import BrowserWrapper
 
 WRAPPER_MAP = {
-    "volatility3"  : VolatilityWrapper,
-    "tshark"       : TsharkWrapper,
-    "tsk_fls"      : TSKWrapper,
-    "regripper"    : RegRipperWrapper,
-    "plaso"        : PlasoWrapper
+    "volatility3": VolatilityWrapper,
+    "tshark": TsharkWrapper,
+    "tsk_fls": TSKWrapper,
+    "regripper": RegRipperWrapper,
+    "plaso": PlasoWrapper,
+    "email": EmailWrapper,
+    "browser": BrowserWrapper
 }
+
 
 def run_tools(execution_plan: dict, evidence_files: dict) -> dict:
     tools = sorted(execution_plan["tools"], key=lambda t: t["order"])
@@ -33,15 +38,18 @@ def run_tools(execution_plan: dict, evidence_files: dict) -> dict:
         args = tool_spec.get("args", {})
         evidence_path = None
 
-        # ✅ FIXED EVIDENCE MAPPING
+        # ✅ CLEAN FIXED MAPPING
         if name == "volatility3":
             evidence_path = evidence_files.get("memory_dump")
 
         elif name == "tsk_fls":
             evidence_path = evidence_files.get("disk_image")
 
-        elif "image" in args:
-            evidence_path = args["image"]
+        elif name == "email":
+            evidence_path = evidence_files.get("email")
+
+        elif name == "browser":
+            evidence_path = evidence_files.get("browser")
 
         elif "pcap" in args:
             evidence_path = evidence_files.get("pcap") or args["pcap"]
@@ -63,6 +71,7 @@ def run_tools(execution_plan: dict, evidence_files: dict) -> dict:
 
             os.makedirs("output/raw", exist_ok=True)
             out_path = f"output/raw/{name}_output.json"
+
             with open(out_path, "w") as f:
                 json.dump({"tool": name, "items": items}, f, indent=2)
 
@@ -84,11 +93,13 @@ if __name__ == "__main__":
         plan = json.load(f)
 
     evidence = {
-        "memory_dump"   : "data/test_cases/memory.dmp",
-        "pcap"          : "data/test_cases/capture.pcap",
-        "disk_image"    : "data/test_cases/disk.img",
-        "registry_hive" : "data/test_cases/NTUSER.DAT",
-        "source"        : "data/test_cases/capture.pcap"
+        "memory_dump": "data/test_cases/memory.dmp",
+        "pcap": "data/test_cases/capture.pcap",
+        "disk_image": "data/test_cases/disk.img",
+        "registry_hive": "data/test_cases/NTUSER.DAT",
+        "source": "data/test_cases/capture.pcap",
+        "email": "data/test_cases/email.txt",
+        "browser": "data/test_cases/history.txt"
     }
 
     results = run_tools(plan, evidence)
@@ -97,7 +108,6 @@ if __name__ == "__main__":
     print("  ORCHESTRATOR COMPLETE")
     print(f"{'='*50}")
 
-    # ✅ IMPROVED SUMMARY
     for tool, items in results.items():
         if len(items) > 0:
             print(f"  ✔ {tool}: {len(items)} items (SUCCESS)")
