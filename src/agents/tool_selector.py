@@ -112,26 +112,33 @@ def validate_ontology(ontology: dict[str, Any]) -> None:
         raise ValueError("tool ontology must contain a non-empty 'tools' list")
 
     seen_names: set[str] = set()
+    
+    # Iterate through all tools in tool_ontology
     for index, tool in enumerate(tools):
         
         # Return error if tool is not an object with keys and values
         if not isinstance(tool, dict):
             raise ValueError(f"ontology tool at index {index} must be an object")
 
+        # Add all essential tool fields that are missing
         missing = []
         for field in REQUIRED_TOOL_FIELDS:
             if field not in tool:
                 missing.append(field)
 
+        # Return an error for all the missing fields
         if missing:
             name = tool.get("name", f"index {index}")
             missing_fields = ", ".join(missing)
             raise ValueError(f"ontology tool {name} missing fields: {missing_fields}")
 
         name = tool["name"]
+        
+        # Return error if tool name is not a string
         if not isinstance(name, str) or not name.strip():
             raise ValueError(f"ontology tool at index {index} has invalid name")
 
+        # Return error if tool name is a duplicate
         if name in seen_names:
             raise ValueError(f"duplicate ontology tool name: {name}")
         seen_names.add(name)
@@ -141,6 +148,7 @@ def validate_ontology(ontology: dict[str, Any]) -> None:
         if name not in SUPPORTED_WRAPPER_NAMES:
             raise ValueError(f"ontology tool '{name}' is not supported by orchestrator")
 
+        # Return error if attributes don't match the expect data type
         if not isinstance(tool["input_types"], list):
             raise ValueError(f"ontology tool '{name}' input_types must be a list")
 
@@ -171,8 +179,7 @@ def tool_matches_artifacts(tool: dict[str, Any], artifact_types: set[str]) -> bo
 def relevance_score(tool: dict[str, Any], case_type: str) -> float:
     """Return case-specific relevance, falling back to unknown or neutral."""
     relevance = tool.get("case_relevance", {})
-    # Unknown case types should not break planning. The ontology can provide an
-    # "unknown" fallback; otherwise use a neutral score.
+    # Unknown case types should not break planning. The ontology can provide an "unknown" fallback; otherwise use a neutral score.
     score = relevance.get(case_type, relevance.get("unknown", 0.5))
     try:
         return float(score)
@@ -194,17 +201,17 @@ def select_tools(
     # First gate: only keep tools that can process evidence actually available
     # for this case. This prevents PCAP-only cases from selecting disk/memory tools.
     selected = []
+    
+    # If the tool input type contains an artifact from case context -> add the tool to selected
     for tool in ontology["tools"]:
         if tool_matches_artifacts(tool, artifact_types):
             selected.append(copy.deepcopy(tool))
 
-    # Add a private transient score used only for sorting. It is not written to
-    # execution_plan.json.
+    # Add a private transient score used only for sorting. It is not written to execution_plan.json.
     for tool in selected:
         tool["_relevance_score"] = relevance_score(tool, case_type)
 
-    # Rank by usefulness first, then by stable default order to avoid arbitrary
-    # output when scores tie.
+    # Rank by usefulness first, then by stable default order to avoid arbitrary output when scores tie.
     selected.sort(key=tool_sort_key)
     return selected
 
