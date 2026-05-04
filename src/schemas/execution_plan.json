@@ -24,6 +24,16 @@
       "name": "plaso",
       "order": 5,
       "args": { "source": true }
+    },
+    {
+      "name": "email",
+      "order": 6,
+      "args": { "email": "data/test_cases/email.txt" }
+    },
+    {
+      "name": "browser",
+      "order": 7,
+      "args": { "browser": "data/test_cases/history.txt" }
     }
   ]
 }
