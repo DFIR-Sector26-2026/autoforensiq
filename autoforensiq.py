@@ -118,6 +118,9 @@ def run_orchestrator(execution_plan: dict, evidence_files: dict) -> dict:
 def run_aggregator(raw_outputs: dict) -> dict:
     _stage(4, "Evidence Aggregator", "P4")
 
+    # P4's job is to normalize and merge the raw tool outputs into one
+    # downstream-friendly evidence bundle.
+
     unified_path = ROOT_DIR / "output" / "unified_evidence.json"
     if unified_path.exists():
         print(f"  [LOADED] Using existing unified_evidence.json")
