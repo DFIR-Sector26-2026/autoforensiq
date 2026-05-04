@@ -1,11 +1,0 @@
---2026-05-02 21:59:21--  https://wiki.wireshark.org/SampleCaptures?action=AttachFile
-Resolving wiki.wireshark.org (wiki.wireshark.org)... 2606:4700:83ba:75c:1ddd:d7:5dc1:8f36, 104.26.11.240, 104.26.10.240, ...
-Connecting to wiki.wireshark.org (wiki.wireshark.org)|2606:4700:83ba:75c:1ddd:d7:5dc1:8f36|:443... connected.
-HTTP request sent, awaiting response... 200 OK
-Length: 254524 (249K) [text/html]
-Saving to: ‘SampleCaptures?action=AttachFile’
-
-SampleCaptures?action=AttachFile                                0%[                                                                                                                                                  ]       0  --.-KB/s               SampleCaptures?action=AttachFile                              100%[=================================================================================================================================================>] 248.56K  --.-KB/s    in 0.1s    
-
-2026-05-02 21:59:26 (1.81 MB/s) - ‘SampleCaptures?action=AttachFile’ saved [254524/254524]
-
