@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "unified_evidence",
+  "description": "Output of the Evidence Aggregator (P4). Consolidated, deduplicated, and enriched evidence from all forensic tools.",
+  "type": "object",
+  "required": [
+    "case_id",
+    "generated_at",
+    "tools_aggregated",
+    "total_items",
+    "evidence_items"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "description": "Case ID from case_context.json for audit trail"
+    },
+    "generated_at": {
+      "type": "string",
+      "description": "ISO 8601 timestamp when this aggregation was performed"
+    },
+    "tools_aggregated": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of tool names that were aggregated (e.g., ['volatility3', 'tshark', 'regripper'])"
+    },
+    "total_items": {
+      "type": "integer",
+      "description": "Total number of unique evidence items after deduplication"
+    },
+    "deduplication_stats": {
+      "type": "object",
+      "description": "Metadata on deduplication process",
+      "properties": {
+        "raw_items_before": {
+          "type": "integer",
+          "description": "Total items before deduplication"
+        },
+        "duplicates_removed": {
+          "type": "integer",
+          "description": "Number of duplicate items removed"
+        }
+      }
+    },
+    "evidence_items": {
+      "type": "array",
+      "items": {
+        "$ref": "evidence_item.json"
+      },
+      "description": "Consolidated evidence array, sorted by severity (critical→low) then by confidence (high→low)"
+    },
+    "evidence_by_type": {
+      "type": "object",
+      "description": "Evidence items grouped by evidence_type for quick lookup",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "evidence_item.json"
+        }
+      }
+    },
+    "evidence_by_tool": {
+      "type": "object",
+      "description": "Evidence items grouped by source_tool for provenance tracking",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "evidence_item.json"
+        }
+      }
+    }
+  }
+}

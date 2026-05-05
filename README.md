@@ -24,6 +24,20 @@ Conference target: **SecTor 2026** (May 26 deadline).
 
 ---
 
+## P4 Handoff
+
+Person 4 owns the evidence aggregation layer. Their job is to take the raw outputs from P3 and turn them into one consistent dataset that later stages can consume.
+
+P4 should:
+
+1. Read every `output/raw/<tool>_output.json` file produced by the orchestrator.
+2. Normalize the different tool formats into a single shared schema.
+3. Deduplicate overlapping findings and preserve source-tool provenance.
+4. Link related artifacts together where the tools already provide enough context.
+5. Write the final consolidated result to `output/unified_evidence.json`.
+
+---
+
 ## Forensic tools integrated
 
 | Tool | Wrapper | Evidence type |
