@@ -7,9 +7,11 @@
     "artifact_id",
     "source_tool",
     "evidence_type",
+    "timestamp",
     "value",
     "severity",
-    "confidence"
+    "confidence",
+    "linked_artifacts"
   ],
   "properties": {
     "artifact_id": {

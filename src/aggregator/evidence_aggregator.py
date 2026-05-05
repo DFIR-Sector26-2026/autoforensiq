@@ -3,11 +3,11 @@ Evidence Aggregator (P4) — Normalize and consolidate forensic evidence
 
 Responsibilities:
   1. Read all raw/<tool>_output.json files from P3
-  2. Validate each evidence item against evidence_item.json schema
+  2. Validate each evidence item against evidence_item.json schema (warns on violation)
   3. Deduplicate by artifact_id (keep first occurrence)
   4. Sort by severity (critical → low) then confidence (high → low)
   5. Build lookup indices (by type, by tool)
-  6. Validate output against unified_evidence.json schema
+  6. Validate output against unified_evidence.json schema (warns on violation)
   7. Write consolidated result
 
 Usage (standalone):
@@ -22,6 +22,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from collections import defaultdict
 from typing import Any
+import jsonschema
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
@@ -33,6 +34,11 @@ def load_json(path: str) -> dict[str, Any]:
     """Load a JSON file."""
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+_SCHEMAS_DIR = ROOT_DIR / "src" / "schemas"
+_EVIDENCE_ITEM_SCHEMA = load_json(str(_SCHEMAS_DIR / "evidence_item.json")) if (_SCHEMAS_DIR / "evidence_item.json").exists() else None
+_UNIFIED_EVIDENCE_SCHEMA = load_json(str(_SCHEMAS_DIR / "unified_evidence.json")) if (_SCHEMAS_DIR / "unified_evidence.json").exists() else None
 
 
 def write_json(path: str, data: dict[str, Any]) -> None:
@@ -66,6 +72,12 @@ def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
             tool_name = data.get("tool", filename.replace("_output.json", ""))
             items = data.get("items", [])
             if items:
+                if _EVIDENCE_ITEM_SCHEMA:
+                    for item in items:
+                        try:
+                            jsonschema.validate(instance=item, schema=_EVIDENCE_ITEM_SCHEMA)
+                        except jsonschema.ValidationError as ve:
+                            print(f"    [WARN] Schema violation in {filename}: {ve.message}")
                 all_outputs[tool_name] = items
                 print(f"    [LOAD] {tool_name}: {len(items)} items from {filename}")
             else:
@@ -88,6 +100,10 @@ def deduplicate_items(all_items: list[dict]) -> tuple[list[dict], int]:
 
     for item in all_items:
         artifact_id = item.get("artifact_id")
+        if not artifact_id:
+            print(f"  [WARN] Skipping item missing artifact_id: {item.get('value', '<no value>')}")
+            deduplicated.append(item)
+            continue
         if artifact_id not in seen:
             deduplicated.append(item)
             seen[artifact_id] = True
@@ -207,7 +223,14 @@ def aggregate_evidence(
         "evidence_by_tool": indices["by_tool"]
     }
     
-    # Step 7: Write output
+    # Step 5: Validate output schema
+    if _UNIFIED_EVIDENCE_SCHEMA:
+        try:
+            jsonschema.validate(instance=unified, schema=_UNIFIED_EVIDENCE_SCHEMA)
+        except jsonschema.ValidationError as ve:
+            print(f"  [WARN] Output schema violation: {ve.message}")
+
+    # Step 6: Write output
     write_json(output_path, unified)
     print(f"  [SAVE] Wrote unified_evidence.json ({len(sorted_items)} items)")
     

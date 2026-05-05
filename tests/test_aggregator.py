@@ -80,9 +80,9 @@ def test_aggregate_evidence_preserves_provenance():
         os.makedirs(raw_dir)
         
         vol_output = {
-            "tool": "volatility",
+            "tool": "volatility3",
             "items": [
-                {"artifact_id": "proc_1", "source_tool": "volatility", 
+                {"artifact_id": "proc_1", "source_tool": "volatility3",
                  "evidence_type": "process", "value": "test.exe", 
                  "severity": "high", "confidence": 0.9, 
                  "timestamp": "", "linked_artifacts": []}

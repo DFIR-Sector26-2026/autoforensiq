@@ -7,9 +7,9 @@ Usage:
 
 Pipeline stages (stubbed modules become real as the team delivers):
     1. Intent Classifier   (P1) — reads report → case_context.json        ✅ LIVE
-    2. Tool Selector       (P2) — reads context → execution_plan.json      🔲 STUB
-    3. Execution Orchestr. (P3) — runs tools   → raw_outputs/             🔲 STUB
-    4. Evidence Aggregator (P4) — normalises   → unified_evidence.json    🔲 STUB
+    2. Tool Selector       (P2) — reads context → execution_plan.json      ✅ LIVE
+    3. Execution Orchestr. (P3) — runs tools   → raw_outputs/             ✅ LIVE
+    4. Evidence Aggregator (P4) — normalises   → unified_evidence.json    ✅ LIVE
     5. Anomaly Detector    (P5) — ML scoring   → anomaly_scores.json      🔲 STUB
     6. XAI Explainer       (P5) — SHAP/LIME    → shap_explanations.json   🔲 STUB
     7. Report Generator    (P1) — LLM report   → final_report.md          🔲 STUB (Burst 2)
@@ -135,7 +135,8 @@ def run_aggregator(case_context: dict) -> dict:
             raw_outputs_dir=str(ROOT_DIR / "output" / "raw"),
             output_path=str(unified_path)
         )
-    except ImportError:
+    except Exception as exc:
+        print(f"  [ERROR] Aggregator failed: {exc}")
         _stub("Evidence Aggregator (P4)", "output/unified_evidence.json")
         return {"evidence_items": [], "generated_at": "", "total_items": 0}
 
