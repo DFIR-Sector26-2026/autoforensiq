@@ -15,7 +15,7 @@
   },
   {
     "artifact_id": "3",
-    "process_name": "randomXYZ123.exe",
+    "process_name": "asdjKJH123.exe",
     "parent_process": "winword.exe",
     "port": 1337,
     "has_network": true

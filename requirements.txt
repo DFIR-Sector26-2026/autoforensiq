@@ -27,3 +27,8 @@ volatility3>=2.5.0         # Volatility 3 memory analysis (P3)
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 tqdm>=4.66.0               # progress bars for long-running tool executions
+pandas
+numpy
+scikit-learn
+shap
+matplotlib
