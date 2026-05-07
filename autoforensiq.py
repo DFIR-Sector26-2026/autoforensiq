@@ -12,7 +12,7 @@ Pipeline stages (stubbed modules become real as the team delivers):
     4. Evidence Aggregator (P4) — normalises   → unified_evidence.json    ✅ LIVE
     5. Anomaly Detector    (P5) — ML scoring   → anomaly_scores.json      ✅ LIVE
     6. XAI Explainer       (P5) — SHAP/LIME    → shap_explanations.json   ✅ LIVE
-    7. Report Generator    (P1) — LLM report   → final_report.md          🔄 IN PROGRESS (Burst 2)
+    7. Report Generator    (P1) — LLM report   → final_report.md          ✅ LIVE
 """
 
 import argparse
