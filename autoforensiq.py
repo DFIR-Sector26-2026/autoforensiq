@@ -10,8 +10,8 @@ Pipeline stages (stubbed modules become real as the team delivers):
     2. Tool Selector       (P2) — reads context → execution_plan.json      ✅ LIVE
     3. Execution Orchestr. (P3) — runs tools   → raw_outputs/             ✅ LIVE
     4. Evidence Aggregator (P4) — normalises   → unified_evidence.json    ✅ LIVE
-    5. Anomaly Detector    (P5) — ML scoring   → anomaly_scores.json      🔲 STUB
-    6. XAI Explainer       (P5) — SHAP/LIME    → shap_explanations.json   🔲 STUB
+    5. Anomaly Detector    (P5) — ML scoring   → anomaly_scores.json      ✅ LIVE
+    6. XAI Explainer       (P5) — SHAP/LIME    → shap_explanations.json   ✅ LIVE
     7. Report Generator    (P1) — LLM report   → final_report.md          🔲 STUB (Burst 2)
 """
 
@@ -151,8 +151,20 @@ def run_ml_pipeline() -> dict:
         print(f"  [LOADED] Using existing shap_explanations.json")
         return _load_json(str(shap_path))
 
-    _stub("ML Pipeline (P5)", "output/shap_explanations.json")
-    return {"explanations": [], "generated_at": ""}
+    try:
+        sys.path.insert(0, str(ROOT_DIR))
+        from src.ml.pipeline import run_ml_pipeline as _run_p5
+        print("  [LIVE] Running P5 ML pipeline...")
+        result = _run_p5(
+            input_path=str(ROOT_DIR / "output" / "unified_evidence.json"),
+            output_path=str(shap_path),
+            baseline_path=str(ROOT_DIR / "data" / "baseline_normal.json")
+        )
+        return result if result else {"explanations": [], "generated_at": ""}
+    except Exception as exc:
+        print(f"  [ERROR] ML pipeline failed: {exc}")
+        _stub("ML Pipeline (P5)", "output/shap_explanations.json")
+        return {"explanations": [], "generated_at": ""}
 
 
 # ── Stage 7: Report Generator (P1 — Burst 2) ─────────────────────────────────

@@ -2,18 +2,17 @@ import shap
 import numpy as np
 
 FEATURE_NAMES = [
-    "high_entropy",
-    "rare_process",
-    "unusual_parent",
-    "parent_mismatch",
-    "port_suspicious",
-    "network_flag",
-    "name_length"
+    "severity_score",
+    "confidence",
+    "value_entropy",
+    "has_links",
+    "is_network",
+    "is_suspicious_type",
+    "value_length"
 ]
 
 
 def generate_shap(model, X):
-    # Background sample (for performance)
     background = X.sample(min(10, len(X)), random_state=42)
 
     explainer = shap.KernelExplainer(
@@ -33,44 +32,44 @@ def explain_instance(shap_vals, row):
         if i >= len(FEATURE_NAMES):
             continue
 
-        if val > 0.02:  # lower threshold for small datasets
+        if val > 0.02:
             feature = FEATURE_NAMES[i]
 
-            if feature == "unusual_parent":
+            if feature == "severity_score":
                 explanation_parts.append(
-                    f"Unusual parent process ({row['parent_process']})"
+                    f"High severity indicator ({row['severity']})"
                 )
 
-            elif feature == "parent_mismatch":
+            elif feature == "confidence":
                 explanation_parts.append(
-                    "Suspicious parent-child relationship"
+                    f"High detection confidence ({float(row['confidence']):.0%})"
                 )
 
-            elif feature == "port_suspicious":
+            elif feature == "value_entropy":
                 explanation_parts.append(
-                    f"Suspicious port ({row['port']})"
+                    "Unusual pattern in evidence value"
                 )
 
-            elif feature == "high_entropy":
+            elif feature == "has_links":
+                count = len(row['linked_artifacts']) if row['linked_artifacts'] else 0
                 explanation_parts.append(
-                    f"Random-looking process name ({row['process_name']})"
+                    f"Linked to {count} other artifact(s)"
                 )
 
-            elif feature == "rare_process":
+            elif feature == "is_network":
                 explanation_parts.append(
-                    f"Rare process ({row['process_name']})"
+                    "Network activity involved"
                 )
 
-            elif feature == "network_flag":
+            elif feature == "is_suspicious_type":
                 explanation_parts.append(
-                    "Network activity observed"
+                    f"Suspicious evidence type ({row['evidence_type']})"
                 )
 
-            elif feature == "name_length":
-                if len(row['process_name']) > 12:
-                    explanation_parts.append(
-                        "Unusually long process name"
-                    )
+            elif feature == "value_length":
+                explanation_parts.append(
+                    "Unusually detailed evidence value"
+                )
 
     if not explanation_parts:
         return "No strong anomaly signals detected"

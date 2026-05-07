@@ -2,10 +2,15 @@ import pandas as pd
 import json
 import math
 
+SEVERITY_MAP = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+
 
 def load_data(path):
     with open(path, 'r') as f:
         data = json.load(f)
+    # Handle both P4's unified_evidence format and flat arrays (e.g. baseline)
+    if isinstance(data, dict) and "evidence_items" in data:
+        data = data["evidence_items"]
     return pd.DataFrame(data)
 
 
@@ -17,60 +22,48 @@ def entropy(s):
 
 
 def create_features(df):
-    # ---------- ENTROPY ----------
-    df['name_entropy'] = df['process_name'].apply(entropy)
-    df['high_entropy'] = df['name_entropy'].apply(lambda x: 1 if x > 3.5 else 0)
+    df = df.copy()
 
-    # ---------- SUSPICIOUS PARENTS ----------
-    SUSPICIOUS_PARENTS = ["cmd.exe", "powershell.exe", "winword.exe"]
-
-    df['unusual_parent'] = df['parent_process'].apply(
-        lambda x: 1 if str(x).lower() in SUSPICIOUS_PARENTS else 0
+    # Severity as numeric score
+    df['severity_score'] = df['severity'].apply(
+        lambda x: SEVERITY_MAP.get(str(x).lower(), 1)
     )
 
-    # ---------- RARE PROCESS ----------
-    COMMON_PROCESSES = ["chrome.exe", "explorer.exe", "notepad.exe", "spotify.exe", "zoom.exe"]
+    # Confidence directly
+    df['confidence'] = df['confidence'].astype(float)
 
-    df['rare_process'] = df['process_name'].apply(
-        lambda x: 0 if str(x).lower() in COMMON_PROCESSES else 1
+    # Entropy of the value string (random-looking values are suspicious)
+    df['value_entropy'] = df['value'].apply(entropy)
+
+    # Whether this item is linked to other artifacts
+    df['has_links'] = df['linked_artifacts'].apply(
+        lambda x: 1 if x else 0
     )
 
-    # ---------- SUSPICIOUS PORTS ----------
-    SUSPICIOUS_PORTS = [4444, 1337, 5555]
-
-    df['port_suspicious'] = df['port'].apply(
-        lambda x: 1 if x in SUSPICIOUS_PORTS else 0
+    # Network-related evidence
+    NETWORK_TYPES = ['network_connection', 'suspicious_url', 'connection']
+    NETWORK_TOOLS = ['tshark', 'browser']
+    df['is_network'] = df.apply(
+        lambda r: 1 if any(t in str(r['evidence_type']).lower() for t in NETWORK_TYPES)
+                     or str(r.get('source_tool', '')).lower() in NETWORK_TOOLS else 0,
+        axis=1
     )
 
-    # ---------- NETWORK FLAG ----------
-    df['network_flag'] = df['has_network'].astype(int)
+    # Known suspicious evidence types
+    SUSPICIOUS_TYPES = ['phishing_email', 'suspicious_url', 'malfind', 'suspicious_connection']
+    df['is_suspicious_type'] = df['evidence_type'].apply(
+        lambda x: 1 if any(s in str(x).lower() for s in SUSPICIOUS_TYPES) else 0
+    )
 
-    # ---------- PROCESS NAME LENGTH ----------
-    df['name_length'] = df['process_name'].apply(len)
+    # Length of value string
+    df['value_length'] = df['value'].apply(len)
 
-    # ---------- PARENT-CHILD MISMATCH ----------
-    def parent_child_mismatch(row):
-        parent = str(row['parent_process']).lower()
-
-        if parent == "explorer.exe":
-            return 0
-
-        if parent in ["cmd.exe", "powershell.exe", "winword.exe"]:
-            return 1
-
-        return 0
-
-    df['parent_mismatch'] = df.apply(parent_child_mismatch, axis=1)
-
-    # ---------- FINAL FEATURE SET ----------
-    return df[
-        [
-            'high_entropy',
-            'rare_process',
-            'unusual_parent',
-            'parent_mismatch',
-            'port_suspicious',
-            'network_flag',
-            'name_length'
-        ]
-    ]
+    return df[[
+        'severity_score',
+        'confidence',
+        'value_entropy',
+        'has_links',
+        'is_network',
+        'is_suspicious_type',
+        'value_length'
+    ]]
