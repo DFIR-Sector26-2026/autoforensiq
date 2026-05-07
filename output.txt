@@ -1,0 +1,55 @@
+
+============================================================
+  AutoForensiq — Autonomous Forensics Pipeline
+============================================================
+  Report:   tests/incidents/05_malware_infection.txt
+  Evidence: none provided
+  Mock LLM: True
+
+============================================================
+  STAGE 1: Intent Classifier  [P1]
+============================================================
+[CLASSIFIER] Reading incident report: tests/incidents/05_malware_infection.txt
+[CLASSIFIER] Running in MOCK mode (no API call)
+[CLASSIFIER] Schema validation passed ✔
+[CLASSIFIER] case_type=malware_infection confidence=0.9 artifacts=['memory_dump', 'disk_image', 'pcap', 'registry_hive', 'email_archive']
+[CLASSIFIER] Output written → /mnt/c/Users/Merull Shah/Desktop/Uni/Research/AutoForensiq/autoforensiq/output/case_context.json
+
+============================================================
+  STAGE 2: Dynamic Tool Selector  [P2]
+============================================================
+  [LIVE] Execution plan generated → /mnt/c/Users/Merull Shah/Desktop/Uni/Research/AutoForensiq/autoforensiq/output/execution_plan.json
+
+============================================================
+  STAGE 3: Execution Orchestrator  [P3]
+============================================================
+  [STUB] Orchestrator (P3) not yet integrated.
+         Expected output: output/raw/<tool>_output.json
+         Replace this stub when the module is ready.
+
+============================================================
+  STAGE 4: Evidence Aggregator  [P4]
+============================================================
+  [LOADED] Using existing unified_evidence.json
+
+============================================================
+  STAGE 5: Anomaly Detector + XAI Explainer  [P5]
+============================================================
+  [LOADED] Using existing shap_explanations.json
+
+============================================================
+  STAGE 7: Report Generator  [P1 — Burst 2]
+============================================================
+  [LIVE] Running report generator...
+  [MOCK] Building report from data (no LLM call).
+  [DONE] Report written → /mnt/c/Users/Merull Shah/Desktop/Uni/Research/AutoForensiq/autoforensiq/output/final_report.md
+
+============================================================
+  PIPELINE COMPLETE
+============================================================
+  case_type  : malware_infection
+  confidence : 0.9
+  artifacts  : memory_dump, disk_image, pcap, registry_hive, email_archive
+  output/    : case_context.json · execution_plan.json · final_report.md
+============================================================
+

@@ -15,7 +15,7 @@ Conference target: **SecTor 2026** (May 26 deadline).
 | Stage | Module | Owner | Status |
 |-------|--------|-------|--------|
 | 1 — Intent Classifier | `src/classifier/intent_classifier.py` | P1 | ✅ Live |
-| 2 — Tool Selector | `src/agents/tool_selector.py` | P2 | ✅ Live |
+| 2 — Tool Selector | `src/selector/` | P2 | ✅ Live |
 | 3 — Execution Orchestrator | `src/orchestrator.py` | P3 | ✅ Live |
 | 4 — Evidence Aggregator | `src/aggregator/evidence_aggregator.py` | P4 | ✅ Live |
 | 5 — Anomaly Detector | `src/ml/anomaly_detector.py` | P5 | ✅ Live |
