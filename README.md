@@ -12,29 +12,15 @@ Conference target: **SecTor 2026** (May 26 deadline).
 
 ## Pipeline stages
 
-| Stage | Module | Status |
-|-------|--------|--------|
-| 1 — Intent Classifier | `src/classifier/intent_classifier.py` | Live |
-| 2 — Tool Selector | `src/selector/` | Stub |
-| 3 — Execution Orchestrator | `src/orchestrator.py` | Live |
-| 4 — Evidence Aggregator | `src/aggregator/` | Stub |
-| 5 — Anomaly Detector | `src/ml/` | Stub |
-| 6 — XAI Explainer | `src/ml/` | Stub |
-| 7 — Report Generator | `autoforensiq.py` | Stub |
-
----
-
-## P4 Handoff
-
-Person 4 owns the evidence aggregation layer. Their job is to take the raw outputs from P3 and turn them into one consistent dataset that later stages can consume.
-
-P4 should:
-
-1. Read every `output/raw/<tool>_output.json` file produced by the orchestrator.
-2. Normalize the different tool formats into a single shared schema.
-3. Deduplicate overlapping findings and preserve source-tool provenance.
-4. Link related artifacts together where the tools already provide enough context.
-5. Write the final consolidated result to `output/unified_evidence.json`.
+| Stage | Module | Owner | Status |
+|-------|--------|-------|--------|
+| 1 — Intent Classifier | `src/classifier/intent_classifier.py` | P1 | ✅ Live |
+| 2 — Tool Selector | `src/agents/tool_selector.py` | P2 | ✅ Live |
+| 3 — Execution Orchestrator | `src/orchestrator.py` | P3 | ✅ Live |
+| 4 — Evidence Aggregator | `src/aggregator/evidence_aggregator.py` | P4 | ✅ Live |
+| 5 — Anomaly Detector | `src/ml/anomaly_detector.py` | P5 | ✅ Live |
+| 6 — XAI Explainer | `src/ml/xai_explainer.py` | P5 | ✅ Live |
+| 7 — Report Generator | `src/report_generator/report_generator.py` | P1 | ✅ Live |
 
 ---
 
@@ -57,6 +43,10 @@ P4 should:
 ```bash
 pip install -r requirements.txt
 ```
+
+> **Note:** NumPy must be below 2.0 for scikit-learn/scipy compatibility. The
+> `requirements.txt` pins this automatically. If you hit a NumPy version error,
+> run: `pip install "numpy<2" --force-reinstall`
 
 To use a live LLM, export your API key and set `mock_mode: false` in `config.yaml`:
 
