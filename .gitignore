@@ -1,4 +1,3 @@
-<<<<<<< p4-aggregator
 __pycache__/
 *.pyc
 *.pyo
@@ -8,12 +7,3 @@ CLAUDE.md
 .claude/
 .venv/
 venv/
-=======
-__pycache__/
-*.pyc
-*.pyo
-output/
-.env
-CLAUDE.md
-.claude/
->>>>>>> main

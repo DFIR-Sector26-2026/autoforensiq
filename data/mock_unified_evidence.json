@@ -1,0 +1,41 @@
+{
+  "case_id": "mock-case-001",
+  "generated_at": "2026-05-08T00:00:00Z",
+  "tools_aggregated": ["volatility3", "tshark", "email"],
+  "total_items": 3,
+  "deduplication_stats": { "raw_items_before": 3, "duplicates_removed": 0 },
+  "evidence_items": [
+    {
+      "artifact_id": "proc_001",
+      "source_tool": "volatility3",
+      "evidence_type": "malfind",
+      "timestamp": "",
+      "value": "svchost.exe spawned by cmd.exe with injected shellcode",
+      "severity": "critical",
+      "confidence": 0.91,
+      "linked_artifacts": ["conn_001"]
+    },
+    {
+      "artifact_id": "conn_001",
+      "source_tool": "tshark",
+      "evidence_type": "network_connection",
+      "timestamp": "",
+      "value": "outbound connection to 185.220.101.45:4444",
+      "severity": "high",
+      "confidence": 0.87,
+      "linked_artifacts": ["proc_001"]
+    },
+    {
+      "artifact_id": "email_urgent_a1b2c3",
+      "source_tool": "email",
+      "evidence_type": "phishing_email",
+      "timestamp": "",
+      "value": "Keyword 'urgent' found",
+      "severity": "high",
+      "confidence": 0.75,
+      "linked_artifacts": []
+    }
+  ],
+  "evidence_by_type": {},
+  "evidence_by_tool": {}
+}

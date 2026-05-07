@@ -1,0 +1,52 @@
+[
+  {
+    "artifact_id": "b1",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "",
+    "value": "HTTP traffic port 80",
+    "severity": "low",
+    "confidence": 0.9,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "b2",
+    "source_tool": "volatility3",
+    "evidence_type": "process",
+    "timestamp": "",
+    "value": "explorer.exe PID 1234",
+    "severity": "low",
+    "confidence": 0.85,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "b3",
+    "source_tool": "volatility3",
+    "evidence_type": "process",
+    "timestamp": "",
+    "value": "chrome.exe PID 2048",
+    "severity": "low",
+    "confidence": 0.88,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "b4",
+    "source_tool": "regripper",
+    "evidence_type": "registry_key",
+    "timestamp": "",
+    "value": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "b5",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "",
+    "value": "HTTPS traffic port 443",
+    "severity": "low",
+    "confidence": 0.92,
+    "linked_artifacts": []
+  }
+]
