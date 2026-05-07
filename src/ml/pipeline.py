@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime, timezone
 
-from .feature_engineering import load_data, create_features, FEATURE_NAMES
+from .feature_engineering import load_data, create_features
 from .anomaly_detector import train_model, predict
 from .xai_explainer import generate_shap, explain_instance
 
