@@ -12,7 +12,7 @@ Pipeline stages (stubbed modules become real as the team delivers):
     4. Evidence Aggregator (P4) — normalises   → unified_evidence.json    ✅ LIVE
     5. Anomaly Detector    (P5) — ML scoring   → anomaly_scores.json      ✅ LIVE
     6. XAI Explainer       (P5) — SHAP/LIME    → shap_explanations.json   ✅ LIVE
-    7. Report Generator    (P1) — LLM report   → final_report.md          🔲 STUB (Burst 2)
+    7. Report Generator    (P1) — LLM report   → final_report.md          🔄 IN PROGRESS (Burst 2)
 """
 
 import argparse
@@ -60,37 +60,36 @@ def run_classifier(report_path: str) -> dict:
     return classify_file(report_path, str(output_path))
 
 
-# ── Stage 2: Tool Selector (P2 stub) ─────────────────────────────────────────
+# ── Stage 2: Tool Selector (P2) ──────────────────────────────────────────────
 
 def run_tool_selector(case_context: dict) -> dict:
     _stage(2, "Dynamic Tool Selector", "P2")
 
-    # Check if a real execution_plan.json already exists (P2 may have delivered)
-    plan_candidates = [
-        ROOT_DIR / "output" / "execution_plan.json",
-        ROOT_DIR / "src" / "schemas" / "execution_plan.json",
-    ]
-    for path in plan_candidates:
-        if path.exists():
-            print(f"  [LOADED] Using execution plan from: {path}")
-            return _load_json(str(path))
-
-    # Fallback stub: use all 5 tools in default order
-    _stub("Tool Selector (P2)", "output/execution_plan.json")
-    stub_plan = {
-        "tools": [
-            {"name": "volatility3", "order": 1, "args": {"image": True}},
-            {"name": "tshark",      "order": 2, "args": {"pcap":  True}},
-            {"name": "tsk_fls",     "order": 3, "args": {"image": True}},
-            {"name": "regripper",   "order": 4, "args": {"hive":  True}},
-            {"name": "plaso",       "order": 5, "args": {"source": True}},
-        ]
-    }
     out_path = ROOT_DIR / "output" / "execution_plan.json"
-    with open(out_path, "w") as f:
-        json.dump(stub_plan, f, indent=2)
-    print(f"  [STUB]   Wrote default execution plan → {out_path}")
-    return stub_plan
+
+    try:
+        from src.agents.tool_selector import generate_execution_plan, load_json as _load_ontology
+        ontology_path = ROOT_DIR / "src" / "data" / "tool_ontology.json"
+        ontology = _load_ontology(str(ontology_path))
+        plan = generate_execution_plan(case_context, ontology)
+        with open(out_path, "w") as f:
+            json.dump(plan, f, indent=2)
+        print(f"  [LIVE] Execution plan generated → {out_path}")
+        return plan
+    except Exception as exc:
+        print(f"  [WARN] Tool selector failed ({exc}), falling back to default plan.")
+        stub_plan = {
+            "tools": [
+                {"name": "volatility3", "order": 1, "args": {"image": True}},
+                {"name": "tshark",      "order": 2, "args": {"pcap":  True}},
+                {"name": "tsk_fls",     "order": 3, "args": {"image": True}},
+                {"name": "regripper",   "order": 4, "args": {"hive":  True}},
+                {"name": "plaso",       "order": 5, "args": {"source": True}},
+            ]
+        }
+        with open(out_path, "w") as f:
+            json.dump(stub_plan, f, indent=2)
+        return stub_plan
 
 
 # ── Stage 3: Execution Orchestrator (P3 stub) ─────────────────────────────────
