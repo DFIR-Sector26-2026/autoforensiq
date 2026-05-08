@@ -13,7 +13,7 @@ class BaseWrapper:
         Returns (stdout, stderr, returncode).
         Logs to audit log automatically.
         """
-        print(f"  [RUNNING] {' '.join(command)}")
+        print(f"  [RUNNING] {' '.join(map(str,command))}")
         try:
             result = subprocess.run(
                 command,
