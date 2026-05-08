@@ -3,14 +3,30 @@ import json
 import math
 
 SEVERITY_MAP = {"critical": 4, "high": 3, "medium": 2, "low": 1}
-
+FEATURE_NAMES = [
+    "high_entropy",
+    "rare_process",
+    "unusual_parent",
+    "parent_mismatch",
+    "port_suspicious",
+    "network_flag",
+    "name_length"
+]
 
 def load_data(path):
     with open(path, 'r') as f:
         data = json.load(f)
-    # Handle both P4's unified_evidence format and flat arrays (e.g. baseline)
+
+    # -------- HANDLE MULTIPLE SCHEMAS --------
     if isinstance(data, dict) and "evidence_items" in data:
         data = data["evidence_items"]
+    elif isinstance(data, dict) and "items" in data:
+        data = data["items"]
+
+    # -------- SAFETY CHECK --------
+    if not isinstance(data, list):
+        raise ValueError("Expected a list of evidence items")
+
     return pd.DataFrame(data)
 
 
