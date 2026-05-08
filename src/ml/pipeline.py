@@ -63,7 +63,9 @@ def run_ml_pipeline(
         }
 
         # ---------- SAVE OUTPUT ----------
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        parent = os.path.dirname(output_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
 
         with open(output_path, "w") as f:
             json.dump(output, f, indent=2)
