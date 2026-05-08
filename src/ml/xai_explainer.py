@@ -1,15 +1,7 @@
 import shap
 import numpy as np
 
-FEATURE_NAMES = [
-    "severity_score",
-    "confidence",
-    "value_entropy",
-    "has_links",
-    "is_network",
-    "is_suspicious_type",
-    "value_length"
-]
+from .feature_engineering import FEATURE_NAMES
 
 
 def generate_shap(model, X):
@@ -32,7 +24,7 @@ def explain_instance(shap_vals, row):
         if i >= len(FEATURE_NAMES):
             continue
 
-        if val > 0.02:
+        if abs(val) > 0.005:
             feature = FEATURE_NAMES[i]
 
             if feature == "severity_score":
