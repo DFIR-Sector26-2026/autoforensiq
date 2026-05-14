@@ -5,23 +5,48 @@
 **Conference target:** SecTor 2026 (submission deadline May 26, 2026)
 
 ```
-incident.txt
-    │
-    ▼
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────┐
-│ Intent          │────▶│ Dynamic Tool     │────▶│ Execution           │
-│ Classifier (LLM)│     │ Selector (DTSA)  │     │ Orchestrator        │
-└─────────────────┘     └──────────────────┘     └─────────────────────┘
-  case_context.json       execution_plan.json       raw/<tool>_output.json
-                                                             │
-    final_report.md                                          ▼
-         ▲          ┌──────────────────┐     ┌─────────────────────────┐
-         │          │ Report Generator │◀────│ Evidence Aggregator     │
-         │          │ (LLM + MITRE +   │     │ + Anomaly Detector (IF) │
-         └──────────│ Kill Chain)      │     │ + XAI (SHAP / LIME)     │
-                    └──────────────────┘     └─────────────────────────┘
-                                               unified_evidence.json
-                                               shap_explanations.json
+  Incident Report          Evidence Artifacts (any format, any combination)
+  ───────────────          ──────────────────────────────────────────────────
+  incident.txt             memory.dmp  capture.pcap  disk.img  NTUSER.DAT
+                           system.hiv  events.evtx   mail.eml  browser.db  …
+        │                        │
+        └────────────────────────┘
+                      │
+                      ▼
+        ┌─────────────────────────┐
+        │   AutoForensiq GUI      │  python autoforensiq.py
+        │   (or CLI flags)        │
+        └─────────────┬───────────┘
+                      │
+          ┌───────────▼───────────┐
+          │  Intent Classifier    │  reads report → attack type + hypotheses
+          │  (LLM)                │
+          └───────────┬───────────┘
+                      │ case_context.json
+          ┌───────────▼───────────┐
+          │  Dynamic Tool         │  maps artifact types → tool list
+          │  Selector (DTSA)      │
+          └───────────┬───────────┘
+                      │ execution_plan.json
+          ┌───────────▼───────────┐
+          │  Execution            │  runs forensic tools as subprocesses
+          │  Orchestrator         │
+          └───────────┬───────────┘
+                      │ raw/<tool>_output.json
+          ┌───────────▼───────────┐
+          │  Evidence Aggregator  │  deduplicates + normalises + MITRE maps
+          │  + Anomaly Detector   │  Isolation Forest anomaly scoring
+          │  + XAI (SHAP / LIME)  │  per-finding plain-English explanations
+          └───────────┬───────────┘
+                      │ unified_evidence.json · shap_explanations.json
+          ┌───────────▼───────────┐
+          │  Report Generator     │  LLM-written forensic report
+          │  (LLM + Kill Chain)   │  + interactive HTML timeline
+          └───────────┬───────────┘
+                      │
+               final_report.md
+               timeline.html
+               audit_log.json
 ```
 
 ---
@@ -68,27 +93,55 @@ pip install -r requirements.txt
 
 ---
 
-## Quick start
+## Running the tool
 
-No API key required — mock mode returns deterministic output for every incident type.
+### GUI (recommended)
+
+Run with no arguments to open the graphical launcher:
 
 ```bash
-# 1. Classifier only — fastest sanity check
+python autoforensiq.py
+```
+
+The GUI lets you select an incident report, attach any number of evidence files (type is auto-detected from the extension), optionally reorder artifacts by priority, configure the LLM provider, and launch the full pipeline — all without touching the command line again.
+
+---
+
+### CLI
+
+Pass `--report` to skip the GUI and run the pipeline directly:
+
+```bash
+# Classifier only — no API key, no evidence files needed
 python autoforensiq.py --report tests/incidents/01_ransomware.txt --mock --skip-tools
 
-# 2. Full pipeline in mock mode (no real evidence files or API key needed)
+# Full pipeline in mock mode
 python autoforensiq.py --report tests/incidents/01_ransomware.txt --mock
 
-# 3. Full pipeline with real evidence files and live LLM
+# Full pipeline with evidence files and a live LLM
 export ANTHROPIC_API_KEY=sk-ant-...
 python autoforensiq.py \
-  --report  tests/incidents/01_ransomware.txt \
+  --report   tests/incidents/01_ransomware.txt \
   --evidence data/test_cases/memory.dmp \
              data/test_cases/capture.pcap \
-             data/test_cases/disk.img
+             data/test_cases/disk.img \
+             data/test_cases/NTUSER.DAT
 ```
 
 On success the final report is written to `output/final_report.md`.
+
+---
+
+### Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| _(none)_ | — | — | Opens the GUI launcher |
+| `--report <path>` | string | — | Path to the plain-text incident report. Required for CLI mode. |
+| `--evidence <paths…>` | list | _(none)_ | One or more artifact files. Pass any format in any order — type is auto-detected from the file extension and name. |
+| `--mock` | flag | off | Run without a real API key. The classifier and report generator return deterministic mock output. |
+| `--skip-tools` | flag | off | Stop after Stage 1 (classifier only). No tools are run, no evidence is processed. |
+| `--gui` | flag | off | Force the GUI to open even when other flags are present. |
 
 ---
 
@@ -281,11 +334,15 @@ done
 
 ```
 autoforensiq/
-├── autoforensiq.py                    # CLI entry point
+├── autoforensiq.py                    # Entry point — GUI (no args) or CLI (--report …)
 ├── config.yaml                        # LLM provider, paths, mock mode
 ├── requirements.txt
 │
 ├── src/
+│   ├── gui/                           # Graphical launcher
+│   │   ├── launcher.py                # Main window, all sections, pipeline wiring
+│   │   ├── widgets.py                 # ArtifactRow and other reusable widgets
+│   │   └── theme.py                   # Colour palette and font constants
 │   ├── classifier/
 │   │   └── intent_classifier.py       # Stage 1 — LLM → case_context.json
 │   ├── agents/
