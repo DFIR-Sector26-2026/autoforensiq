@@ -272,12 +272,13 @@ def run_report_generator(
 def parse_args():
 
     parser = argparse.ArgumentParser(
-        description="AutoForensiq"
+        description="AutoForensiq — run with no arguments to open the GUI"
     )
 
     parser.add_argument(
         "--report",
-        required=True
+        default=None,
+        help="Path to plain-text incident report. Omit to launch the GUI."
     )
 
     parser.add_argument(
@@ -294,6 +295,12 @@ def parse_args():
     parser.add_argument(
         "--skip-tools",
         action="store_true"
+    )
+
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Force the GUI even when other flags are provided."
     )
 
     return parser.parse_args()
@@ -356,9 +363,10 @@ def _map_evidence_files(paths: list):
 # MAIN
 # ─────────────────────────────────────────────────────────────
 
-def main():
+def main(args=None):
 
-    args = parse_args()
+    if args is None:
+        args = parse_args()
 
     print("\n" + "=" * 60)
     print("  AutoForensiq — Autonomous Forensics Pipeline")
@@ -419,4 +427,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    if args.gui or args.report is None:
+        from src.gui.launcher import AutoForensiqGUI
+        app = AutoForensiqGUI()
+        app.mainloop()
+    else:
+        main(args)
