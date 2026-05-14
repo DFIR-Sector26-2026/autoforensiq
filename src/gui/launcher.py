@@ -92,6 +92,8 @@ class AutoForensiqGUI(ctk.CTk):
         self._build_header()
         self._build_report_section()
         self._build_evidence_section()
+        self._build_config_section()
+        self._build_run_button()
 
     # ── Shared card helper ────────────────────────────────────────────────────
 
@@ -302,6 +304,94 @@ class AutoForensiqGUI(ctk.CTk):
 
     def _load_sample(self, filename: str) -> None:
         self._report_path.set(str(ROOT_DIR / "tests" / "incidents" / filename))
+
+    # ── Header ────────────────────────────────────────────────────────────────
+
+    # ── Configuration section ─────────────────────────────────────────────────
+
+    def _build_config_section(self) -> None:
+        _, body, _ = self._card("CONFIGURATION")
+
+        # Row 1 — provider + model dropdowns
+        row1 = ctk.CTkFrame(body, fg_color="transparent")
+        row1.pack(fill="x", pady=(0, 14))
+
+        ctk.CTkLabel(
+            row1, text="Provider",
+            font=(FONT_FAMILY, 12), text_color=TEXT_SECONDARY, width=68,
+        ).pack(side="left")
+
+        self._provider_menu = ctk.CTkOptionMenu(
+            row1,
+            variable=self._provider,
+            values=list(_PROVIDER_MODELS.keys()),
+            command=self._on_provider_change,
+            width=140, height=34, corner_radius=8,
+            fg_color=INPUT_BG, button_color=ACCENT_DIM,
+            button_hover_color=ACCENT, text_color=TEXT_PRIMARY,
+            font=(FONT_FAMILY, 12),
+        )
+        self._provider_menu.pack(side="left", padx=(6, 24))
+
+        ctk.CTkLabel(
+            row1, text="Model",
+            font=(FONT_FAMILY, 12), text_color=TEXT_SECONDARY, width=50,
+        ).pack(side="left")
+
+        self._model_menu = ctk.CTkOptionMenu(
+            row1,
+            variable=self._model,
+            values=_PROVIDER_MODELS["anthropic"],
+            width=240, height=34, corner_radius=8,
+            fg_color=INPUT_BG, button_color=ACCENT_DIM,
+            button_hover_color=ACCENT, text_color=TEXT_PRIMARY,
+            font=(FONT_FAMILY, 12),
+        )
+        self._model_menu.pack(side="left", padx=6)
+
+        # Row 2 — checkboxes
+        row2 = ctk.CTkFrame(body, fg_color="transparent")
+        row2.pack(fill="x")
+
+        _chk = dict(
+            font=(FONT_FAMILY, 12), text_color=TEXT_PRIMARY,
+            checkmark_color="#ffffff", fg_color=ACCENT_DIM,
+            hover_color=ACCENT, border_color=BORDER,
+        )
+        ctk.CTkCheckBox(
+            row2, text="Mock mode  (no API key required)",
+            variable=self._mock_mode, **_chk,
+        ).pack(side="left", padx=(0, 32))
+
+        ctk.CTkCheckBox(
+            row2, text="Skip tools  (classifier only)",
+            variable=self._skip_tools, **_chk,
+        ).pack(side="left")
+
+    def _on_provider_change(self, provider: str) -> None:
+        models = _PROVIDER_MODELS.get(provider, [])
+        self._model_menu.configure(values=models)
+        self._model.set(models[0] if models else "")
+
+    # ── Run button ────────────────────────────────────────────────────────────
+
+    def _build_run_button(self) -> None:
+        frame = ctk.CTkFrame(self._scroll, fg_color="transparent")
+        frame.pack(fill="x", padx=24, pady=(0, 20))
+
+        self._run_btn = ctk.CTkButton(
+            frame,
+            text="▶   Run Pipeline",
+            command=self._run_pipeline,
+            height=52, corner_radius=10,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            font=(FONT_FAMILY, 15, "bold"),
+            text_color="#ffffff",
+        )
+        self._run_btn.pack(fill="x")
+
+    def _run_pipeline(self) -> None:
+        pass  # wired up in the next commit
 
     # ── Header ────────────────────────────────────────────────────────────────
 
