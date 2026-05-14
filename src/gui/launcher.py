@@ -9,6 +9,7 @@ Run with:
 from __future__ import annotations
 
 from pathlib import Path
+from tkinter import filedialog
 
 import customtkinter as ctk
 
@@ -18,6 +19,32 @@ from src.gui.theme import (
     FONT_FAMILY, INPUT_BG,
     TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
 )
+from src.gui.widgets import ArtifactRow
+
+# Extension → artifact type (mirrors _map_evidence_files in autoforensiq.py)
+_EXT_MAP: dict[str, str] = {
+    ".dmp": "memory_dump", ".mem": "memory_dump", ".raw": "memory_dump",
+    ".pcap": "pcap", ".pcapng": "pcap",
+    ".img": "disk_image", ".dd": "disk_image", ".e01": "disk_image",
+    ".dat": "registry_hive", ".hiv": "registry_hive",
+    ".eml": "email_archive", ".msg": "email_archive",
+    ".log": "log_files", ".evtx": "log_files",
+}
+
+
+def _detect_type(path: str) -> str:
+    p = Path(path)
+    low = str(p).lower()
+    t = _EXT_MAP.get(p.suffix.lower())
+    if t:
+        return t
+    if "memory" in low:
+        return "memory_dump"
+    if any(k in low for k in ("ntuser", "system", "software")):
+        return "registry_hive"
+    if "history" in low:
+        return "browser_history"
+    return "unknown"
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -64,6 +91,7 @@ class AutoForensiqGUI(ctk.CTk):
 
         self._build_header()
         self._build_report_section()
+        self._build_evidence_section()
 
     # ── Shared card helper ────────────────────────────────────────────────────
 
@@ -159,8 +187,112 @@ class AutoForensiqGUI(ctk.CTk):
                 text_color=TEXT_SECONDARY,
             ).pack(side="left", padx=(0, 6))
 
+    # ── Evidence file section ─────────────────────────────────────────────────
+
+    def _build_evidence_section(self) -> None:
+        _, body, hdr = self._card("EVIDENCE FILES")
+
+        ctk.CTkButton(
+            hdr, text="+ Add Evidence",
+            command=self._add_evidence_files,
+            width=120, height=28, corner_radius=6,
+            fg_color=ACCENT_DIM, hover_color=ACCENT,
+            font=(FONT_FAMILY, 11, "bold"),
+        ).pack(side="right")
+
+        self._evidence_list = ctk.CTkFrame(body, fg_color="transparent")
+        self._evidence_list.pack(fill="x")
+
+        self._empty_label = ctk.CTkLabel(
+            self._evidence_list,
+            text="No evidence files added yet.\nClick  + Add Evidence  to attach forensic artifacts.",
+            font=(FONT_FAMILY, 12),
+            text_color=TEXT_MUTED,
+            justify="center",
+        )
+        self._empty_label.pack(pady=24)
+
+        self._priority_hint = ctk.CTkLabel(
+            body,
+            text="ℹ  Use ↑ ↓ to reorder — priority is optional and does not affect which tools run",
+            font=(FONT_FAMILY, 10),
+            text_color=TEXT_MUTED,
+        )
+        self._priority_hint.pack(anchor="w", pady=(8, 0))
+        self._priority_hint.pack_forget()
+
+    def _add_evidence_files(self) -> None:
+        paths = filedialog.askopenfilenames(
+            title="Select evidence files",
+            filetypes=[
+                ("Forensic artifacts",
+                 "*.dmp *.mem *.raw *.pcap *.pcapng *.img *.dd *.e01 "
+                 "*.dat *.hiv *.log *.evtx *.eml *.msg"),
+                ("Memory dumps",   "*.dmp *.mem *.raw"),
+                ("PCAP",           "*.pcap *.pcapng"),
+                ("Disk images",    "*.img *.dd *.e01"),
+                ("Registry hives", "*.dat *.hiv"),
+                ("Log files",      "*.log *.evtx"),
+                ("Email",          "*.eml *.msg"),
+                ("All files",      "*.*"),
+            ],
+            initialdir=str(ROOT_DIR / "data" / "test_cases"),
+        )
+        for p in paths:
+            self._add_artifact_row(p)
+
+    def _add_artifact_row(self, filepath: str) -> None:
+        self._empty_label.pack_forget()
+
+        row = ArtifactRow(
+            self._evidence_list,
+            filepath=filepath,
+            artifact_type=_detect_type(filepath),
+            index=len(self._artifact_rows),
+            on_remove=lambda p=filepath: self._remove_artifact(p),
+            on_move_up=lambda p=filepath: self._move_artifact(p, -1),
+            on_move_down=lambda p=filepath: self._move_artifact(p, +1),
+        )
+        row.pack(fill="x", pady=(0, 6))
+        self._artifact_rows.append(row)
+        self._refresh_priorities()
+        self._priority_hint.pack(anchor="w", pady=(8, 0))
+
+    def _remove_artifact(self, filepath: str) -> None:
+        for widget in self._evidence_list.winfo_children():
+            if isinstance(widget, ArtifactRow) and widget.filepath == filepath:
+                widget.destroy()
+                break
+        self._artifact_rows = [r for r in self._artifact_rows if r.filepath != filepath]
+        self._refresh_priorities()
+        if not self._artifact_rows:
+            self._empty_label.pack(pady=24)
+            self._priority_hint.pack_forget()
+
+    def _move_artifact(self, filepath: str, direction: int) -> None:
+        idx = next((i for i, r in enumerate(self._artifact_rows) if r.filepath == filepath), None)
+        if idx is None:
+            return
+        new_idx = idx + direction
+        if not (0 <= new_idx < len(self._artifact_rows)):
+            return
+        rows = self._artifact_rows
+        rows[idx], rows[new_idx] = rows[new_idx], rows[idx]
+        for r in rows:
+            r.pack_forget()
+        for r in rows:
+            r.pack(fill="x", pady=(0, 6))
+        self._refresh_priorities()
+
+    def _refresh_priorities(self) -> None:
+        for i, row in enumerate(self._artifact_rows):
+            row.set_priority(i + 1)
+
+    def get_artifact_order(self) -> list[str]:
+        return [r.filepath for r in self._artifact_rows]
+
     def _browse_report(self) -> None:
-        path = __import__("tkinter.filedialog", fromlist=["askopenfilename"]).askopenfilename(
+        path = filedialog.askopenfilename(
             title="Select incident report",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
             initialdir=str(ROOT_DIR / "tests" / "incidents"),
