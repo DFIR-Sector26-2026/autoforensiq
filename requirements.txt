@@ -16,7 +16,7 @@ jsonschema>=4.21.0         # validate case_context.json against schema
 scikit-learn>=1.4.0        # IsolationForest anomaly detector
 shap>=0.45.0               # SHAP feature attribution
 lime>=0.2.0                # LIME local interpretability
-numpy>=1.26.0
+numpy>=1.26.0,<2.0.0        # pin below 2.0 — scipy/sklearn compiled against NumPy 1.x
 pandas>=2.2.0
 
 # ── Forensic tool support ─────────────────────────────────────────────────────
@@ -24,6 +24,9 @@ volatility3>=2.5.0         # Volatility 3 memory analysis (P3)
 
 # ── Report output ─────────────────────────────────────────────────────────────
 # reportlab>=4.1.0         # (optional) PDF generation — uncomment for PDF output
+
+# ── GUI ───────────────────────────────────────────────────────────────────────
+customtkinter>=5.2.0       # modern dark-themed Tkinter widgets (launcher GUI)
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 tqdm>=4.66.0               # progress bars for long-running tool executions

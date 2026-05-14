@@ -226,7 +226,11 @@ def aggregate_evidence(
     # Step 5: Validate output schema
     if _UNIFIED_EVIDENCE_SCHEMA:
         try:
-            jsonschema.validate(instance=unified, schema=_UNIFIED_EVIDENCE_SCHEMA)
+            resolver = jsonschema.RefResolver(
+                base_uri=_SCHEMAS_DIR.as_uri() + "/",
+                referrer=_UNIFIED_EVIDENCE_SCHEMA,
+            )
+            jsonschema.validate(instance=unified, schema=_UNIFIED_EVIDENCE_SCHEMA, resolver=resolver)
         except jsonschema.ValidationError as ve:
             print(f"  [WARN] Output schema violation: {ve.message}")
 
