@@ -8,8 +8,11 @@ Run with:
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import threading
 from pathlib import Path
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
@@ -94,6 +97,7 @@ class AutoForensiqGUI(ctk.CTk):
         self._build_evidence_section()
         self._build_config_section()
         self._build_run_button()
+        self._build_console()
 
     # ── Shared card helper ────────────────────────────────────────────────────
 
@@ -390,8 +394,101 @@ class AutoForensiqGUI(ctk.CTk):
         )
         self._run_btn.pack(fill="x")
 
+    # ── Output console ────────────────────────────────────────────────────────
+
+    def _build_console(self) -> None:
+        _, body, hdr = self._card("PIPELINE OUTPUT")
+
+        ctk.CTkButton(
+            hdr, text="Clear",
+            command=self._clear_console,
+            width=56, height=24, corner_radius=6,
+            fg_color="transparent", hover_color=BORDER,
+            border_width=1, border_color=BORDER,
+            font=(FONT_FAMILY, 10), text_color=TEXT_MUTED,
+        ).pack(side="right")
+
+        self._console = ctk.CTkTextbox(
+            body,
+            height=240,
+            fg_color="#010409",
+            text_color="#3fb950",
+            font=("Consolas", 11),
+            corner_radius=8,
+            border_width=1,
+            border_color=BORDER,
+            wrap="word",
+            state="disabled",
+        )
+        self._console.pack(fill="x")
+        self._console_write("Waiting for pipeline run…\n")
+
+    def _console_write(self, text: str) -> None:
+        self._console.configure(state="normal")
+        self._console.insert("end", text)
+        self._console.see("end")
+        self._console.configure(state="disabled")
+
+    def _clear_console(self) -> None:
+        self._console.configure(state="normal")
+        self._console.delete("1.0", "end")
+        self._console.configure(state="disabled")
+
+    # ── Pipeline execution ────────────────────────────────────────────────────
+
     def _run_pipeline(self) -> None:
-        pass  # wired up in the next commit
+        if self._pipeline_running:
+            return
+
+        report = self._report_path.get().strip()
+        if not report:
+            messagebox.showwarning("Missing report", "Please select an incident report file.")
+            return
+        if not Path(report).exists():
+            messagebox.showerror("File not found", f"Report not found:\n{report}")
+            return
+
+        self._pipeline_running = True
+        self._run_btn.configure(text="⏳   Running…", state="disabled", fg_color=ACCENT_DIM)
+        self._clear_console()
+
+        threading.Thread(target=self._pipeline_thread, args=(report,), daemon=True).start()
+
+    def _pipeline_thread(self, report: str) -> None:
+        cmd = [sys.executable, str(ROOT_DIR / "autoforensiq.py"), "--report", report]
+
+        if self._mock_mode.get():
+            cmd.append("--mock")
+        if self._skip_tools.get():
+            cmd.append("--skip-tools")
+
+        evidence = self.get_artifact_order()
+        if evidence:
+            cmd += ["--evidence"] + evidence
+
+        self.after(0, self._console_write, f"$ {' '.join(cmd)}\n\n")
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=str(ROOT_DIR),
+            )
+            for line in proc.stdout:
+                self.after(0, self._console_write, line)
+            proc.wait()
+            status = "✓  Pipeline complete." if proc.returncode == 0 else f"✗  Exit code {proc.returncode}"
+            self.after(0, self._console_write, f"\n{status}\n")
+        except Exception as exc:
+            self.after(0, self._console_write, f"\n[ERROR] {exc}\n")
+        finally:
+            self.after(0, self._restore_run_btn)
+
+    def _restore_run_btn(self) -> None:
+        self._pipeline_running = False
+        self._run_btn.configure(text="▶   Run Pipeline", state="normal", fg_color=ACCENT)
 
     # ── Header ────────────────────────────────────────────────────────────────
 
