@@ -59,6 +59,17 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     "openai":    ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
 }
 
+# Tool name → display label
+_TOOLS: list[tuple[str, str]] = [
+    ("volatility3", "Volatility3"),
+    ("tshark",      "Tshark"),
+    ("tsk_fls",     "SleuthKit"),
+    ("regripper",   "RegRipper"),
+    ("plaso",       "Plaso"),
+    ("email",       "Email"),
+    ("browser",     "Browser"),
+]
+
 
 class AutoForensiqGUI(ctk.CTk):
 
@@ -76,6 +87,9 @@ class AutoForensiqGUI(ctk.CTk):
         self._model = ctk.StringVar(value="claude-sonnet-4-6")
         self._mock_mode = ctk.BooleanVar(value=True)
         self._skip_tools = ctk.BooleanVar(value=False)
+        self._tool_vars: dict[str, ctk.BooleanVar] = {
+            name: ctk.BooleanVar(value=True) for name, _ in _TOOLS
+        }
         self._pipeline_running = False
 
         self._build_ui()
@@ -372,6 +386,44 @@ class AutoForensiqGUI(ctk.CTk):
             variable=self._skip_tools, **_chk,
         ).pack(side="left")
 
+        # Row 3 — tool selection
+        row3 = ctk.CTkFrame(body, fg_color="transparent")
+        row3.pack(fill="x", pady=(14, 0))
+
+        ctk.CTkLabel(
+            row3, text="Tools",
+            font=(FONT_FAMILY, 12), text_color=TEXT_SECONDARY, width=68,
+        ).pack(side="left")
+
+        tools_inner = ctk.CTkFrame(row3, fg_color="transparent")
+        tools_inner.pack(side="left", fill="x", expand=True)
+
+        _tool_chk = dict(
+            font=(FONT_FAMILY, 11), text_color=TEXT_PRIMARY,
+            checkmark_color="#ffffff", fg_color=ACCENT_DIM,
+            hover_color=ACCENT, border_color=BORDER,
+        )
+        for name, label in _TOOLS:
+            ctk.CTkCheckBox(
+                tools_inner, text=label,
+                variable=self._tool_vars[name],
+                **_tool_chk,
+            ).pack(side="left", padx=(0, 16))
+
+        self._all_tools_btn = ctk.CTkButton(
+            tools_inner, text="All",
+            command=self._select_all_tools,
+            width=40, height=22, corner_radius=6,
+            fg_color="transparent", hover_color=BORDER,
+            border_width=1, border_color=BORDER,
+            font=(FONT_FAMILY, 10), text_color=TEXT_MUTED,
+        )
+        self._all_tools_btn.pack(side="left")
+
+    def _select_all_tools(self) -> None:
+        for var in self._tool_vars.values():
+            var.set(True)
+
     def _on_provider_change(self, provider: str) -> None:
         models = _PROVIDER_MODELS.get(provider, [])
         self._model_menu.configure(values=models)
@@ -465,6 +517,10 @@ class AutoForensiqGUI(ctk.CTk):
         evidence = self.get_artifact_order()
         if evidence:
             cmd += ["--evidence"] + evidence
+
+        selected_tools = [name for name, _ in _TOOLS if self._tool_vars[name].get()]
+        if selected_tools and len(selected_tools) < len(_TOOLS):
+            cmd += ["--tools"] + selected_tools
 
         self.after(0, self._console_write, f"$ {' '.join(cmd)}\n\n")
 
