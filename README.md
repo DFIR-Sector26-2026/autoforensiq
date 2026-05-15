@@ -2,8 +2,6 @@
 
 > Autonomous digital forensics pipeline with explainable AI — from incident report to structured forensic report with zero human intervention.
 
-**Conference target:** SecTor 2026 (submission deadline May 26, 2026)
-
 ```
   Incident Report          Evidence Artifacts (any format, any combination)
   ───────────────          ──────────────────────────────────────────────────
@@ -382,14 +380,6 @@ autoforensiq/
 │
 └── output/                            # Runtime output — gitignored
 ```
-
----
-
-## Security notes
-
-- **Never commit API keys.** Use environment variables or a `.env` file. `config.yaml` stores only the environment variable *name*, not the key value.
-- **Evidence files may contain sensitive data.** The `output/` directory is gitignored — keep it that way.
-- **Audit log integrity.** `output/audit_log.json` contains SHA-256 hashes of all evidence files at time of processing. Do not modify evidence files after a run if chain-of-custody matters.
 
 ---
 
