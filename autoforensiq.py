@@ -284,7 +284,25 @@ def parse_args():
     parser.add_argument(
         "--evidence",
         nargs="*",
-        default=[]
+        default=[],
+        metavar="FILE",
+        help=(
+            "Artifact files in any order — type is auto-detected from extension/name. "
+            "Pass order = priority (#1 runs first). "
+            "Example: --evidence memory.dmp capture.pcap disk.img"
+        )
+    )
+
+    parser.add_argument(
+        "--tools",
+        nargs="*",
+        default=None,
+        metavar="TOOL",
+        help=(
+            "Restrict which forensic tools run. Default: all tools selected by the DTSA. "
+            "Valid names: volatility3 tshark tsk_fls regripper plaso email browser. "
+            "Example: --tools volatility3 tshark"
+        )
     )
 
     parser.add_argument(
@@ -374,6 +392,7 @@ def main(args=None):
 
     print(f"  Report:   {args.report}")
     print(f"  Evidence: {args.evidence or 'none'}")
+    print(f"  Tools:    {', '.join(args.tools) if args.tools else 'all (DTSA)'}")
     print(f"  Mock LLM: {args.mock}")
 
     _ensure_output_dir()
@@ -392,8 +411,24 @@ def main(args=None):
     # STAGE 2
     execution_plan = run_tool_selector(case_context)
 
+    # Filter tools if --tools was specified
+    if args.tools:
+        allowed = set(args.tools)
+        execution_plan["tools"] = [
+            t for t in execution_plan["tools"] if t["name"] in allowed
+        ]
+        for i, t in enumerate(execution_plan["tools"], 1):
+            t["order"] = i
+        print(f"  [FILTER] Restricted to tools: {', '.join(args.tools)}")
+
     # STAGE 3
     evidence_files = _map_evidence_files(args.evidence)
+
+    if evidence_files:
+        priority_list = [
+            f"#{i + 1} {k}" for i, k in enumerate(evidence_files)
+        ]
+        print(f"  [PRIORITY] {' → '.join(priority_list)}")
 
     raw_outputs = run_orchestrator(
         execution_plan,

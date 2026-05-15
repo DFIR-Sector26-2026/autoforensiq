@@ -138,7 +138,8 @@ On success the final report is written to `output/final_report.md`.
 |---|---|---|---|
 | _(none)_ | — | — | Opens the GUI launcher |
 | `--report <path>` | string | — | Path to the plain-text incident report. Required for CLI mode. |
-| `--evidence <paths…>` | list | _(none)_ | One or more artifact files. Pass any format in any order — type is auto-detected from the file extension and name. |
+| `--evidence <paths…>` | list | _(none)_ | One or more artifact files. Type is auto-detected from extension/name. **Order = priority** — the first file listed is processed first. |
+| `--tools <names…>` | list | all | Restrict which forensic tools run. Names: `volatility3` `tshark` `tsk_fls` `regripper` `plaso` `email` `browser`. Default runs all tools selected by the DTSA. |
 | `--mock` | flag | off | Run without a real API key. The classifier and report generator return deterministic mock output. |
 | `--skip-tools` | flag | off | Stop after Stage 1 (classifier only). No tools are run, no evidence is processed. |
 | `--gui` | flag | off | Force the GUI to open even when other flags are present. |
