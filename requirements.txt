@@ -25,5 +25,8 @@ volatility3>=2.5.0         # Volatility 3 memory analysis (P3)
 # ── Report output ─────────────────────────────────────────────────────────────
 # reportlab>=4.1.0         # (optional) PDF generation — uncomment for PDF output
 
+# ── GUI ───────────────────────────────────────────────────────────────────────
+customtkinter>=5.2.0       # modern dark-themed Tkinter widgets (launcher GUI)
+
 # ── Utilities ─────────────────────────────────────────────────────────────────
 tqdm>=4.66.0               # progress bars for long-running tool executions

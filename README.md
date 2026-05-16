@@ -2,26 +2,49 @@
 
 > Autonomous digital forensics pipeline with explainable AI — from incident report to structured forensic report with zero human intervention.
 
-**Conference target:** SecTor 2026 (submission deadline May 26, 2026)
-
 ```
-incident.txt
-    │
-    ▼
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────┐
-│ Intent          │────▶│ Dynamic Tool     │────▶│ Execution           │
-│ Classifier (LLM)│     │ Selector (DTSA)  │     │ Orchestrator        │
-└─────────────────┘     └──────────────────┘     └─────────────────────┘
-  case_context.json       execution_plan.json       raw/<tool>_output.json
-                                                             │
-    final_report.md                                          ▼
-         ▲          ┌──────────────────┐     ┌─────────────────────────┐
-         │          │ Report Generator │◀────│ Evidence Aggregator     │
-         │          │ (LLM + MITRE +   │     │ + Anomaly Detector (IF) │
-         └──────────│ Kill Chain)      │     │ + XAI (SHAP / LIME)     │
-                    └──────────────────┘     └─────────────────────────┘
-                                               unified_evidence.json
-                                               shap_explanations.json
+  Incident Report          Evidence Artifacts (any format, any combination)
+  ───────────────          ──────────────────────────────────────────────────
+  incident.txt             memory.dmp  capture.pcap  disk.img  NTUSER.DAT
+                           system.hiv  events.evtx   mail.eml  browser.db  …
+        │                        │
+        └────────────────────────┘
+                      │
+                      ▼
+        ┌─────────────────────────┐
+        │   AutoForensiq GUI      │  python autoforensiq.py
+        │   (or CLI flags)        │
+        └─────────────┬───────────┘
+                      │
+          ┌───────────▼───────────┐
+          │  Intent Classifier    │  reads report → attack type + hypotheses
+          │  (LLM)                │
+          └───────────┬───────────┘
+                      │ case_context.json
+          ┌───────────▼───────────┐
+          │  Dynamic Tool         │  maps artifact types → tool list
+          │  Selector (DTSA)      │
+          └───────────┬───────────┘
+                      │ execution_plan.json
+          ┌───────────▼───────────┐
+          │  Execution            │  runs forensic tools as subprocesses
+          │  Orchestrator         │
+          └───────────┬───────────┘
+                      │ raw/<tool>_output.json
+          ┌───────────▼───────────┐
+          │  Evidence Aggregator  │  deduplicates + normalises + MITRE maps
+          │  + Anomaly Detector   │  Isolation Forest anomaly scoring
+          │  + XAI (SHAP / LIME)  │  per-finding plain-English explanations
+          └───────────┬───────────┘
+                      │ unified_evidence.json · shap_explanations.json
+          ┌───────────▼───────────┐
+          │  Report Generator     │  LLM-written forensic report
+          │  (LLM + Kill Chain)   │  + interactive HTML timeline
+          └───────────┬───────────┘
+                      │
+               final_report.md
+               timeline.html
+               audit_log.json
 ```
 
 ---
@@ -68,27 +91,56 @@ pip install -r requirements.txt
 
 ---
 
-## Quick start
+## Running the tool
 
-No API key required — mock mode returns deterministic output for every incident type.
+### GUI (recommended)
+
+Run with no arguments to open the graphical launcher:
 
 ```bash
-# 1. Classifier only — fastest sanity check
+python autoforensiq.py
+```
+
+The GUI lets you select an incident report, attach any number of evidence files (type is auto-detected from the extension), optionally reorder artifacts by priority, configure the LLM provider, and launch the full pipeline — all without touching the command line again.
+
+---
+
+### CLI
+
+Pass `--report` to skip the GUI and run the pipeline directly:
+
+```bash
+# Classifier only — no API key, no evidence files needed
 python autoforensiq.py --report tests/incidents/01_ransomware.txt --mock --skip-tools
 
-# 2. Full pipeline in mock mode (no real evidence files or API key needed)
+# Full pipeline in mock mode
 python autoforensiq.py --report tests/incidents/01_ransomware.txt --mock
 
-# 3. Full pipeline with real evidence files and live LLM
+# Full pipeline with evidence files and a live LLM
 export ANTHROPIC_API_KEY=sk-ant-...
 python autoforensiq.py \
-  --report  tests/incidents/01_ransomware.txt \
+  --report   tests/incidents/01_ransomware.txt \
   --evidence data/test_cases/memory.dmp \
              data/test_cases/capture.pcap \
-             data/test_cases/disk.img
+             data/test_cases/disk.img \
+             data/test_cases/NTUSER.DAT
 ```
 
 On success the final report is written to `output/final_report.md`.
+
+---
+
+### Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| _(none)_ | — | — | Opens the GUI launcher |
+| `--report <path>` | string | — | Path to the plain-text incident report. Required for CLI mode. |
+| `--evidence <paths…>` | list | _(none)_ | One or more artifact files. Type is auto-detected from extension/name. **Order = priority** — the first file listed is processed first. |
+| `--tools <names…>` | list | all | Restrict which forensic tools run. Names: `volatility3` `tshark` `tsk_fls` `regripper` `plaso` `email` `browser`. Default runs all tools selected by the DTSA. |
+| `--mock` | flag | off | Run without a real API key. The classifier and report generator return deterministic mock output. |
+| `--skip-tools` | flag | off | Stop after Stage 1 (classifier only). No tools are run, no evidence is processed. |
+| `--gui` | flag | off | Force the GUI to open even when other flags are present. |
 
 ---
 
@@ -151,6 +203,28 @@ python -m src.classifier.intent_classifier tests/incidents/02_apt_intrusion.txt
 python -m src.orchestrator
 ```
 
+Tool `name` values must exactly match the orchestrator's `WRAPPER_MAP` keys.
+</details>
+
+<details>
+<summary><code>evidence_item</code> — Orchestrator → Aggregator (per item)</summary>
+
+```json
+{
+  "artifact_id": "string",
+  "source_tool": "volatility3 | tshark | tsk_fls | regripper | plaso",
+  "evidence_type": "string",
+  "timestamp": "ISO 8601 or empty string",
+  "value": "string",
+  "severity": "low | medium | high | critical",
+  "confidence": 0.9,
+  "linked_artifacts": ["artifact_id strings"]
+}
+```
+
+Always produced via `BaseWrapper.make_evidence_item()` — never construct manually.
+</details>
+
 ---
 
 ## Forensic tools
@@ -169,7 +243,63 @@ All wrappers inherit from `src/wrappers/base_wrapper.py` and produce a uniform `
 
 ---
 
-## Supported incident types
+## Project structure
+
+```
+autoforensiq/
+├── autoforensiq.py                    # CLI entry point
+├── config.yaml                        # LLM provider, paths, mock mode
+├── requirements.txt
+│
+├── src/
+│   ├── classifier/
+│   │   └── intent_classifier.py       # Stage 1 — LLM → case_context.json
+│   ├── agents/
+│   │   └── tool_selector.py           # Stage 2 — DTSA → execution_plan.json
+│   ├── orchestrator.py                # Stage 3 — subprocess wrappers
+│   ├── wrappers/                      # Stage 3 — one wrapper per tool
+│   │   ├── base_wrapper.py            # make_evidence_item() contract
+│   │   ├── volatility_wrapper.py
+│   │   ├── tshark_wrapper.py
+│   │   ├── tsk_wrapper.py
+│   │   ├── regripper_wrapper.py
+│   │   ├── plaso_wrapper.py
+│   │   ├── email_wrapper.py
+│   │   └── browser_wrapper.py
+│   ├── aggregator/
+│   │   └── evidence_aggregator.py     # Stage 4 — normalise + deduplicate
+│   ├── ml/
+│   │   ├── anomaly_detector.py        # Stage 5 — Isolation Forest
+│   │   └── xai_explainer.py          # Stage 6 — SHAP + LIME
+│   ├── report_generator/
+│   │   └── report_generator.py        # Stage 7 — LLM report + HTML timeline
+│   ├── utils/
+│   │   └── audit_log.py               # SHA-256 chain-of-custody log
+│   └── schemas/
+│       ├── case_context_schema.json
+│       ├── execution_plan.json
+│       ├── evidence_item.json
+│       └── unified_evidence.json
+│
+├── tests/
+│   ├── incidents/                     # 5 sample plain-text incident reports
+│   └── test_wrappers.py
+│
+├── data/
+│   └── test_cases/                    # Sample evidence files (memory.dmp, capture.pcap, …)
+│
+└── output/                            # Runtime output — gitignored
+```
+
+---
+
+## Security notes
+
+- **Never commit API keys.** Use environment variables or a `.env` file. `config.yaml` stores only the environment variable *name*, not the key value.
+- **Evidence files may contain sensitive data.** The `output/` directory is gitignored — keep it that way.
+- **Audit log integrity.** `output/audit_log.json` contains SHA-256 hashes of all evidence files at time of processing. Do not modify evidence files after a run if chain-of-custody matters.
+
+---
 
 | Type | Sample report |
 |---|---|
@@ -281,11 +411,15 @@ done
 
 ```
 autoforensiq/
-├── autoforensiq.py                    # CLI entry point
+├── autoforensiq.py                    # Entry point — GUI (no args) or CLI (--report …)
 ├── config.yaml                        # LLM provider, paths, mock mode
 ├── requirements.txt
 │
 ├── src/
+│   ├── gui/                           # Graphical launcher
+│   │   ├── launcher.py                # Main window, all sections, pipeline wiring
+│   │   ├── widgets.py                 # ArtifactRow and other reusable widgets
+│   │   └── theme.py                   # Colour palette and font constants
 │   ├── classifier/
 │   │   └── intent_classifier.py       # Stage 1 — LLM → case_context.json
 │   ├── agents/
@@ -324,14 +458,6 @@ autoforensiq/
 │
 └── output/                            # Runtime output — gitignored
 ```
-
----
-
-## Security notes
-
-- **Never commit API keys.** Use environment variables or a `.env` file. `config.yaml` stores only the environment variable *name*, not the key value.
-- **Evidence files may contain sensitive data.** The `output/` directory is gitignored — keep it that way.
-- **Audit log integrity.** `output/audit_log.json` contains SHA-256 hashes of all evidence files at time of processing. Do not modify evidence files after a run if chain-of-custody matters.
 
 ---
 
