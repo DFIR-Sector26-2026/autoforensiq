@@ -203,6 +203,28 @@ python -m src.classifier.intent_classifier tests/incidents/02_apt_intrusion.txt
 python -m src.orchestrator
 ```
 
+Tool `name` values must exactly match the orchestrator's `WRAPPER_MAP` keys.
+</details>
+
+<details>
+<summary><code>evidence_item</code> — Orchestrator → Aggregator (per item)</summary>
+
+```json
+{
+  "artifact_id": "string",
+  "source_tool": "volatility3 | tshark | tsk_fls | regripper | plaso",
+  "evidence_type": "string",
+  "timestamp": "ISO 8601 or empty string",
+  "value": "string",
+  "severity": "low | medium | high | critical",
+  "confidence": 0.9,
+  "linked_artifacts": ["artifact_id strings"]
+}
+```
+
+Always produced via `BaseWrapper.make_evidence_item()` — never construct manually.
+</details>
+
 ---
 
 ## Forensic tools
@@ -221,7 +243,63 @@ All wrappers inherit from `src/wrappers/base_wrapper.py` and produce a uniform `
 
 ---
 
-## Supported incident types
+## Project structure
+
+```
+autoforensiq/
+├── autoforensiq.py                    # CLI entry point
+├── config.yaml                        # LLM provider, paths, mock mode
+├── requirements.txt
+│
+├── src/
+│   ├── classifier/
+│   │   └── intent_classifier.py       # Stage 1 — LLM → case_context.json
+│   ├── agents/
+│   │   └── tool_selector.py           # Stage 2 — DTSA → execution_plan.json
+│   ├── orchestrator.py                # Stage 3 — subprocess wrappers
+│   ├── wrappers/                      # Stage 3 — one wrapper per tool
+│   │   ├── base_wrapper.py            # make_evidence_item() contract
+│   │   ├── volatility_wrapper.py
+│   │   ├── tshark_wrapper.py
+│   │   ├── tsk_wrapper.py
+│   │   ├── regripper_wrapper.py
+│   │   ├── plaso_wrapper.py
+│   │   ├── email_wrapper.py
+│   │   └── browser_wrapper.py
+│   ├── aggregator/
+│   │   └── evidence_aggregator.py     # Stage 4 — normalise + deduplicate
+│   ├── ml/
+│   │   ├── anomaly_detector.py        # Stage 5 — Isolation Forest
+│   │   └── xai_explainer.py          # Stage 6 — SHAP + LIME
+│   ├── report_generator/
+│   │   └── report_generator.py        # Stage 7 — LLM report + HTML timeline
+│   ├── utils/
+│   │   └── audit_log.py               # SHA-256 chain-of-custody log
+│   └── schemas/
+│       ├── case_context_schema.json
+│       ├── execution_plan.json
+│       ├── evidence_item.json
+│       └── unified_evidence.json
+│
+├── tests/
+│   ├── incidents/                     # 5 sample plain-text incident reports
+│   └── test_wrappers.py
+│
+├── data/
+│   └── test_cases/                    # Sample evidence files (memory.dmp, capture.pcap, …)
+│
+└── output/                            # Runtime output — gitignored
+```
+
+---
+
+## Security notes
+
+- **Never commit API keys.** Use environment variables or a `.env` file. `config.yaml` stores only the environment variable *name*, not the key value.
+- **Evidence files may contain sensitive data.** The `output/` directory is gitignored — keep it that way.
+- **Audit log integrity.** `output/audit_log.json` contains SHA-256 hashes of all evidence files at time of processing. Do not modify evidence files after a run if chain-of-custody matters.
+
+---
 
 | Type | Sample report |
 |---|---|
