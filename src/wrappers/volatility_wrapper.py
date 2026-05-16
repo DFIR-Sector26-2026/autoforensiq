@@ -29,7 +29,7 @@ class VolatilityWrapper(BaseWrapper):
         for plugin in PLUGINS:
             print(f"\n  [VOL] Running {plugin}...")
             stdout, stderr, code = self.run_command(
-                ["./venv/bin/vol", "-f", image_path, plugin],   # ✅ FIXED LINE
+                ["./venv/bin/vol", "-f", image_path, plugin],
                 input_files=[image_path],
                 timeout=120
             )
@@ -70,10 +70,14 @@ class VolatilityWrapper(BaseWrapper):
                 pid  = parts[1]
                 ppid = parts[2]
                 name = parts[0]
+                # FIX: append process name to pid to ensure unique artifact_id
+                # Multiple child processes can share the same parent PID,
+                # causing duplicate IDs and evidence loss during P4 deduplication
+                safe_name = name.lower().replace('.', '_').replace('@', '')
                 severity = "high" if any(s in name.lower()
                            for s in SUSPICIOUS_PARENTS) else "low"
                 items.append(self.make_evidence_item(
-                    artifact_id=f"proc_{pid}",
+                    artifact_id=f"proc_{pid}_{safe_name}",
                     evidence_type="process",
                     value=f"{name} (PID:{pid} PPID:{ppid})",
                     severity=severity,
@@ -161,6 +165,14 @@ class VolatilityWrapper(BaseWrapper):
             try:
                 pid  = parts[1] if parts[1].isdigit() else "unknown"
                 name = parts[0]
+
+                # FIX: filter out null byte regions — they are false positives
+                # Real shellcode has non-zero bytes; all-zero regions are noise
+                hex_tokens = [p for p in parts if len(p) == 2 and
+                              all(c in '0123456789abcdefABCDEF' for c in p)]
+                if len(hex_tokens) >= 8 and all(h == '00' for h in hex_tokens[:8]):
+                    continue
+
                 items.append(self.make_evidence_item(
                     artifact_id=f"malfind_{pid}_{str(uuid.uuid4())[:4]}",
                     evidence_type="injected_code",
