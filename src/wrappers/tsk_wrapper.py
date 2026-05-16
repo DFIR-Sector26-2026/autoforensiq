@@ -17,12 +17,12 @@ class TSKWrapper(BaseWrapper):
             print(f"  [ERROR] Disk image not found: {image_path}")
             return []
 
-        all_items = []
-        all_items.extend(self._run_fls(image_path))
-        all_items.extend(self._run_mactime(image_path))
+        fls_output, fls_items = self._run_fls(image_path)
+        all_items = list(fls_items)
+        all_items.extend(self._run_mactime(fls_output))
         return all_items
 
-    def _run_fls(self, image_path: str) -> list:
+    def _run_fls(self, image_path: str) -> tuple:
         print("  [TSK] Running fls (file listing)...")
         stdout, _, code = self.run_command(
             ["fls", "-r", "-m", "/", image_path],
@@ -33,7 +33,7 @@ class TSKWrapper(BaseWrapper):
         items = []
         if code != 0 or not stdout.strip():
             print("  [TSK] fls produced no output")
-            return items
+            return "", items
 
         for line in stdout.strip().splitlines():
             parts = line.split("|")
@@ -64,27 +64,19 @@ class TSKWrapper(BaseWrapper):
                 continue
 
         print(f"  [TSK] fls → {len(items)} suspicious file items")
-        return items
+        return stdout, items
 
-    def _run_mactime(self, image_path: str) -> list:
+    def _run_mactime(self, fls_output: str) -> list:
         print("  [TSK] Running mactime (timeline)...")
 
-        # step 1: fls output to temp file for mactime
-        fls_stdout, _, code = self.run_command(
-            ["fls", "-r", "-m", "/", image_path],
-            input_files=[image_path],
-            timeout=180
-        )
-
-        if code != 0 or not fls_stdout.strip():
+        if not fls_output:
             return []
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".fls",
                                          delete=False) as tmp:
-            tmp.write(fls_stdout)
+            tmp.write(fls_output)
             tmp_path = tmp.name
 
-        # step 2: run mactime on the fls output
         stdout, _, code = self.run_command(
             ["mactime", "-b", tmp_path, "-d"],
             input_files=[tmp_path],

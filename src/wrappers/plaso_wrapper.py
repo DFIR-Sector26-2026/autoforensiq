@@ -1,8 +1,17 @@
 import os
 import json
+import shutil
 import tempfile
 import csv
 from src.wrappers.base_wrapper import BaseWrapper
+
+
+def _resolve_cmd(preferred: str, fallback: str) -> str:
+    return preferred if shutil.which(preferred) else fallback
+
+
+LOG2TIMELINE = _resolve_cmd("log2timeline.py", "log2timeline")
+PSORT        = _resolve_cmd("psort.py",        "psort")
 
 SUSPICIOUS_SOURCES = [
     "run key",
@@ -34,9 +43,10 @@ class PlasoWrapper(BaseWrapper):
 
         stdout, stderr, code = self.run_command(
             [
-                "log2timeline.py",
+                LOG2TIMELINE,
                 "--status_view",
                 "none",
+                "--storage_file",
                 plaso_dump,
                 source_path
             ],
@@ -64,7 +74,7 @@ class PlasoWrapper(BaseWrapper):
 
         stdout, stderr, code = self.run_command(
             [
-                "psort.py",
+                PSORT,
                 "-o",
                 "l2tcsv",
                 "-w",

@@ -52,5 +52,5 @@ def test_evidence_item_schema_matches():
         schema = json.load(f)
     w = BaseWrapper("schema_test")
     item = w.make_evidence_item("id_001","process","test value")
-    for key in schema.keys():
+    for key in schema["required"]:
         assert key in item, f"Schema field '{key}' missing from evidence_item output"
