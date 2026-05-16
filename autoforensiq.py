@@ -36,6 +36,17 @@ def _ensure_output_dir():
     (ROOT_DIR / "output" / "raw").mkdir(exist_ok=True)
 
 
+def _clear_stale_outputs():
+    raw_dir = ROOT_DIR / "output" / "raw"
+    if raw_dir.exists():
+        for f in raw_dir.glob("*.json"):
+            f.unlink()
+    for name in ("unified_evidence.json", "shap_explanations.json"):
+        stale = ROOT_DIR / "output" / name
+        if stale.exists():
+            stale.unlink()
+
+
 # ─────────────────────────────────────────────────────────────
 # STAGE 1 — CLASSIFIER
 # ─────────────────────────────────────────────────────────────
@@ -125,6 +136,8 @@ def run_orchestrator(execution_plan: dict, evidence_files: dict):
         )
         return {}
 
+    _clear_stale_outputs()
+
     try:
 
         sys.path.insert(0, str(ROOT_DIR))
@@ -151,12 +164,6 @@ def run_aggregator(case_context: dict):
     _stage(4, "Evidence Aggregator", "P4")
 
     unified_path = ROOT_DIR / "output" / "unified_evidence.json"
-
-    if unified_path.exists():
-
-        print("  [LOADED] Using existing unified_evidence.json")
-
-        return _load_json(str(unified_path))
 
     try:
 
@@ -194,12 +201,6 @@ def run_ml_pipeline():
     _stage(5, "Anomaly Detector + XAI Explainer", "P5")
 
     shap_path = ROOT_DIR / "output" / "shap_explanations.json"
-
-    if shap_path.exists():
-
-        print("  [LOADED] Using existing shap_explanations.json")
-
-        return _load_json(str(shap_path))
 
     try:
 
