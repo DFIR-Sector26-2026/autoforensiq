@@ -1,77 +1,121 @@
-import json
-import os
-from datetime import datetime, timezone
+"""
+pipeline.py
+-----------
+Stage 5 of the AutoForensiq pipeline: ML-based anomaly detection.
 
-from .feature_engineering import load_data, create_features
-from .anomaly_detector import train_model, predict
-from .xai_explainer import generate_shap, explain_instance
-from .feature_engineering import FEATURE_NAMES
-from .feature_engineering import FEATURE_NAMES
+Called by autoforensiq.py as:
+
+    shap_explanations = run_ml_pipeline(input_path, output_path, baseline_path)
+
+Contract
+--------
+* ALWAYS returns a dict (never None)
+* ALWAYS writes that same dict to output_path as shap_explanations.json
+* Output dict shape:
+    {
+        "explanations": { "<artifact_id>": { is_anomaly, score,
+                                             confidence, severity, reason } },
+        "summary":      { total_items, anomalies_detected, normal_items },
+        "generated_at": "<ISO-8601 timestamp>"
+    }
+"""
+
+import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Any
+
+from src.ml.feature_engineering import extract_feature_matrix
+from src.ml.anomaly_detector    import AnomalyDetector
+from src.ml.xai_explainer       import explain
+
+log = logging.getLogger(__name__)
+
 
 def run_ml_pipeline(
-    input_path,
-    output_path,
-    baseline_path="data/baseline_normal.json"
-):
+    input_path:    str,
+    output_path:   str,
+    baseline_path: str,
+) -> Dict[str, Any]:
+    """
+    Parameters
+    ----------
+    input_path    : path to unified_evidence.json   (Stage 4 output)
+    output_path   : destination for shap_explanations.json
+    baseline_path : path to baseline_normal.json
 
-    try:
-        # ---------- FILE CHECKS ----------
-        if not os.path.exists(input_path):
-            raise FileNotFoundError(f"Input file not found: {input_path}")
+    Returns
+    -------
+    dict — always; never None.
+    {
+        "explanations": { artifact_id: { is_anomaly, score, confidence,
+                                         severity, reason } },
+        "summary":      { total_items, anomalies_detected, normal_items },
+        "generated_at": "<ISO timestamp>"
+    }
+    """
 
-        if not os.path.exists(baseline_path):
-            raise FileNotFoundError(f"Baseline file not found: {baseline_path}")
+    # ── 1. Load data ──────────────────────────────────────────────────────────
+    log.info("[P5] Loading baseline from %s", baseline_path)
+    baseline_records = json.loads(Path(baseline_path).read_text())
 
-        # ---------- LOAD DATA ----------
-        df = load_data(input_path)
-        baseline_df = load_data(baseline_path)
+    log.info("[P5] Loading evidence from %s", input_path)
+    evidence_records = json.loads(Path(input_path).read_text())
 
-        if df.empty:
-            raise ValueError("Input data is empty")
+    # unified_evidence.json may be wrapped in a top-level object:
+    #   { "evidence_items": [...] }  OR just a plain list
+    if isinstance(evidence_records, dict):
+        evidence_records = (
+            evidence_records.get("evidence_items")
+            or evidence_records.get("items")
+            or []
+        )
 
-        if baseline_df.empty:
-            raise ValueError("Baseline data is empty")
+    # ── 2. Featurise baseline → train model ───────────────────────────────────
+    X_baseline, _ = extract_feature_matrix(baseline_records)
+    detector = AnomalyDetector()
+    detector.fit(X_baseline)
+    log.info("[P5] Model trained on %d baseline records.", len(baseline_records))
 
-        # ---------- FEATURE ENGINEERING ----------
-        X = create_features(df)
-        X_baseline = create_features(baseline_df)
+    # ── 3. Featurise evidence → score ─────────────────────────────────────────
+    X_evidence, _ = extract_feature_matrix(evidence_records)
+    predictions    = detector.predict(X_evidence)
 
-        # ---------- MODEL ----------
-        model = train_model(X_baseline)
-        preds, scores = predict(model, X)
+    # ── 4. Build explanations ─────────────────────────────────────────────────
+    explanations: Dict[str, Any] = {}
+    anomaly_count = 0
 
-        # ---------- EXPLANATIONS ----------
-        shap_values = generate_shap(model, X)
+    for record, pred in zip(evidence_records, predictions):
+        artifact_id = str(record.get("artifact_id", "unknown"))
+        explanation = explain(
+            record     = record,
+            features   = pred["features"],
+            score      = pred["score"],
+            is_anomaly = pred["is_anomaly"],
+            confidence = pred["confidence"],
+        )
+        explanations[artifact_id] = explanation
+        if explanation["is_anomaly"]:
+            anomaly_count += 1
 
-        # ---------- BUILD OUTPUT (DICT) ----------
-        results = {}
+    # ── 5. Assemble output dict ───────────────────────────────────────────────
+    output: Dict[str, Any] = {
+        "explanations": explanations,
+        "summary": {
+            "total_items":        len(evidence_records),
+            "anomalies_detected": anomaly_count,
+            "normal_items":       len(evidence_records) - anomaly_count,
+        },
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
-        for i in range(len(df)):
-            aid = df.iloc[i]["artifact_id"]
+    # ── 6. Persist to output_path (required by autoforensiq.py) ──────────────
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)   # create output/ if needed
+    out.write_text(json.dumps(output, indent=2))
+    log.info("[P5] Results saved → %s  (%d anomalies / %d total)",
+             out, anomaly_count, len(evidence_records))
 
-            results[aid] = {
-                "is_anomaly": bool(preds[i] == -1),
-                "score": float(scores[i]),
-                "feature_weights": dict(
-                    zip(FEATURE_NAMES, [float(v) for v in shap_values[i]])
-                ),
-                "reason": explain_instance(shap_values[i], df.iloc[i])
-            }
-
-        output = {
-            "explanations": results,
-            "generated_at": datetime.now(timezone.utc).isoformat()
-        }
-
-        # ---------- SAVE OUTPUT ----------
-        parent = os.path.dirname(output_path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-
-        with open(output_path, "w") as f:
-            json.dump(output, f, indent=2)
-
-        print("DONE — output saved.")
-
-    except Exception as e:
-        print(f"[ERROR] Pipeline failed: {str(e)}")
+    # ── 7. Always return the dict ─────────────────────────────────────────────
+    return output

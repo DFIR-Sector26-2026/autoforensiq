@@ -1,85 +1,169 @@
-import pandas as pd
-import json
-import math
+"""
+feature_engineering.py
+-----------------------
+Converts both baseline_normal.json and mock_unified_evidence.json into a
+COMMON, fixed-width numeric feature vector.
 
-SEVERITY_MAP = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+Feature vector layout (14 dimensions):
+  [0]  is_system_process      – known Windows system binary
+  [1]  is_suspicious_process  – known malware/LOLBin name
+  [2]  suspicious_parent      – parent is cmd/powershell/wscript etc.
+  [3]  port_is_nonstandard    – port not in {80,443,0}
+  [4]  port_is_known_c2       – port in common C2 list {4444,1337,8888,9999,...}
+  [5]  has_network            – boolean
+  [6]  evidence_is_file       – evidence_type == "file"
+  [7]  evidence_is_network    – evidence_type == "network"
+  [8]  evidence_is_email      – evidence_type == "email"
+  [9]  path_in_temp           – value contains Temp/AppData/Roaming path
+  [10] path_has_exe_in_temp   – .exe dropped in Temp/Downloads
+  [11] keyword_c2_indicator   – value has C2/shell/beacon/reverse keywords
+  [12] keyword_exfil          – value has exfil/upload/POST/data keywords
+  [13] severity_score         – critical=1.0, high=0.75, medium=0.5, low=0.25, none=0.0
+"""
+
+import re
+from typing import Dict, Any, List
+
+# ── Threat intelligence lists ─────────────────────────────────────────────────
+
+SUSPICIOUS_PROCESSES = {
+    "cmd.exe", "powershell.exe", "wscript.exe", "cscript.exe",
+    "mshta.exe", "rundll32.exe", "regsvr32.exe", "certutil.exe",
+    "bitsadmin.exe", "wmic.exe", "psexec.exe", "nc.exe", "ncat.exe",
+    "mimikatz.exe", "procdump.exe", "meterpreter", "beacon.exe",
+    "malware.exe", "payload.exe", "shell.exe", "rat.exe",
+}
+
+SYSTEM_PROCESSES = {
+    "svchost.exe", "lsass.exe", "csrss.exe", "smss.exe", "wininit.exe",
+    "services.exe", "winlogon.exe", "explorer.exe", "taskhostw.exe",
+    "spoolsv.exe", "dwm.exe", "system", "registry",
+}
+
+SUSPICIOUS_PARENTS = {
+    "cmd.exe", "powershell.exe", "wscript.exe", "cscript.exe",
+    "mshta.exe", "python.exe", "python3", "bash", "sh",
+}
+
+KNOWN_C2_PORTS = {
+    4444, 1337, 8888, 9999, 31337, 6666, 12345, 54321,
+    4000, 5555, 7777, 2222, 3333, 6667,
+}
+
+STANDARD_PORTS = {80, 443, 0, 8080, 8443, 53, 22, 21, 25}
+
+SEVERITY_MAP = {
+    "critical": 1.0,
+    "high":     0.75,
+    "medium":   0.50,
+    "low":      0.25,
+    "none":     0.0,
+    "":         0.0,
+}
+
+C2_KEYWORDS = re.compile(
+    r"\b(c2|command.and.control|beacon|reverse.shell|meterpreter|"
+    r"connect.back|bind.shell|netcat|nc\.exe|4444|1337|8888|"
+    r"payload|dropper|implant|rat\b|exeshell)", re.I
+)
+
+EXFIL_KEYWORDS = re.compile(
+    r"\b(exfil|upload|exfiltrat|data.sent|POST|curl|wget|"
+    r"ftp|sftp|transfer|smuggl|tunnel|dns.query)", re.I
+)
+
+TEMP_PATH = re.compile(
+    r"(AppData[\\\/](?:Roaming|Local|Temp)|"
+    r"[\\\/]Temp[\\\/]|[\\\/]tmp[\\\/]|"
+    r"Downloads[\\\/]|ProgramData[\\\/])", re.I
+)
+
+EXE_IN_TEMP = re.compile(
+    r"(Temp|AppData|Downloads|tmp)[\\\/\w]*\.exe", re.I
+)
+
+
+# ── Core extractor ────────────────────────────────────────────────────────────
+
+def extract_features(record: Dict[str, Any]) -> List[float]:
+    """
+    Accept either a baseline record or a unified-evidence record.
+    Always returns a 14-element list of floats in [0, 1].
+    """
+
+    # ── Pull raw fields, tolerating missing keys ──────────────────────────────
+    evidence_type = str(record.get("evidence_type", "")).lower()
+    value         = str(record.get("value", ""))
+    severity_raw  = str(record.get("severity", "")).lower()
+
+    # Baseline fields
+    process_name   = str(record.get("process_name", "")).lower()
+    parent_process = str(record.get("parent_process", "")).lower()
+    port           = int(record.get("port", 0))
+    has_network    = bool(record.get("has_network", False))
+
+    # ── Derive process / parent from value text when evidence record ──────────
+    # e.g. "svchost.exe spawned by cmd.exe" → process=svchost, parent=cmd
+    if not process_name and value:
+        spawned_match = re.search(
+            r"([\w\-]+\.exe)\s+(?:spawned|launched|executed)\s+by\s+([\w\-]+\.exe)",
+            value, re.I
+        )
+        if spawned_match:
+            process_name   = spawned_match.group(1).lower()
+            parent_process = spawned_match.group(2).lower()
+        else:
+            # fallback: first .exe mentioned
+            exe_match = re.findall(r"[\w\-]+\.exe", value, re.I)
+            if exe_match:
+                process_name = exe_match[0].lower()
+
+    # ── Derive port from value text when evidence record ─────────────────────
+    # e.g. "connection to 192.168.1.5:4444"
+    if port == 0 and value:
+        port_match = re.search(r":(\d{2,5})\b", value)
+        if port_match:
+            port = int(port_match.group(1))
+
+    # ── Compute individual features ───────────────────────────────────────────
+    f0  = 1.0 if process_name in SYSTEM_PROCESSES else 0.0
+    f1  = 1.0 if process_name in SUSPICIOUS_PROCESSES else 0.0
+    f2  = 1.0 if parent_process in SUSPICIOUS_PARENTS else 0.0
+    f3  = 0.0 if port in STANDARD_PORTS else (1.0 if port > 0 else 0.0)
+    f4  = 1.0 if port in KNOWN_C2_PORTS else 0.0
+    f5  = 1.0 if has_network or evidence_type == "network" else 0.0
+    f6  = 1.0 if evidence_type == "file" else 0.0
+    f7  = 1.0 if evidence_type == "network" else 0.0
+    f8  = 1.0 if evidence_type == "email" else 0.0
+    f9  = 1.0 if TEMP_PATH.search(value) else 0.0
+    f10 = 1.0 if EXE_IN_TEMP.search(value) else 0.0
+    f11 = 1.0 if C2_KEYWORDS.search(value) else 0.0
+    f12 = 1.0 if EXFIL_KEYWORDS.search(value) else 0.0
+    f13 = SEVERITY_MAP.get(severity_raw, 0.0)
+
+    return [f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13]
+
+
 FEATURE_NAMES = [
-    "high_entropy",
-    "rare_process",
-    "unusual_parent",
-    "parent_mismatch",
-    "port_suspicious",
-    "network_flag",
-    "name_length"
+    "is_system_process",
+    "is_suspicious_process",
+    "suspicious_parent",
+    "port_is_nonstandard",
+    "port_is_known_c2",
+    "has_network",
+    "evidence_is_file",
+    "evidence_is_network",
+    "evidence_is_email",
+    "path_in_temp",
+    "path_has_exe_in_temp",
+    "keyword_c2_indicator",
+    "keyword_exfil",
+    "severity_score",
 ]
 
-def load_data(path):
-    with open(path, 'r') as f:
-        data = json.load(f)
 
-    # -------- HANDLE MULTIPLE SCHEMAS --------
-    if isinstance(data, dict) and "evidence_items" in data:
-        data = data["evidence_items"]
-    elif isinstance(data, dict) and "items" in data:
-        data = data["items"]
-
-    # -------- SAFETY CHECK --------
-    if not isinstance(data, list):
-        raise ValueError("Expected a list of evidence items")
-
-    return pd.DataFrame(data)
-
-
-def entropy(s):
-    if not s:
-        return 0
-    prob = [float(s.count(c)) / len(s) for c in dict.fromkeys(list(s))]
-    return -sum([p * math.log2(p) for p in prob])
-
-
-def create_features(df):
-    df = df.copy()
-
-    # Severity as numeric score
-    df['severity_score'] = df['severity'].apply(
-        lambda x: SEVERITY_MAP.get(str(x).lower(), 1)
-    )
-
-    # Confidence directly
-    df['confidence'] = df['confidence'].astype(float)
-
-    # Entropy of the value string (random-looking values are suspicious)
-    df['value_entropy'] = df['value'].apply(entropy)
-
-    # Whether this item is linked to other artifacts
-    df['has_links'] = df['linked_artifacts'].apply(
-        lambda x: 1 if x else 0
-    )
-
-    # Network-related evidence
-    NETWORK_TYPES = ['network_connection', 'suspicious_url', 'connection']
-    NETWORK_TOOLS = ['tshark', 'browser']
-    df['is_network'] = df.apply(
-        lambda r: 1 if any(t in str(r['evidence_type']).lower() for t in NETWORK_TYPES)
-                     or str(r.get('source_tool', '')).lower() in NETWORK_TOOLS else 0,
-        axis=1
-    )
-
-    # Known suspicious evidence types
-    SUSPICIOUS_TYPES = ['phishing_email', 'suspicious_url', 'malfind', 'suspicious_connection']
-    df['is_suspicious_type'] = df['evidence_type'].apply(
-        lambda x: 1 if any(s in str(x).lower() for s in SUSPICIOUS_TYPES) else 0
-    )
-
-    # Length of value string
-    df['value_length'] = df['value'].apply(len)
-
-    return df[[
-        'severity_score',
-        'confidence',
-        'value_entropy',
-        'has_links',
-        'is_network',
-        'is_suspicious_type',
-        'value_length'
-    ]]
+def extract_feature_matrix(records: List[Dict[str, Any]]):
+    """Return (matrix, feature_names) ready for sklearn."""
+    import numpy as np
+    matrix = np.array([extract_features(r) for r in records], dtype=float)
+    return matrix, FEATURE_NAMES
