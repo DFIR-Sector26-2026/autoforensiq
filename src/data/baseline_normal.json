@@ -19,5 +19,19 @@
     "parent_process": "wininit.exe",
     "port": 443,
     "has_network": false
+  },
+  {
+    "artifact_id": "n4",
+    "process_name": "spotify.exe",
+    "parent_process": "explorer.exe",
+    "port": 80,
+    "has_network": true
+  },
+  {
+    "artifact_id": "n5",
+    "process_name": "code.exe",
+    "parent_process": "explorer.exe",
+    "port": 443,
+    "has_network": true
   }
 ]
