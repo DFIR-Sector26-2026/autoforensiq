@@ -48,6 +48,29 @@ Write a professional forensic report in Markdown.
 
 
 # ─────────────────────────────────────────────────────────────
+# EXPLANATION SHAPE NORMALISER
+# ─────────────────────────────────────────────────────────────
+
+def _iter_explanations(shap_explanations):
+    """Yield (artifact_id, explanation) pairs from the P5 output.
+
+    pipeline.py emits `explanations` as a dict keyed by artifact_id; the
+    error-fallback path in autoforensiq.py emits an empty list. Support both.
+    """
+    explanations = shap_explanations.get("explanations", {})
+
+    if isinstance(explanations, dict):
+        for aid, exp in explanations.items():
+            if isinstance(exp, dict):
+                yield aid, exp
+
+    elif isinstance(explanations, list):
+        for exp in explanations:
+            if isinstance(exp, dict):
+                yield exp.get("artifact_id", ""), exp
+
+
+# ─────────────────────────────────────────────────────────────
 # USER PROMPT BUILDER
 # ─────────────────────────────────────────────────────────────
 
@@ -57,28 +80,11 @@ def _build_user_prompt(
     case_context
 ):
 
-    anomaly_lookup = {}
-
-    explanations = shap_explanations.get(
-        "explanations",
-        []
-    )
-
-    # SAFETY FIX
-    if not isinstance(explanations, list):
-        explanations = []
-
-    for item in explanations:
-
-        # IMPORTANT FIX
-        if not isinstance(item, dict):
-            continue
-
-        if item.get("is_anomaly"):
-
-            anomaly_lookup[
-                item.get("artifact_id", "")
-            ] = item.get("reason", "")
+    anomaly_lookup = {
+        aid: item.get("reason", "")
+        for aid, item in _iter_explanations(shap_explanations)
+        if item.get("is_anomaly")
+    }
 
     priority_items = [
 
@@ -202,28 +208,11 @@ def _mock_report(
     case_context
 ):
 
-    anomaly_lookup = {}
-
-    explanations = shap_explanations.get(
-        "explanations",
-        []
-    )
-
-    # IMPORTANT FIX
-    if not isinstance(explanations, list):
-        explanations = []
-
-    for item in explanations:
-
-        # IMPORTANT FIX
-        if not isinstance(item, dict):
-            continue
-
-        if item.get("is_anomaly"):
-
-            anomaly_lookup[
-                item.get("artifact_id", "")
-            ] = item.get("reason", "")
+    anomaly_lookup = {
+        aid: item.get("reason", "")
+        for aid, item in _iter_explanations(shap_explanations)
+        if item.get("is_anomaly")
+    }
 
     case_type = case_context.get(
         "case_type",
@@ -260,15 +249,7 @@ def _mock_report(
         0
     )
 
-    n_anomalies = 0
-
-    for item in explanations:
-
-        if (
-            isinstance(item, dict)
-            and item.get("is_anomaly")
-        ):
-            n_anomalies += 1
+    n_anomalies = len(anomaly_lookup)
 
     generated = datetime.now(
         timezone.utc
