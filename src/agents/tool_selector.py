@@ -10,6 +10,7 @@ import argparse
 import copy
 import json
 import os
+import shutil
 from typing import Any
 
 
@@ -39,6 +40,51 @@ SUPPORTED_WRAPPER_NAMES = {
     "regripper",
     "plaso",
 }
+
+# How to detect whether each tool's underlying binary is actually installed.
+# Mirrors the commands the P3 wrappers invoke (src/wrappers/*). Each tool maps
+# to a list of REQUIREMENTS; a tool is available only if every requirement is
+# satisfied. A requirement is a list of candidate probes and passes if ANY
+# candidate resolves — a probe is ("which", <exe>) checked on PATH, or
+# ("path", <file>) checked on disk (~ is expanded). An empty list means the
+# tool is pure-Python and always available.
+_TOOL_BINARIES: dict[str, list[list[tuple[str, str]]]] = {
+    # volatility_wrapper calls ./venv/bin/vol; fall back to vol on PATH.
+    "volatility3": [[("path", "./venv/bin/vol"), ("which", "vol")]],
+    "tshark":      [[("which", "tshark")]],          # tshark_wrapper
+    "tsk_fls":     [[("which", "fls")]],             # tsk_wrapper (sleuthkit)
+    # regripper_wrapper runs `perl ~/regripper/rip.pl ...` — needs both.
+    "regripper":   [[("which", "perl")], [("path", "~/regripper/rip.pl")]],
+    # plaso_wrapper resolves either the .py or bare name via shutil.which.
+    "plaso":       [[("which", "log2timeline.py"), ("which", "log2timeline")]],
+    "email":       [],   # email_wrapper — pure Python
+    "browser":     [],   # browser_wrapper — pure Python
+}
+
+
+def _probe(kind: str, target: str) -> bool:
+    """Resolve a single availability probe (PATH lookup or filesystem path)."""
+    if kind == "which":
+        return shutil.which(target) is not None
+    if kind == "path":
+        return os.path.exists(os.path.expanduser(target))
+    return False
+
+
+def check_tool_available(tool_name: str) -> tuple[bool, list[str]]:
+    """Check whether a tool's underlying binary/binaries are installed.
+
+    Returns (available, unmet) where `unmet` lists human-readable descriptions
+    of each unsatisfied requirement (e.g. "log2timeline.py or log2timeline").
+    Unknown tools are treated as available (no probe defined → nothing to fail).
+    """
+    requirements = _TOOL_BINARIES.get(tool_name, [])
+    unmet: list[str] = []
+    for candidates in requirements:
+        if not any(_probe(kind, target) for kind, target in candidates):
+            unmet.append(" or ".join(target for _, target in candidates))
+    return (not unmet, unmet)
+
 
 # Built-in paths for learning and quick testing.
 # Use with: python3 -m src.agents.tool_selector --sample ransomware_all --stdout
@@ -294,6 +340,89 @@ def generate_execution_plan(
     """Generate an execution plan from case context and ontology."""
     selected_tools = select_tools(case_context, ontology)
     return build_execution_plan(selected_tools)
+
+
+def validate_evidence(
+    case_context: dict[str, Any],
+    evidence_files: dict[str, str],
+    ontology: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Pre-flight check: confirm each selected tool has a usable evidence file
+    AND that its underlying binary is installed.
+
+    Selects tools exactly as the planner does, then for each checks two things:
+      1. evidence — at least one input_type present in evidence_files and
+         existing on disk (same gate as the orchestrator, src/orchestrator.py).
+      2. tool — the wrapper's binary is installed (see check_tool_available).
+    A tool is `ready` only when both pass; otherwise it lands in `missing` with
+    every blocking reason recorded.
+
+    Returns a display-ready report for P1's pre-flight panel:
+        {
+          "ok": bool,                       # True when nothing is missing
+          "selected_tools": [<name>, ...],
+          "ready":   [{"tool", "input_type", "path"}, ...],
+          "missing": [{"tool", "required_input_types",
+                       "evidence_present", "tool_installed", "reasons"}, ...],
+        }
+    """
+    if ontology is None:
+        ontology = load_json(DEFAULT_ONTOLOGY_PATH)
+    evidence_files = evidence_files or {}
+
+    selected = select_tools(case_context, ontology)
+    ready: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+
+    for tool in selected:
+        name = tool["name"]
+        input_types = tool.get("input_types", [])
+
+        # Check 1: evidence — one input_type keyed in evidence_files and on disk.
+        match = next(
+            (
+                (itype, evidence_files[itype])
+                for itype in input_types
+                if evidence_files.get(itype) and os.path.exists(evidence_files[itype])
+            ),
+            None,
+        )
+
+        # Check 2: the wrapper's binary is installed.
+        tool_installed, unmet_binaries = check_tool_available(name)
+
+        if match and tool_installed:
+            ready.append({"tool": name, "input_type": match[0], "path": match[1]})
+            continue
+
+        reasons: list[str] = []
+        if not match:
+            # Distinguish "nothing supplied" from "supplied but the path is gone".
+            provided = [itype for itype in input_types if itype in evidence_files]
+            reasons.append(
+                "evidence file not found on disk"
+                if provided
+                else "no matching evidence file provided"
+            )
+        if not tool_installed:
+            reasons.append(f"tool not installed (missing: {', '.join(unmet_binaries)})")
+
+        missing.append(
+            {
+                "tool": name,
+                "required_input_types": input_types,
+                "evidence_present": bool(match),
+                "tool_installed": tool_installed,
+                "reasons": reasons,
+            }
+        )
+
+    return {
+        "ok": not missing,
+        "selected_tools": [tool["name"] for tool in selected],
+        "ready": ready,
+        "missing": missing,
+    }
 
 
 def load_case_context(args: argparse.Namespace) -> dict[str, Any]:
