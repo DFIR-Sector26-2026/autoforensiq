@@ -37,6 +37,32 @@
       },
       "wrapper_status": "implemented"
     },
+
+    {
+      "name": "memprocfs",
+      "domains": ["memory"],
+      "input_types": ["memory_dump"],
+      "output_types": [
+        "memory_artifacts",
+        "memory_analysis_status"
+      ],
+      "case_relevance": {
+        "ransomware": 0.95,
+        "apt_intrusion": 0.95,
+        "data_exfiltration": 0.8,
+        "insider_threat": 0.6,
+        "malware_infection": 0.98,
+        "phishing": 0.4,
+        "unknown": 0.7
+      },
+      "dependencies": [],
+      "default_order": 2,
+      "args_template": {
+        "image": true
+      },
+      "wrapper_status": "implemented_with_graceful_failure_handling"
+    },
+
     {
       "name": "tshark",
       "domains": ["network"],
@@ -63,6 +89,7 @@
       },
       "wrapper_status": "implemented_and_observed_working"
     },
+
     {
       "name": "tsk_fls",
       "domains": ["disk"],
@@ -84,6 +111,7 @@
       },
       "wrapper_status": "implemented_requires_sleuthkit"
     },
+
     {
       "name": "regripper",
       "domains": ["registry"],
@@ -105,6 +133,7 @@
       },
       "wrapper_status": "implemented_requires_regripper_install"
     },
+
     {
       "name": "plaso",
       "domains": ["timeline"],

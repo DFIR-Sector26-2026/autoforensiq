@@ -8,6 +8,7 @@ from src.wrappers.regripper_wrapper import RegRipperWrapper
 from src.wrappers.plaso_wrapper import PlasoWrapper
 from src.wrappers.email_wrapper import EmailWrapper
 from src.wrappers.browser_wrapper import BrowserWrapper
+from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
 
 
 # ─────────────────────────────────────────────────────────────
@@ -16,12 +17,13 @@ from src.wrappers.browser_wrapper import BrowserWrapper
 
 WRAPPER_MAP = {
     "volatility3": VolatilityWrapper,
+    "memprocfs": MemProcFSWrapper,
     "tshark": TsharkWrapper,
     "tsk_fls": TSKWrapper,
     "regripper": RegRipperWrapper,
     "plaso": PlasoWrapper,
     "email": EmailWrapper,
-    "browser": BrowserWrapper
+    "browser": BrowserWrapper,
 }
 
 
@@ -68,6 +70,16 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             )
 
         # ─────────────────────────────────────────
+        # MEMPROCFS — MEMORY FORENSICS
+        # ─────────────────────────────────────────
+
+        elif name == "memprocfs":
+
+            evidence_path = evidence_files.get(
+                "memory_dump"
+            )
+
+        # ─────────────────────────────────────────
         # TSHARK — NETWORK FORENSICS
         # ─────────────────────────────────────────
 
@@ -103,10 +115,9 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
         elif name == "plaso":
 
-            # Better to analyze the entire evidence folder
-            # instead of handmade ext4 image
-
-            evidence_path = evidence_files.get("disk_image")
+            evidence_path = evidence_files.get(
+                "disk_image"
+            )
 
         # ─────────────────────────────────────────
         # EMAIL ANALYSIS
@@ -165,7 +176,6 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
             all_raw_outputs[name] = items
 
-            # CREATE RAW OUTPUT DIR
             os.makedirs(
                 "output/raw",
                 exist_ok=True

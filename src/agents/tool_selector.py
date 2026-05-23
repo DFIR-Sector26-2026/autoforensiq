@@ -38,6 +38,7 @@ SUPPORTED_WRAPPER_NAMES = {
     "tsk_fls",
     "regripper",
     "plaso",
+    "memprocfs",
 }
 
 # Built-in paths for learning and quick testing.

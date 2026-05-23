@@ -15,7 +15,9 @@ PLUGINS = [
 
 
 class ProcessNode:
+
     def __init__(self, pid, ppid, name):
+
         self.pid = pid
         self.ppid = ppid
         self.name = name
@@ -26,6 +28,7 @@ class ProcessNode:
 
 
 def serialize_tree(node):
+
     return {
         "pid": node.pid,
         "ppid": node.ppid,
@@ -71,19 +74,18 @@ SUSPICIOUS_RELATIONSHIPS = {
 class VolatilityWrapper(BaseWrapper):
 
     def __init__(self):
+
         super().__init__("volatility3")
 
     def run(self, image_path: str) -> list:
 
         if not os.path.exists(image_path):
+
             print(f"  [ERROR] Memory image not found: {image_path}")
+
             return []
 
         all_items = []
-
-        # --------------------------------------------------
-        # Try multiple volatility execution methods
-        # --------------------------------------------------
 
         volatility_commands = [
             ["vol"],
@@ -102,18 +104,23 @@ class VolatilityWrapper(BaseWrapper):
             )
 
             if code == 0:
+
                 working_command = base_cmd
                 break
 
         if not working_command:
-            print("  [ERROR] Could not locate working Volatility3 installation")
+
+            print(
+                "  [ERROR] Could not locate "
+                "working Volatility3 installation"
+            )
+
             return []
 
-        print(f"  [VOL] Using command: {' '.join(working_command)}")
-
-        # --------------------------------------------------
-        # Execute plugins
-        # --------------------------------------------------
+        print(
+            f"  [VOL] Using command: "
+            f"{' '.join(working_command)}"
+        )
 
         for plugin in PLUGINS:
 
@@ -130,26 +137,43 @@ class VolatilityWrapper(BaseWrapper):
                 timeout=180
             )
 
-            # DEBUG OUTPUT
             print(f"\n  [DEBUG] Return code: {code}")
 
             if stderr.strip():
-                print(f"\n  [DEBUG] STDERR:\n{stderr[:1000]}")
+
+                print(
+                    f"\n  [DEBUG] STDERR:\n"
+                    f"{stderr[:1000]}"
+                )
 
             if stdout.strip():
-                print(f"\n  [DEBUG] STDOUT:\n{stdout[:1000]}")
+
+                print(
+                    f"\n  [DEBUG] STDOUT:\n"
+                    f"{stdout[:1000]}"
+                )
 
             if code != 0:
+
                 print(f"  [SKIP] {plugin} failed")
+
                 continue
 
             if not stdout.strip():
-                print(f"  [SKIP] {plugin} produced empty output")
+
+                print(
+                    f"  [SKIP] "
+                    f"{plugin} produced empty output"
+                )
+
                 continue
 
             items = self._parse(plugin, stdout)
 
-            print(f"  [VOL] {plugin} → {len(items)} evidence items")
+            print(
+                f"  [VOL] {plugin} → "
+                f"{len(items)} evidence items"
+            )
 
             all_items.extend(items)
 
@@ -162,25 +186,29 @@ class VolatilityWrapper(BaseWrapper):
             if l.strip()
         ]
 
-        data_lines = lines
-
         if plugin == "windows.pslist":
-            return self._parse_pslist(data_lines)
+
+            return self._parse_pslist(lines)
 
         elif plugin == "windows.pstree":
-            return self._parse_pstree(data_lines)
+
+            return self._parse_pstree(lines)
 
         elif plugin == "windows.cmdline":
-            return self._parse_cmdline(data_lines)
+
+            return self._parse_cmdline(lines)
 
         elif plugin == "windows.netstat":
-            return self._parse_netstat(data_lines)
+
+            return self._parse_netstat(lines)
 
         elif plugin == "windows.malfind":
-            return self._parse_malfind(data_lines)
+
+            return self._parse_malfind(lines)
 
         elif plugin == "windows.dlllist":
-            return self._parse_dlllist(data_lines)
+
+            return self._parse_dlllist(lines)
 
         return []
 
@@ -190,15 +218,22 @@ class VolatilityWrapper(BaseWrapper):
 
         for line in lines:
 
+            if (
+                "Volatility 3 Framework" in line or
+                ("PID" in line and "PPID" in line)
+            ):
+                continue
+
             parts = line.split()
 
             if len(parts) < 3:
                 continue
 
             try:
-                pid = parts[1]
-                ppid = parts[2]
-                name = parts[0]
+
+                pid = parts[0]
+                ppid = parts[1]
+                name = parts[2]
 
                 safe_name = (
                     name.lower()
@@ -236,21 +271,26 @@ class VolatilityWrapper(BaseWrapper):
 
         processes = {}
 
-        # --------------------------------------------------
-        # Parse Process Nodes
-        # --------------------------------------------------
-
         for line in lines:
 
-            parts = line.split()
+            if (
+                "Volatility 3 Framework" in line or
+                ("PID" in line and "PPID" in line)
+            ):
+                continue
+
+            clean = line.replace("*", "").strip()
+
+            parts = clean.split()
 
             if len(parts) < 3:
                 continue
 
             try:
-                name = parts[0].lstrip("*. ")
-                pid = int(parts[1])
-                ppid = int(parts[2])
+
+                pid = int(parts[0])
+                ppid = int(parts[1])
+                name = parts[2]
 
                 node = ProcessNode(pid, ppid, name)
 
@@ -258,10 +298,6 @@ class VolatilityWrapper(BaseWrapper):
 
             except Exception:
                 continue
-
-        # --------------------------------------------------
-        # Build Relationships
-        # --------------------------------------------------
 
         relation_items = []
 
@@ -278,7 +314,6 @@ class VolatilityWrapper(BaseWrapper):
                     proc.name.lower()
                 )
 
-                # Suspicious lineage detection
                 if pair in SUSPICIOUS_RELATIONSHIPS:
 
                     proc.suspicious = True
@@ -308,10 +343,6 @@ class VolatilityWrapper(BaseWrapper):
                         )
                     )
 
-        # --------------------------------------------------
-        # Find Root Processes
-        # --------------------------------------------------
-
         roots = []
 
         for proc in processes.values():
@@ -319,19 +350,20 @@ class VolatilityWrapper(BaseWrapper):
             if proc.ppid not in processes:
                 roots.append(proc)
 
-        # --------------------------------------------------
-        # Create Recursive Tree Evidence
-        # --------------------------------------------------
-
         tree_items = []
 
         for root in roots:
+
+            serialized_tree = serialize_tree(root)
 
             tree_items.append(
                 self.make_evidence_item(
                     artifact_id=f"process_tree_{root.pid}",
                     evidence_type="process_tree",
-                    value=serialize_tree(root),
+                    value=json.dumps(
+                        serialized_tree,
+                        indent=2
+                    ),
                     severity="medium",
                     confidence=0.95,
                     linked_artifacts=[]
@@ -362,7 +394,10 @@ class VolatilityWrapper(BaseWrapper):
 
             lower = line.lower()
 
-            if any(kw in lower for kw in suspicious_keywords):
+            if any(
+                kw in lower
+                for kw in suspicious_keywords
+            ):
 
                 parts = line.split()
 
@@ -390,33 +425,26 @@ class VolatilityWrapper(BaseWrapper):
 
         for line in lines:
 
+            if (
+                "Volatility 3 Framework" in line or
+                "Offset" in line
+            ):
+                continue
+
             parts = line.split()
 
-            if len(parts) < 4:
+            if len(parts) < 8:
                 continue
 
             try:
-                proto = parts[0]
-                local = parts[1]
-                foreign = parts[2]
 
-                state = (
-                    parts[3]
-                    if len(parts) > 3
-                    else ""
-                )
+                proto = parts[1]
+                local = f"{parts[2]}:{parts[3]}"
+                foreign = f"{parts[4]}:{parts[5]}"
+                state = parts[6]
+                pid = parts[7]
 
-                pid = (
-                    parts[-1]
-                    if parts[-1].isdigit()
-                    else "unknown"
-                )
-
-                port = (
-                    int(foreign.split(":")[-1])
-                    if ":" in foreign
-                    else 0
-                )
+                port = int(parts[5])
 
                 severity = (
                     "high"
@@ -424,28 +452,22 @@ class VolatilityWrapper(BaseWrapper):
                     else "medium"
                 )
 
-                if foreign not in [
-                    "0.0.0.0:0",
-                    "*:*",
-                    ":::*"
-                ]:
-
-                    items.append(
-                        self.make_evidence_item(
-                            artifact_id=f"net_{pid}_{port}",
-                            evidence_type="network_connection",
-                            value=(
-                                f"{proto} "
-                                f"{local} → {foreign} "
-                                f"[{state}] PID:{pid}"
-                            ),
-                            severity=severity,
-                            confidence=0.80,
-                            linked_artifacts=[
-                                f"proc_{pid}"
-                            ]
-                        )
+                items.append(
+                    self.make_evidence_item(
+                        artifact_id=f"net_{pid}_{port}",
+                        evidence_type="network_connection",
+                        value=(
+                            f"{proto} "
+                            f"{local} -> {foreign} "
+                            f"[{state}] PID:{pid}"
+                        ),
+                        severity=severity,
+                        confidence=0.80,
+                        linked_artifacts=[
+                            f"proc_{pid}"
+                        ]
                     )
+                )
 
             except Exception:
                 continue
@@ -460,34 +482,31 @@ class VolatilityWrapper(BaseWrapper):
 
         for line in lines:
 
+            if (
+                "Volatility 3 Framework" in line or
+                ("PID" in line and "Process" in line) or
+                "Disasm" in line
+            ):
+                continue
+
             parts = line.split()
 
             if len(parts) < 2:
                 continue
 
+            if not parts[0].isdigit():
+                continue
+
+            if len(parts) < 2:
+                continue
+
+            if ".exe" not in parts[1].lower():
+                continue
+
             try:
-                pid = (
-                    parts[1]
-                    if parts[1].isdigit()
-                    else "unknown"
-                )
 
-                name = parts[0]
-
-                hex_tokens = [
-                    p for p in parts
-                    if len(p) == 2 and all(
-                        c in '0123456789abcdefABCDEF'
-                        for c in p
-                    )
-                ]
-
-                # Ignore null-byte regions
-                if (
-                    len(hex_tokens) >= 8 and
-                    all(h == '00' for h in hex_tokens[:8])
-                ):
-                    continue
+                pid = parts[0]
+                name = parts[1]
 
                 if pid not in grouped_regions:
 
@@ -501,7 +520,6 @@ class VolatilityWrapper(BaseWrapper):
             except Exception:
                 continue
 
-        # Aggregate suspicious regions
         for pid, info in grouped_regions.items():
 
             items.append(
@@ -512,8 +530,7 @@ class VolatilityWrapper(BaseWrapper):
                         f"Injected memory regions "
                         f"detected in "
                         f"{info['name']} "
-                        f"(PID:{pid}) — "
-                        f"{info['count']} suspicious regions"
+                        f"(PID:{pid})"
                     ),
                     severity="critical",
                     confidence=0.92
@@ -583,7 +600,7 @@ if __name__ == "__main__":
     os.makedirs("output/raw", exist_ok=True)
 
     with open(
-        "output/raw/volatility_output.json",
+        "output/raw/volatility3_output.json",
         "w"
     ) as f:
 
@@ -592,5 +609,5 @@ if __name__ == "__main__":
     print(
         f"\n[DONE] {len(items)} "
         f"evidence items saved to "
-        f"output/raw/volatility_output.json"
+        f"output/raw/volatility3_output.json"
     )
