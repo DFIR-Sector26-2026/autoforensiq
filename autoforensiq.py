@@ -379,94 +379,61 @@ def _map_evidence_files(paths: list):
 
 
 # ─────────────────────────────────────────────────────────────
-# MAIN
+# PRE-FLIGHT CHECK
 # ─────────────────────────────────────────────────────────────
 
-def main(args=None):
+# Maps each forensic tool name → the evidence key it requires
+_TOOL_EVIDENCE_MAP = {
+    "volatility3": "memory_dump",
+    "tshark":      "pcap",
+    "tsk_fls":     "disk_image",
+    "regripper":   "registry_hive",
+    "plaso":       "log_files",
+    "email":       "email",
+    "browser":     "browser",
+}
 
-    if args is None:
-        args = parse_args()
+_TOOL_DISPLAY = {
+    "volatility3": "Volatility3       (memory analysis)",
+    "tshark":      "tshark            (network capture analysis)",
+    "tsk_fls":     "The Sleuth Kit    (disk image analysis)",
+    "regripper":   "RegRipper         (registry hive analysis)",
+    "plaso":       "Plaso             (log / event-log timeline)",
+    "email":       "Email analyzer    (email artifact analysis)",
+    "browser":     "Browser analyzer  (browser history analysis)",
+}
 
-    print("\n" + "=" * 60)
-    print("  AutoForensiq — Autonomous Forensics Pipeline")
-    print("=" * 60)
-
-    print(f"  Report:   {args.report}")
-    print(f"  Evidence: {args.evidence or 'none'}")
-    print(f"  Tools:    {', '.join(args.tools) if args.tools else 'all (DTSA)'}")
-    print(f"  Mock LLM: {args.mock}")
-
-    _ensure_output_dir()
-
-    os.chdir(ROOT_DIR)
-
-    # STAGE 1
-    case_context = run_classifier(args.report)
-
-    if args.skip_tools:
-
-        print("\n[SKIP] --skip-tools enabled")
-
-        return
-
-    # STAGE 2
-    execution_plan = run_tool_selector(case_context)
-
-    # Filter tools if --tools was specified
-    if args.tools:
-        allowed = set(args.tools)
-        execution_plan["tools"] = [
-            t for t in execution_plan["tools"] if t["name"] in allowed
-        ]
-        for i, t in enumerate(execution_plan["tools"], 1):
-            t["order"] = i
-        print(f"  [FILTER] Restricted to tools: {', '.join(args.tools)}")
-
-    # STAGE 3
-    evidence_files = _map_evidence_files(args.evidence)
-
-    if evidence_files:
-        priority_list = [
-            f"#{i + 1} {k}" for i, k in enumerate(evidence_files)
-        ]
-        print(f"  [PRIORITY] {' → '.join(priority_list)}")
-
-    raw_outputs = run_orchestrator(
-        execution_plan,
-        evidence_files
-    )
-
-    # STAGE 4
-    unified_evidence = run_aggregator(case_context)
-
-    # STAGE 5/6
-    shap_explanations = run_ml_pipeline()
-
-    # STAGE 7
-    run_report_generator(
-        unified_evidence,
-        shap_explanations,
-        case_context
-    )
-
-    print("\n" + "=" * 60)
-    print("  PIPELINE COMPLETE")
-    print("=" * 60)
-
-    print(f"  case_type  : {case_context['case_type']}")
-    print(f"  confidence : {case_context['classifier_confidence']}")
-    print(f"  artifacts  : {', '.join(case_context['artifact_types'])}")
-
-    print("  output/    : final_report.md")
-
-    print("=" * 60 + "\n")
+_ACQUIRE_HINT = {
+    "memory_dump":    "Acquire a memory dump (.dmp / .mem) using WinPmem, DumpIt, or LiME.",
+    "pcap":           "Capture network traffic (.pcap) via Wireshark or tcpdump.",
+    "disk_image":     "Acquire a disk image (.img / .dd / .e01) using FTK Imager or dd.",
+    "registry_hive":  "Export registry hives (NTUSER.DAT / SYSTEM / SOFTWARE) from the affected host.",
+    "log_files":      "Export Windows event logs (.evtx) via Event Viewer or wevtutil.",
+    "email":          "Export email artifacts (.eml / .msg) from the affected mail client.",
+    "browser":        "Export browser History files from the user profile directory.",
+}
 
 
-if __name__ == "__main__":
-    args = parse_args()
-    if args.gui or args.report is None:
-        from src.gui.launcher import AutoForensiqGUI
-        app = AutoForensiqGUI()
-        app.mainloop()
-    else:
-        main(args)
+def preflight_check(evidence_files: dict, execution_plan: dict):
+    """
+    Print a pre-flight summary of which tools will run and which will be
+    skipped based on the evidence files that were supplied.
+
+    For each skipped tool a one-line acquisition hint is printed so the
+    investigator knows exactly what to collect to enable full coverage.
+    """
+    print("\n" + "─" * 60)
+    print("  PRE-FLIGHT CHECK")
+    print("─" * 60)
+
+    tools_in_plan = [t["name"] for t in execution_plan.get("tools", [])]
+
+    will_run  = []
+    will_skip = []
+
+    for tool in tools_in_plan:
+        required_ev = _TOOL_EVIDENCE_MAP.get(tool)
+        if required_ev is None or required_ev in evidence_files:
+            will_run.append(tool)
+        else:
+            will_skip.append((tool, required_ev))
