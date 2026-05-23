@@ -342,33 +342,31 @@ def generate_execution_plan(
     return build_execution_plan(selected_tools)
 
 
-def validate_evidence(
+def validate_tools(
     case_context: dict[str, Any],
-    evidence_files: dict[str, str],
     ontology: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Pre-flight check: confirm each selected tool has a usable evidence file
-    AND that its underlying binary is installed.
+    """Pre-flight check: confirm each selected tool's binary is installed.
 
-    Selects tools exactly as the planner does, then for each checks two things:
-      1. evidence — at least one input_type present in evidence_files and
-         existing on disk (same gate as the orchestrator, src/orchestrator.py).
-      2. tool — the wrapper's binary is installed (see check_tool_available).
-    A tool is `ready` only when both pass; otherwise it lands in `missing` with
-    every blocking reason recorded.
+    Selects tools exactly as the planner does, then checks each tool's
+    underlying binary via check_tool_available().
+
+    Missing *evidence files* are intentionally NOT checked here: the P3
+    orchestrator already skips any tool with no input file
+    (src/orchestrator.py), so the pipeline does what it can with whatever
+    evidence is provided. This pre-flight only catches the gap P3 doesn't —
+    a selected tool whose binary is not installed at all.
 
     Returns a display-ready report for P1's pre-flight panel:
         {
-          "ok": bool,                       # True when nothing is missing
+          "ok": bool,                       # True when every selected tool is runnable
           "selected_tools": [<name>, ...],
-          "ready":   [{"tool", "input_type", "path"}, ...],
-          "missing": [{"tool", "required_input_types",
-                       "evidence_present", "tool_installed", "reasons"}, ...],
+          "ready":   [{"tool"}, ...],
+          "missing": [{"tool", "reason"}, ...],
         }
     """
     if ontology is None:
         ontology = load_json(DEFAULT_ONTOLOGY_PATH)
-    evidence_files = evidence_files or {}
 
     selected = select_tools(case_context, ontology)
     ready: list[dict[str, Any]] = []
@@ -376,46 +374,16 @@ def validate_evidence(
 
     for tool in selected:
         name = tool["name"]
-        input_types = tool.get("input_types", [])
-
-        # Check 1: evidence — one input_type keyed in evidence_files and on disk.
-        match = next(
-            (
-                (itype, evidence_files[itype])
-                for itype in input_types
-                if evidence_files.get(itype) and os.path.exists(evidence_files[itype])
-            ),
-            None,
-        )
-
-        # Check 2: the wrapper's binary is installed.
-        tool_installed, unmet_binaries = check_tool_available(name)
-
-        if match and tool_installed:
-            ready.append({"tool": name, "input_type": match[0], "path": match[1]})
-            continue
-
-        reasons: list[str] = []
-        if not match:
-            # Distinguish "nothing supplied" from "supplied but the path is gone".
-            provided = [itype for itype in input_types if itype in evidence_files]
-            reasons.append(
-                "evidence file not found on disk"
-                if provided
-                else "no matching evidence file provided"
+        installed, unmet_binaries = check_tool_available(name)
+        if installed:
+            ready.append({"tool": name})
+        else:
+            missing.append(
+                {
+                    "tool": name,
+                    "reason": f"tool not installed (missing: {', '.join(unmet_binaries)})",
+                }
             )
-        if not tool_installed:
-            reasons.append(f"tool not installed (missing: {', '.join(unmet_binaries)})")
-
-        missing.append(
-            {
-                "tool": name,
-                "required_input_types": input_types,
-                "evidence_present": bool(match),
-                "tool_installed": tool_installed,
-                "reasons": reasons,
-            }
-        )
 
     return {
         "ok": not missing,
