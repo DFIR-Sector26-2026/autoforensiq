@@ -312,6 +312,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--bulk-manifest",
+        default=None,
+        help=("Path to a JSON manifest describing multiple machine raw output locations. "
+              "If provided, runs bulk aggregation and exits.")
+    )
+
+    parser.add_argument(
         "--skip-tools",
         action="store_true"
     )
@@ -397,6 +404,33 @@ def main(args=None):
     print(f"  Mock LLM: {args.mock}")
 
     _ensure_output_dir()
+
+    # If bulk manifest provided, run bulk aggregation and exit early
+    if args.bulk_manifest:
+        print(f"\n[BULK] Loading manifest: {args.bulk_manifest}")
+        try:
+            with open(args.bulk_manifest) as f:
+                manifest = json.load(f)
+        except Exception as exc:
+            print(f"  [ERROR] Failed to load bulk manifest: {exc}")
+            return
+
+        # manifest expected to be { "machines": { name: { raw_outputs_dir, case_context, output_path? } } }
+        machine_runs = manifest.get("machines") or manifest
+
+        try:
+            sys.path.insert(0, str(ROOT_DIR))
+            from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
+
+            summary = aggregate_bulk_evidence(machine_runs, output_root=str(ROOT_DIR / "output" / "bulk"))
+            summary_path = ROOT_DIR / "output" / "bulk_summary.json"
+            with open(summary_path, "w") as f:
+                json.dump(summary, f, indent=2)
+            print(f"  [BULK] Summary written → {summary_path}")
+            return
+        except Exception as exc:
+            print(f"  [ERROR] Bulk aggregation failed: {exc}")
+            return
 
     os.chdir(ROOT_DIR)
 
