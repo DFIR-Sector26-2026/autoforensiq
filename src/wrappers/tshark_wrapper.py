@@ -66,7 +66,7 @@ class TsharkWrapper(BaseWrapper):
                 severity = "high" if port in SUSPICIOUS_PORTS else "low"
                 ts = str(agg["first_ts"]) if agg.get("first_ts") is not None else ""
                 items.append(self.make_evidence_item(
-                    artifact_id=f"conn_{src.replace('.','_')}_{dport}",
+                    artifact_id=f"conn_{src.replace('.','_')}_{dst.replace('.','_')}_{dport}_{int(agg['first_ts'])}",
                     evidence_type="network_connection",
                     value=f"TCP {src} → {dst}:{dport} ({agg['bytes']} bytes, {agg['packets']} packets)",
                     severity=severity,

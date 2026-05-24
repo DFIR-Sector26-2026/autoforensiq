@@ -715,7 +715,7 @@ def aggregate_evidence(
     # Step 6: Build correlations and indices
     annotated_items, findings = build_correlations(sorted_items, signals_by_artifact)
     exfiltration_findings = [finding for finding in findings if finding.get("correlation_type") == "exfiltration"]
-    indices = build_indices(sorted_items)
+    indices = build_indices(annotated_items)
 
     # Step 7: Build unified_evidence output
     unified = {
