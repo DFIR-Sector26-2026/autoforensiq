@@ -10,19 +10,29 @@ from src.wrappers.email_wrapper import EmailWrapper
 from src.wrappers.browser_wrapper import BrowserWrapper
 from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
 
+from src.ioc.ioc_engine import extract_iocs
+
 
 # ─────────────────────────────────────────────────────────────
 # WRAPPER MAP
 # ─────────────────────────────────────────────────────────────
 
 WRAPPER_MAP = {
+
     "volatility3": VolatilityWrapper,
+
     "memprocfs": MemProcFSWrapper,
+
     "tshark": TsharkWrapper,
+
     "tsk_fls": TSKWrapper,
+
     "regripper": RegRipperWrapper,
+
     "plaso": PlasoWrapper,
+
     "email": EmailWrapper,
+
     "browser": BrowserWrapper,
 }
 
@@ -40,6 +50,12 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
     all_raw_outputs = {}
 
+    merged_items = []
+
+    # ─────────────────────────────────────────
+    # EXECUTE TOOLS
+    # ─────────────────────────────────────────
+
     for tool_spec in tools:
 
         name = tool_spec["name"]
@@ -48,7 +64,10 @@ def run_tools(execution_plan: dict, evidence_files: dict):
         print(f"  Running: {name}")
         print(f"{'=' * 50}")
 
+        # ─────────────────────────────────────────
         # UNKNOWN TOOL
+        # ─────────────────────────────────────────
+
         if name not in WRAPPER_MAP:
 
             print(f"  [SKIP] No wrapper found for: {name}")
@@ -60,27 +79,17 @@ def run_tools(execution_plan: dict, evidence_files: dict):
         evidence_path = None
 
         # ─────────────────────────────────────────
-        # VOLATILITY — MEMORY FORENSICS
+        # MEMORY FORENSICS
         # ─────────────────────────────────────────
 
-        if name == "volatility3":
+        if name in ["volatility3", "memprocfs"]:
 
             evidence_path = evidence_files.get(
                 "memory_dump"
             )
 
         # ─────────────────────────────────────────
-        # MEMPROCFS — MEMORY FORENSICS
-        # ─────────────────────────────────────────
-
-        elif name == "memprocfs":
-
-            evidence_path = evidence_files.get(
-                "memory_dump"
-            )
-
-        # ─────────────────────────────────────────
-        # TSHARK — NETWORK FORENSICS
+        # NETWORK FORENSICS
         # ─────────────────────────────────────────
 
         elif name == "tshark":
@@ -90,7 +99,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             )
 
         # ─────────────────────────────────────────
-        # TSK / SLEUTHKIT — DISK FORENSICS
+        # DISK FORENSICS
         # ─────────────────────────────────────────
 
         elif name == "tsk_fls":
@@ -100,7 +109,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             )
 
         # ─────────────────────────────────────────
-        # REGRIPPER — REGISTRY FORENSICS
+        # REGISTRY FORENSICS
         # ─────────────────────────────────────────
 
         elif name == "regripper":
@@ -110,7 +119,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             )
 
         # ─────────────────────────────────────────
-        # PLASO — TIMELINE ANALYSIS
+        # TIMELINE ANALYSIS
         # ─────────────────────────────────────────
 
         elif name == "plaso":
@@ -172,9 +181,16 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             items = wrapper.run(evidence_path)
 
             if items is None:
+
                 items = []
 
             all_raw_outputs[name] = items
+
+            merged_items.extend(items)
+
+            # ─────────────────────────────────────
+            # SAVE RAW TOOL OUTPUT
+            # ─────────────────────────────────────
 
             os.makedirs(
                 "output/raw",
@@ -207,6 +223,76 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             )
 
             all_raw_outputs[name] = []
+
+    # ─────────────────────────────────────────
+    # IOC EXTRACTION
+    # ─────────────────────────────────────────
+
+    print(f"\n{'=' * 50}")
+    print("  IOC EXTRACTION")
+    print(f"{'=' * 50}")
+
+    ioc_items = extract_iocs(
+        merged_items
+    )
+
+    print(
+        f"  [IOC] Extracted {len(ioc_items)} IOC items"
+    )
+
+    merged_items.extend(
+        ioc_items
+    )
+    # ─────────────────────────────────────
+    # SAVE IOC RAW OUTPUT
+    # ─────────────────────────────────────
+
+    os.makedirs(
+        "output/raw",
+        exist_ok=True
+    )
+
+    with open(
+        "output/raw/ioc_output.json",
+        "w"
+    ) as f:
+
+        json.dump(
+            {
+                "tool": "ioc_engine",
+                "items": ioc_items
+            },
+            f,
+            indent=2
+        )
+
+    print(
+        f"  [SAVED] {len(ioc_items)} IOC items → output/raw/ioc_output.json"
+    )
+
+    # ─────────────────────────────────────────
+    # SAVE UNIFIED EVIDENCE
+    # ─────────────────────────────────────────
+
+    os.makedirs(
+        "output",
+        exist_ok=True
+    )
+
+    with open(
+        "output/unified_evidence.json",
+        "w"
+    ) as f:
+
+        json.dump(
+            merged_items,
+            f,
+            indent=2
+        )
+
+    print(
+        f"\n[MERGE] {len(merged_items)} total evidence items saved"
+    )
 
     return all_raw_outputs
 
