@@ -449,6 +449,14 @@ def main(args=None):
         case_context
     )
 
+    # Dev convenience: one HTML page with every output artifact (auto-opens).
+    try:
+        from src.utils.dev_report import generate_dev_report
+        html_path = generate_dev_report(ROOT_DIR / "output")
+        print(f"  [DEV] HTML report → {html_path}")
+    except Exception as e:  # never let the dev report break the pipeline
+        print(f"  [DEV] HTML report skipped: {e}")
+
     print("\n" + "=" * 60)
     print("  PIPELINE COMPLETE")
     print("=" * 60)
