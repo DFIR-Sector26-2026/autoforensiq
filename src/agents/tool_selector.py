@@ -39,6 +39,7 @@ SUPPORTED_WRAPPER_NAMES = {
     "tsk_fls",
     "regripper",
     "plaso",
+    "memprocfs",
 }
 
 # How to detect whether each tool's underlying binary is actually installed.
