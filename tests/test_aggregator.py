@@ -11,6 +11,7 @@ from src.aggregator.evidence_aggregator import (
     aggregate_evidence,
     load_raw_outputs
 )
+from autoforensiq import run_bulk_aggregation
 
 
 def test_deduplicate_removes_duplicates():
@@ -111,14 +112,170 @@ def test_aggregate_evidence_preserves_provenance():
         )
         
         assert result["total_items"] == 2
-        assert "volatility" in result["tools_aggregated"]
+        assert "volatility3" in result["tools_aggregated"]
         assert "tshark" in result["tools_aggregated"]
-        assert len(result["evidence_by_tool"]["volatility"]) == 1
+        assert len(result["evidence_by_tool"]["volatility3"]) == 1
         assert len(result["evidence_by_tool"]["tshark"]) == 1
         
         # Check that provenance is maintained
         for item in result["evidence_items"]:
-            assert item["source_tool"] in ["volatility", "tshark"]
+            assert item["source_tool"] in ["volatility3", "tshark"]
+
+
+def test_aggregate_evidence_builds_correlations_and_exfiltration():
+    """Test that cross-tool correlations and the exfiltration rule are emitted."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        raw_dir = os.path.join(tmpdir, "raw")
+        os.makedirs(raw_dir)
+
+        vol_output = {
+            "tool": "volatility3",
+            "items": [
+                {
+                    "artifact_id": "proc_4321_powershell_exe",
+                    "source_tool": "volatility3",
+                    "evidence_type": "process",
+                    "value": "powershell.exe (PID:4321 PPID:100)",
+                    "severity": "high",
+                    "confidence": 0.9,
+                    "timestamp": "2026-05-08T12:00:00Z",
+                    "linked_artifacts": [],
+                },
+                {
+                    "artifact_id": "proc_tree_4321",
+                    "source_tool": "volatility3",
+                    "evidence_type": "process_tree",
+                    "value": "Suspicious parent-child: powershell.exe (PID:4321) under PPID:100",
+                    "severity": "high",
+                    "confidence": 0.85,
+                    "timestamp": "2026-05-08T12:00:00Z",
+                    "linked_artifacts": [],
+                },
+            ],
+        }
+        tshark_output = {
+            "tool": "tshark",
+            "items": [
+                {
+                    "artifact_id": "net_4321_4444",
+                    "source_tool": "tshark",
+                    "evidence_type": "network_connection",
+                    "value": "TCP 10.0.0.5 → 185.220.101.47:4444 (1500000 bytes, 12 packets)",
+                    "severity": "high",
+                    "confidence": 0.8,
+                    "timestamp": "2026-05-08T12:05:00Z",
+                    "linked_artifacts": ["proc_4321_powershell_exe"],
+                },
+            ],
+        }
+        tsk_output = {
+            "tool": "tsk_fls",
+            "items": [
+                {
+                    "artifact_id": "timeline_payload",
+                    "source_tool": "tsk_fls",
+                    "evidence_type": "timeline_event",
+                    "value": "[2026-05-08T12:01:00Z] modified → C:/Users/admin/AppData/Temp/payload.exe",
+                    "severity": "medium",
+                    "confidence": 0.7,
+                    "timestamp": "2026-05-08T12:01:00Z",
+                    "linked_artifacts": [],
+                },
+                {
+                    "artifact_id": "file_payload",
+                    "source_tool": "tsk_fls",
+                    "evidence_type": "file_artifact",
+                    "value": "Suspicious file: C:/Users/admin/AppData/Temp/payload.exe",
+                    "severity": "medium",
+                    "confidence": 0.75,
+                    "timestamp": "2026-05-08T12:01:00Z",
+                    "linked_artifacts": [],
+                },
+            ],
+        }
+
+        with open(os.path.join(raw_dir, "volatility_output.json"), "w") as f:
+            json.dump(vol_output, f)
+        with open(os.path.join(raw_dir, "tshark_output.json"), "w") as f:
+            json.dump(tshark_output, f)
+        with open(os.path.join(raw_dir, "tsk_output.json"), "w") as f:
+            json.dump(tsk_output, f)
+
+        case_context = {
+            "case_id": "test_case_789",
+            "affected_systems": ["WIN-ACCT-033"],
+        }
+        result = aggregate_evidence(
+            case_context=case_context,
+            raw_outputs_dir=raw_dir,
+            output_path=os.path.join(tmpdir, "unified.json")
+        )
+
+        assert result["total_items"] == 5
+        assert result["evidence_by_machine"]["WIN-ACCT-033"]
+        assert any(f["correlation_type"] == "same_pid" for f in result["findings"])
+        assert any(f["correlation_type"] == "exfiltration" for f in result["exfiltration_findings"])
+        assert any(item.get("correlations") for item in result["evidence_items"])
+        exfil = next(f for f in result["exfiltration_findings"] if f["correlation_type"] == "exfiltration")
+        assert exfil["file"].endswith("payload.exe")
+        assert exfil["destination"] == "185.220.101.47:4444"
+        assert exfil["bytes_transferred"] == 1500000
+
+
+def test_run_bulk_aggregation_writes_summary():
+    """Test that the CLI bulk helper aggregates multiple machine bundles."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        machine_a_raw = os.path.join(tmpdir, "machine_a", "raw")
+        machine_b_raw = os.path.join(tmpdir, "machine_b", "raw")
+        output_root = os.path.join(tmpdir, "bulk_output")
+        summary_path = os.path.join(tmpdir, "bulk_summary.json")
+        os.makedirs(machine_a_raw)
+        os.makedirs(machine_b_raw)
+
+        shared_item = {
+            "artifact_id": "proc_shared",
+            "source_tool": "volatility3",
+            "evidence_type": "process",
+            "value": "powershell.exe (PID:9001 PPID:100)",
+            "severity": "high",
+            "confidence": 0.9,
+            "timestamp": "2026-05-08T12:00:00Z",
+            "linked_artifacts": [],
+        }
+
+        with open(os.path.join(machine_a_raw, "volatility_output.json"), "w") as f:
+            json.dump({"tool": "volatility3", "items": [shared_item]}, f)
+
+        with open(os.path.join(machine_b_raw, "volatility_output.json"), "w") as f:
+            json.dump({"tool": "volatility3", "items": [shared_item]}, f)
+
+        manifest = {
+            "output_root": output_root,
+            "summary_path": summary_path,
+            "machines": [
+                {
+                    "machine_name": "machine_a",
+                    "raw_outputs_dir": machine_a_raw,
+                    "case_context": {"case_id": "case-a", "affected_systems": ["machine-a"]},
+                },
+                {
+                    "machine_name": "machine_b",
+                    "raw_outputs_dir": machine_b_raw,
+                    "case_context": {"case_id": "case-b", "affected_systems": ["machine-b"]},
+                },
+            ],
+        }
+
+        manifest_path = os.path.join(tmpdir, "bulk_manifest.json")
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f)
+
+        result = run_bulk_aggregation(manifest_path)
+
+        assert os.path.exists(summary_path)
+        assert result["bulk_summary"]["total_items"] == 2
+        assert len(result["bulk_summary"]["machines"]) == 2
+        assert result["bulk_summary"]["machines"][0]["findings"] >= 0
 
 
 if __name__ == "__main__":

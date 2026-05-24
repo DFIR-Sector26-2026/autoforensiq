@@ -68,6 +68,72 @@
           "$ref": "evidence_item.json"
         }
       }
+    },
+    "evidence_by_machine": {
+      "type": "object",
+      "description": "Evidence items grouped by machine_id for bulk analysis",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "evidence_item.json"
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "description": "Cross-tool correlation findings such as same PID, same IP, same file, same timestamp, and exfiltration",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item": { "type": "string" },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "confidence": { "type": "number" },
+          "correlation_type": { "type": "string" },
+          "finding": { "type": "string" },
+          "what_confirmed_it": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "artifacts": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "source_tools": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "signal": { "type": "string" },
+          "file": { "type": "string" },
+          "destination": { "type": "string" },
+          "timestamp": { "type": "string" },
+          "bytes_transferred": { "type": "integer" }
+        }
+      }
+    },
+    "exfiltration_findings": {
+      "type": "array",
+      "description": "Subset of findings specifically flagged as likely exfiltration",
+      "items": {
+        "type": "object"
+      }
+    },
+    "bulk_summary": {
+      "type": "object",
+      "description": "High-level summary that can be used by downstream bulk report consumers",
+      "properties": {
+        "machines_analyzed": { "type": "integer" },
+        "machine_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "findings_detected": { "type": "integer" },
+        "exfiltration_findings": { "type": "integer" }
+      }
     }
   }
 }
