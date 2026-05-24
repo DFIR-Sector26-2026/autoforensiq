@@ -11,6 +11,7 @@ from src.wrappers.browser_wrapper import BrowserWrapper
 from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
 
 from src.ioc.ioc_engine import extract_iocs
+from src.utils.mitre_mapper import map_mitre
 
 
 # ─────────────────────────────────────────────────────────────
@@ -243,9 +244,26 @@ def run_tools(execution_plan: dict, evidence_files: dict):
     merged_items.extend(
         ioc_items
     )
-    # ─────────────────────────────────────
+
+    # ─────────────────────────────────────────
+    # MITRE MAPPING
+    # ─────────────────────────────────────────
+
+    mitre_items = map_mitre(
+        merged_items
+    )
+
+    merged_items.extend(
+        mitre_items
+    )
+
+    print(
+        f"  [MITRE] Generated {len(mitre_items)} mappings"
+    )
+
+    # ─────────────────────────────────────────
     # SAVE IOC RAW OUTPUT
-    # ─────────────────────────────────────
+    # ─────────────────────────────────────────
 
     os.makedirs(
         "output/raw",
@@ -268,6 +286,44 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
     print(
         f"  [SAVED] {len(ioc_items)} IOC items → output/raw/ioc_output.json"
+    )
+
+    # ─────────────────────────────────────────
+    # REPORT STATS
+    # ─────────────────────────────────────────
+
+    report_stats = {
+
+        "artifact_id":
+            "report_stats",
+
+        "evidence_type":
+            "report_stats",
+
+        "value": {
+
+            "total_items":
+                len(merged_items),
+
+            "ioc_count":
+                len(ioc_items),
+
+            "critical_count":
+                len([
+                    x for x in merged_items
+                    if x.get("severity") == "critical"
+                ])
+        },
+
+        "severity":
+            "info",
+
+        "confidence":
+            1.0
+    }
+
+    merged_items.append(
+        report_stats
     )
 
     # ─────────────────────────────────────────
@@ -356,3 +412,4 @@ if __name__ == "__main__":
             print(
                 f"  ⚠ {tool}: no data / skipped"
             )
+
