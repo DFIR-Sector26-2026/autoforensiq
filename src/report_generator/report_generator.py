@@ -70,6 +70,196 @@ def _iter_explanations(shap_explanations):
                 yield exp.get("artifact_id", ""), exp
 
 
+def _explanation_text(explanation):
+    return (
+        explanation.get("explain_instance")
+        or explanation.get("plain_english")
+        or explanation.get("reason")
+        or ""
+    )
+
+
+def _score_summary(explanation):
+    return {
+        "model_score": explanation.get("model_score"),
+        "rule_score": explanation.get("rule_score"),
+        "final_score": explanation.get(
+            "final_score",
+            explanation.get("score")
+        ),
+        "threshold": explanation.get("threshold"),
+        "confidence": explanation.get("confidence"),
+        "severity": explanation.get("severity"),
+    }
+
+
+def _xai_payload(explanation):
+    return {
+        "summary": (
+            explanation.get("plain_english")
+            or explanation.get("reason")
+            or _explanation_text(explanation)
+        ),
+        "explain_instance": _explanation_text(explanation),
+        "scores": _score_summary(explanation),
+        "top_factors": explanation.get("top_factors", []),
+        "baseline_comparison": explanation.get("baseline_comparison", []),
+        "machine_context": explanation.get("machine_context", {}),
+        "correlation_context": explanation.get("correlation_context", []),
+        "case_finding_context": explanation.get("case_finding_context", {}),
+        "recommended_review": explanation.get("recommended_review", []),
+    }
+
+
+def _xai_lookup(shap_explanations, only_anomalies=False):
+    lookup = {}
+
+    for aid, item in _iter_explanations(shap_explanations):
+        if only_anomalies and not item.get("is_anomaly"):
+            continue
+
+        lookup[aid] = _xai_payload(item)
+
+    return lookup
+
+
+def _format_score(value):
+    if isinstance(value, (int, float)):
+        return f"{value:+.4f}"
+    return "N/A"
+
+
+def _format_percent(value):
+    if isinstance(value, (int, float)):
+        return f"{value:.0%}"
+    return "N/A"
+
+
+def _format_top_factors(factors):
+    if not factors:
+        return "_No SHAP factors recorded._"
+
+    lines = []
+    for factor in factors[:5]:
+        lines.append(
+            "- "
+            f"{factor.get('feature', 'unknown')}: "
+            f"{factor.get('direction', 'unknown impact')} "
+            f"(SHAP {_format_score(factor.get('shap_value'))}) — "
+            f"{factor.get('meaning', 'No explanation available.')}"
+        )
+
+    return "\n".join(lines)
+
+
+def _format_baseline_comparison(comparisons):
+    if not comparisons:
+        return "_No baseline comparison recorded._"
+
+    lines = []
+    for item in comparisons[:5]:
+        lines.append(
+            "- "
+            f"{item.get('feature', 'unknown')}: "
+            f"artifact={item.get('artifact_value', 'N/A')}, "
+            f"baseline={item.get('baseline_average', 'N/A')}, "
+            f"{item.get('direction', 'differs from baseline')}"
+        )
+
+    return "\n".join(lines)
+
+
+def _format_correlation_context(correlations):
+    if not correlations:
+        return "_No P4 correlation context recorded._"
+
+    lines = []
+    for item in correlations[:5]:
+        matches = item.get("matches") or []
+        match_text = (
+            f" using {', '.join(map(str, matches[:3]))}"
+            if matches
+            else ""
+        )
+        lines.append(
+            "- "
+            f"{item.get('artifact_id', 'unknown artifact')} via "
+            f"{item.get('correlation_type', 'correlation')}"
+            f"{match_text}"
+        )
+
+    return "\n".join(lines)
+
+
+def _format_recommended_review(actions):
+    if not actions:
+        return "_No review actions recorded._"
+
+    return "\n".join(f"- {action}" for action in actions[:5])
+
+
+def _build_explainability_section(shap_explanations, max_items=8):
+    items = [
+        (aid, exp)
+        for aid, exp in _iter_explanations(shap_explanations)
+        if exp.get("is_anomaly")
+    ]
+
+    if not items:
+        return "_No anomalous artifacts were available for XAI analysis._"
+
+    sections = []
+
+    for aid, exp in items[:max_items]:
+        scores = _score_summary(exp)
+        machine = exp.get("machine_context", {})
+        machine_id = machine.get("machine_id") or "unknown"
+
+        sections.append(
+            "\n".join([
+                f"### Artifact {aid}",
+                "",
+                f"- **Decision:** Anomalous",
+                f"- **Severity:** {scores.get('severity', 'N/A')}",
+                f"- **Confidence:** {_format_percent(scores.get('confidence'))}",
+                f"- **Model Scope:** {exp.get('model_scope', 'N/A')}",
+                f"- **Machine:** {machine_id}",
+                f"- **Model Score:** {_format_score(scores.get('model_score'))}",
+                f"- **Rule Score:** {_format_score(scores.get('rule_score'))}",
+                f"- **Final Score:** {_format_score(scores.get('final_score'))}",
+                f"- **Threshold:** {_format_score(scores.get('threshold'))}",
+                "",
+                "**Explanation**",
+                "",
+                _explanation_text(exp) or "_No explanation text recorded._",
+                "",
+                "**Top Contributing Factors**",
+                "",
+                _format_top_factors(exp.get("top_factors", [])),
+                "",
+                "**Baseline Comparison**",
+                "",
+                _format_baseline_comparison(
+                    exp.get("baseline_comparison", [])
+                ),
+                "",
+                "**P4 Correlation Context**",
+                "",
+                _format_correlation_context(
+                    exp.get("correlation_context", [])
+                ),
+                "",
+                "**Recommended Review**",
+                "",
+                _format_recommended_review(
+                    exp.get("recommended_review", [])
+                ),
+            ])
+        )
+
+    return "\n\n".join(sections)
+
+
 # ─────────────────────────────────────────────────────────────
 # USER PROMPT BUILDER
 # ─────────────────────────────────────────────────────────────
@@ -80,11 +270,10 @@ def _build_user_prompt(
     case_context
 ):
 
-    anomaly_lookup = {
-        aid: item.get("reason", "")
-        for aid, item in _iter_explanations(shap_explanations)
-        if item.get("is_anomaly")
-    }
+    xai_lookup = _xai_lookup(
+        shap_explanations,
+        only_anomalies=True
+    )
 
     priority_items = [
 
@@ -114,9 +303,9 @@ def _build_user_prompt(
 
         aid = item.get("artifact_id", "")
 
-        if aid in anomaly_lookup:
+        if aid in xai_lookup:
 
-            item["_shap_reason"] = anomaly_lookup[aid]
+            item["_xai"] = xai_lookup[aid]
 
     prompt_parts = [
 
@@ -129,6 +318,12 @@ def _build_user_prompt(
         "## Evidence",
 
         json.dumps(priority_items, indent=2),
+
+        "",
+
+        "## Explainability Analysis",
+
+        _build_explainability_section(shap_explanations),
 
         "",
 
@@ -208,11 +403,10 @@ def _mock_report(
     case_context
 ):
 
-    anomaly_lookup = {
-        aid: item.get("reason", "")
-        for aid, item in _iter_explanations(shap_explanations)
-        if item.get("is_anomaly")
-    }
+    xai_lookup = _xai_lookup(
+        shap_explanations,
+        only_anomalies=True
+    )
 
     case_type = case_context.get(
         "case_type",
@@ -244,12 +438,17 @@ def _mock_report(
         []
     )
 
-    total = unified_evidence.get(
-        "total_items",
-        0
+    evidence_items = unified_evidence.get(
+        "evidence_items",
+        []
     )
 
-    n_anomalies = len(anomaly_lookup)
+    total = unified_evidence.get(
+        "total_items",
+        len(evidence_items)
+    )
+
+    n_anomalies = len(xai_lookup)
 
     generated = datetime.now(
         timezone.utc
@@ -257,10 +456,7 @@ def _mock_report(
 
     priority_items = [
 
-        e for e in unified_evidence.get(
-            "evidence_items",
-            []
-        )
+            e for e in evidence_items
 
         if isinstance(e, dict)
         and e.get("severity") in (
@@ -271,10 +467,7 @@ def _mock_report(
 
     if not priority_items:
 
-        priority_items = unified_evidence.get(
-            "evidence_items",
-            []
-        )[:10]
+        priority_items = evidence_items[:10]
 
     table_rows = [
 
@@ -293,10 +486,8 @@ def _mock_report(
             ""
         )
 
-        shap_note = anomaly_lookup.get(
-            aid,
-            "—"
-        )
+        xai = xai_lookup.get(aid, {})
+        shap_note = xai.get("summary", "—")
 
         row = (
 
@@ -370,6 +561,10 @@ Immediate analyst review is recommended.
 ## Critical Findings
 
 {findings_table}
+
+## Explainability Analysis
+
+{_build_explainability_section(shap_explanations)}
 
 ## Reconstructed Attack Timeline
 
