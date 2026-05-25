@@ -111,6 +111,69 @@ def _group_records(records):
     return groups
 
 
+def _build_machine_index(unified_evidence, evidence_records):
+    machine_index = {}
+
+    if isinstance(unified_evidence, dict):
+        by_machine = unified_evidence.get("evidence_by_machine", {})
+        if isinstance(by_machine, dict):
+            for machine_id, items in by_machine.items():
+                if isinstance(items, list):
+                    machine_index[str(machine_id)] = [
+                        item for item in items if isinstance(item, dict)
+                    ]
+
+    if machine_index:
+        return machine_index
+
+    for record in evidence_records:
+        machine_id = str(record.get("machine_id", "")).strip()
+        if machine_id:
+            machine_index.setdefault(machine_id, []).append(record)
+
+    return machine_index
+
+
+def _extract_artifact_ids(obj):
+    ids = set()
+
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key == "artifact_id" and isinstance(value, str):
+                ids.add(value)
+            elif key in (
+                "artifact_ids",
+                "linked_artifacts",
+                "related_artifacts",
+                "evidence_ids",
+            ) and isinstance(value, list):
+                ids.update(str(v) for v in value if isinstance(v, str))
+            else:
+                ids.update(_extract_artifact_ids(value))
+
+    elif isinstance(obj, list):
+        for value in obj:
+            ids.update(_extract_artifact_ids(value))
+
+    return ids
+
+
+def _build_finding_lookup(findings):
+    lookup = {}
+
+    if not isinstance(findings, list):
+        return lookup
+
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+
+        for artifact_id in _extract_artifact_ids(finding):
+            lookup.setdefault(artifact_id, []).append(finding)
+
+    return lookup
+
+
 def run_ml_pipeline(
     input_path:    str,
     output_path:   str,
@@ -139,16 +202,34 @@ def run_ml_pipeline(
     baseline_records = json.loads(Path(baseline_path).read_text())
 
     log.info("[P5] Loading evidence from %s", input_path)
-    evidence_records = json.loads(Path(input_path).read_text())
+    unified_evidence = json.loads(Path(input_path).read_text())
+    evidence_records = unified_evidence
 
     # unified_evidence.json may be wrapped in a top-level object:
     #   { "evidence_items": [...] }  OR just a plain list
-    if isinstance(evidence_records, dict):
+    if isinstance(unified_evidence, dict):
         evidence_records = (
-            evidence_records.get("evidence_items")
-            or evidence_records.get("items")
+            unified_evidence.get("evidence_items")
+            or unified_evidence.get("items")
             or []
         )
+
+    machine_index = _build_machine_index(unified_evidence, evidence_records)
+    findings_lookup = _build_finding_lookup(
+        unified_evidence.get("findings", [])
+        if isinstance(unified_evidence, dict)
+        else []
+    )
+    exfiltration_lookup = _build_finding_lookup(
+        unified_evidence.get("exfiltration_findings", [])
+        if isinstance(unified_evidence, dict)
+        else []
+    )
+    bulk_summary = (
+        unified_evidence.get("bulk_summary", {})
+        if isinstance(unified_evidence, dict)
+        else {}
+    )
 
     # ── 2. Group evidence → train scoped models ───────────────────────────────
     baseline_groups = _group_records(baseline_records)
@@ -222,6 +303,20 @@ def run_ml_pipeline(
                     record=record,
                     prediction=pred,
                     top_factors=shap_top_factors[local_idx],
+                    baseline_comparison=baseline_comparisons[local_idx],
+                    machine_items=machine_index.get(
+                        str(record.get("machine_id", "")).strip(),
+                        [],
+                    ),
+                    correlated_findings=findings_lookup.get(
+                        str(record.get("artifact_id", "")),
+                        [],
+                    ),
+                    exfiltration_findings=exfiltration_lookup.get(
+                        str(record.get("artifact_id", "")),
+                        [],
+                    ),
+                    bulk_summary=bulk_summary,
                 )
             )
 

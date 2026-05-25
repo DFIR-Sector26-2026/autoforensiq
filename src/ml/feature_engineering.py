@@ -108,6 +108,19 @@ def _canonical_evidence_type(evidence_type: str) -> str:
     return evidence_type
 
 
+def _record_value(record: Dict[str, Any]) -> str:
+    """
+    Prefer P4's normalized text for ML features, then fall back to display/raw
+    values for older evidence items.
+    """
+    return str(
+        record.get("normalized_value")
+        or record.get("value")
+        or record.get("raw_value")
+        or ""
+    )
+
+
 # ── Core extractor ────────────────────────────────────────────────────────────
 
 def extract_features(record: Dict[str, Any]) -> List[float]:
@@ -120,7 +133,7 @@ def extract_features(record: Dict[str, Any]) -> List[float]:
     evidence_type = _canonical_evidence_type(
         str(record.get("evidence_type", ""))
     )
-    value         = str(record.get("value", ""))
+    value         = _record_value(record)
     severity_raw  = str(record.get("severity", "")).lower()
 
     # Baseline fields
