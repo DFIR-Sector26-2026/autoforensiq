@@ -8,3 +8,4 @@ output/
 *.raw
 *.json
 data/live_case/
+dashboard/node_modules/
