@@ -16,7 +16,11 @@ Design
 from typing import Dict, Any, List, Optional
 
 import numpy as np
-import shap
+try:
+    import shap
+    _SHAP_AVAILABLE = True
+except ImportError:
+    _SHAP_AVAILABLE = False
 
 from src.ml.feature_engineering import FEATURE_NAMES
 
@@ -173,7 +177,11 @@ def compute_shap_explanations(
         components = detector.score_components(np.asarray(X))
         return components["final_scores"]
 
-    explainer = shap.PermutationExplainer(score_fn, X_baseline)
+    if not _SHAP_AVAILABLE:
+        # shap not installed — fall back to empty top_factors; rule-based reason still works
+        return [[] for _ in range(len(X_evidence))]
+
+    explainer = shap.PermutationExplainer(score_fn, X_baseline, max_evals=100)
     shap_result = explainer(X_evidence)
 
     all_explanations = []
