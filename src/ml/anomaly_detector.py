@@ -80,16 +80,9 @@ class AnomalyDetector:
         boosts += X[:, 13] * SEVERITY_AMPLIFIER
         return boosts
 
-    def score_samples(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Returns
-        -------
-        final_scores : ndarray shape (n,)   – combined score; negative = anomalous
-        is_anomaly   : ndarray shape (n,)   – bool array
-        confidence   : ndarray shape (n,)   – float in [0, 1]
-        """
+    def score_components(self, X: np.ndarray) -> Dict[str, np.ndarray]:
         if not self._fitted:
-            raise RuntimeError("Call fit() before score_samples().")
+            raise RuntimeError("Call fit() before score_components().")
 
         model_scores = self._model_score(X)          # typically (-0.5, +0.5)
         rule_scores  = self._rule_boost(X)           # always ≤ 0
@@ -101,19 +94,43 @@ class AnomalyDetector:
         # At threshold → 0.5; at threshold-0.5 → ~1.0; above threshold → < 0.5
         confidence = np.clip(0.5 - final_scores, 0.0, 1.0)
 
-        return final_scores, is_anomaly, confidence
+        return {
+            "model_scores": model_scores,
+            "rule_scores": rule_scores,
+            "final_scores": final_scores,
+            "is_anomaly": is_anomaly,
+            "confidence": confidence,
+        }
+
+    def score_samples(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Returns
+        -------
+        final_scores : ndarray shape (n,)   – combined score; negative = anomalous
+        is_anomaly   : ndarray shape (n,)   – bool array
+        confidence   : ndarray shape (n,)   – float in [0, 1]
+        """
+        components = self.score_components(X)
+        return (
+            components["final_scores"],
+            components["is_anomaly"],
+            components["confidence"],
+        )
 
     # ── Convenience wrapper ───────────────────────────────────────────────────
 
     def predict(self, X: np.ndarray) -> List[Dict[str, Any]]:
         """Return a list of result dicts (one per sample)."""
-        scores, flags, confs = self.score_samples(X)
+        components = self.score_components(X)
         results = []
         for i in range(len(X)):
             results.append({
-                "score":      round(float(scores[i]), 4),
-                "is_anomaly": bool(flags[i]),
-                "confidence": round(float(confs[i]), 4),
+                "model_score": round(float(components["model_scores"][i]), 4),
+                "rule_score": round(float(components["rule_scores"][i]), 4),
+                "score":      round(float(components["final_scores"][i]), 4),
+                "threshold":  ANOMALY_THRESHOLD,
+                "is_anomaly": bool(components["is_anomaly"][i]),
+                "confidence": round(float(components["confidence"][i]), 4),
                 "features":   X[i].tolist(),
             })
         return results

@@ -83,6 +83,31 @@ EXE_IN_TEMP = re.compile(
 )
 
 
+def _canonical_evidence_type(evidence_type: str) -> str:
+    evidence_type = evidence_type.lower()
+
+    if (
+        "network" in evidence_type
+        or "connection" in evidence_type
+        or "pcap" in evidence_type
+    ):
+        return "network"
+
+    if (
+        "email" in evidence_type
+        or "phishing" in evidence_type
+    ):
+        return "email"
+
+    if (
+        "file" in evidence_type
+        or "disk" in evidence_type
+    ):
+        return "file"
+
+    return evidence_type
+
+
 # ── Core extractor ────────────────────────────────────────────────────────────
 
 def extract_features(record: Dict[str, Any]) -> List[float]:
@@ -92,7 +117,9 @@ def extract_features(record: Dict[str, Any]) -> List[float]:
     """
 
     # ── Pull raw fields, tolerating missing keys ──────────────────────────────
-    evidence_type = str(record.get("evidence_type", "")).lower()
+    evidence_type = _canonical_evidence_type(
+        str(record.get("evidence_type", ""))
+    )
     value         = str(record.get("value", ""))
     severity_raw  = str(record.get("severity", "")).lower()
 
