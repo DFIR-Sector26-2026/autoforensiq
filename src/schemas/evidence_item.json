@@ -50,6 +50,36 @@
       "items": { "type": "string" },
       "description": "Array of other artifact_ids that this evidence relates to (e.g., a process linked to a network connection)",
       "default": []
+    },
+    "raw_value": {
+      "type": "string",
+      "description": "Original value captured from the source tool before normalization"
+    },
+    "normalized_value": {
+      "type": "string",
+      "description": "Whitespace-normalized value used for cross-tool matching"
+    },
+    "machine_id": {
+      "type": "string",
+      "description": "Machine or host bucket used for grouped bulk analysis"
+    },
+    "correlations": {
+      "type": "array",
+      "description": "Cross-tool correlation findings that reference this evidence item",
+      "items": {
+        "type": "object",
+        "properties": {
+          "artifact_id": { "type": "string" },
+          "correlation_type": { "type": "string" },
+          "matches": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "confidence": { "type": "number" },
+          "reason": { "type": "string" },
+          "finding": { "type": "string" }
+        }
+      }
     }
   }
 }

@@ -39,30 +39,48 @@ class TsharkWrapper(BaseWrapper):
         if code != 0 or not stdout.strip():
             return items
 
-        seen = set()
+        conversations = {}
         for line in stdout.strip().splitlines():
             parts = line.split("\t")
-            if len(parts) < 4:
+            if len(parts) < 5:
                 continue
             try:
-                src, dst, dport, length = parts[0], parts[1], parts[2], parts[3]
-                timestamp = parts[4] if len(parts) > 4 else ""
+                src, dst, dport, length, timestamp = (
+                    parts[0], parts[1], parts[2], parts[3], parts[4]
+                )
                 key = f"{src}-{dst}-{dport}"
-                if key in seen:
-                    continue
-                seen.add(key)
-                port = int(dport) if dport.isdigit() else 0
-                severity = "high" if port in SUSPICIOUS_PORTS else "low"
-                items.append(self.make_evidence_item(
-                    artifact_id=f"conn_{src.replace('.','_')}_{dport}",
-                    evidence_type="network_connection",
-                    value=f"TCP {src} → {dst}:{dport} ({length} bytes)",
-                    severity=severity,
-                    confidence=0.75,
-                    timestamp=timestamp
-                ))
+                record = conversations.setdefault(
+                    key,
+                    {
+                        "src": src,
+                        "dst": dst,
+                        "dport": dport,
+                        "timestamp": timestamp,
+                        "bytes": 0,
+                        "packets": 0,
+                    }
+                )
+                record["packets"] += 1
+                if length.isdigit():
+                    record["bytes"] += int(length)
+                if not record.get("timestamp") and timestamp:
+                    record["timestamp"] = timestamp
             except Exception:
                 continue
+        for record in conversations.values():
+            port = int(record["dport"]) if str(record["dport"]).isdigit() else 0
+            severity = "high" if port in SUSPICIOUS_PORTS else "low"
+            items.append(self.make_evidence_item(
+                artifact_id=f"conn_{record['src'].replace('.','_')}_{record['dport']}",
+                evidence_type="network_connection",
+                value=(
+                    f"TCP {record['src']} → {record['dst']}:{record['dport']} "
+                    f"({record['bytes']} bytes, {record['packets']} packets)"
+                ),
+                severity=severity,
+                confidence=0.75,
+                timestamp=record.get("timestamp", "")
+            ))
         print(f"  [TSHARK] Conversations → {len(items)} items")
         return items
 
