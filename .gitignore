@@ -7,4 +7,5 @@ output/
 *.img
 *.raw
 *.json
+!src/data/ioc_patterns.json
 data/live_case/

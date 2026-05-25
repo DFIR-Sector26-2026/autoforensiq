@@ -24,10 +24,15 @@ from collections import defaultdict
 from typing import Any
 import jsonschema
 
+from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 # Severity ranking for sorting
 SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+
+# IOC catalog for post-aggregation severity re-scoring (loaded once).
+_IOC_CATALOG = load_ioc_catalog()
 
 
 def load_json(path: str) -> dict[str, Any]:
@@ -201,7 +206,12 @@ def aggregate_evidence(
     # Step 3: Deduplicate
     unique_items, removed_count = deduplicate_items(all_items)
     print(f"  [DEDUP] Removed {removed_count} duplicates → {len(unique_items)} unique")
-    
+
+    # Step 3b: IOC re-scoring (boost severity on known indicators).
+    # Must run BEFORE sort, which keys on severity.
+    unique_items, boosted_count = rescore_items(unique_items, _IOC_CATALOG, case_context)
+    print(f"  [IOC] Re-scored severity on {boosted_count} item(s)")
+
     # Step 4: Sort by severity and confidence
     sorted_items = sort_evidence_items(unique_items)
     

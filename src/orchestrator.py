@@ -8,6 +8,10 @@ from src.wrappers.regripper_wrapper import RegRipperWrapper
 from src.wrappers.plaso_wrapper import PlasoWrapper
 from src.wrappers.email_wrapper import EmailWrapper
 from src.wrappers.browser_wrapper import BrowserWrapper
+from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
+
+from src.ioc.ioc_engine import extract_iocs
+from src.utils.mitre_mapper import map_mitre
 
 
 # ─────────────────────────────────────────────────────────────
@@ -15,13 +19,22 @@ from src.wrappers.browser_wrapper import BrowserWrapper
 # ─────────────────────────────────────────────────────────────
 
 WRAPPER_MAP = {
+
     "volatility3": VolatilityWrapper,
+
+    "memprocfs": MemProcFSWrapper,
+
     "tshark": TsharkWrapper,
+
     "tsk_fls": TSKWrapper,
+
     "regripper": RegRipperWrapper,
+
     "plaso": PlasoWrapper,
+
     "email": EmailWrapper,
-    "browser": BrowserWrapper
+
+    "browser": BrowserWrapper,
 }
 
 
@@ -38,6 +51,12 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
     all_raw_outputs = {}
 
+    merged_items = []
+
+    # ─────────────────────────────────────────
+    # EXECUTE TOOLS
+    # ─────────────────────────────────────────
+
     for tool_spec in tools:
 
         name = tool_spec["name"]
@@ -46,7 +65,10 @@ def run_tools(execution_plan: dict, evidence_files: dict):
         print(f"  Running: {name}")
         print(f"{'=' * 50}")
 
+        # ─────────────────────────────────────────
         # UNKNOWN TOOL
+        # ─────────────────────────────────────────
+
         if name not in WRAPPER_MAP:
 
             print(f"  [SKIP] No wrapper found for: {name}")
@@ -58,17 +80,17 @@ def run_tools(execution_plan: dict, evidence_files: dict):
         evidence_path = None
 
         # ─────────────────────────────────────────
-        # VOLATILITY — MEMORY FORENSICS
+        # MEMORY FORENSICS
         # ─────────────────────────────────────────
 
-        if name == "volatility3":
+        if name in ["volatility3", "memprocfs"]:
 
             evidence_path = evidence_files.get(
                 "memory_dump"
             )
 
         # ─────────────────────────────────────────
-        # TSHARK — NETWORK FORENSICS
+        # NETWORK FORENSICS
         # ─────────────────────────────────────────
 
         elif name == "tshark":
@@ -78,7 +100,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             )
 
         # ─────────────────────────────────────────
-        # TSK / SLEUTHKIT — DISK FORENSICS
+        # DISK FORENSICS
         # ─────────────────────────────────────────
 
         elif name == "tsk_fls":
@@ -88,7 +110,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             )
 
         # ─────────────────────────────────────────
-        # REGRIPPER — REGISTRY FORENSICS
+        # REGISTRY FORENSICS
         # ─────────────────────────────────────────
 
         elif name == "regripper":
@@ -98,15 +120,14 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             )
 
         # ─────────────────────────────────────────
-        # PLASO — TIMELINE ANALYSIS
+        # TIMELINE ANALYSIS
         # ─────────────────────────────────────────
 
         elif name == "plaso":
 
-            # Better to analyze the entire evidence folder
-            # instead of handmade ext4 image
-
-            evidence_path = evidence_files.get("disk_image")
+            evidence_path = evidence_files.get(
+                "disk_image"
+            )
 
         # ─────────────────────────────────────────
         # EMAIL ANALYSIS
@@ -161,11 +182,17 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             items = wrapper.run(evidence_path)
 
             if items is None:
+
                 items = []
 
             all_raw_outputs[name] = items
 
-            # CREATE RAW OUTPUT DIR
+            merged_items.extend(items)
+
+            # ─────────────────────────────────────
+            # SAVE RAW TOOL OUTPUT
+            # ─────────────────────────────────────
+
             os.makedirs(
                 "output/raw",
                 exist_ok=True
@@ -197,6 +224,131 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             )
 
             all_raw_outputs[name] = []
+
+    # ─────────────────────────────────────────
+    # IOC EXTRACTION
+    # ─────────────────────────────────────────
+
+    print(f"\n{'=' * 50}")
+    print("  IOC EXTRACTION")
+    print(f"{'=' * 50}")
+
+    ioc_items = extract_iocs(
+        merged_items
+    )
+
+    print(
+        f"  [IOC] Extracted {len(ioc_items)} IOC items"
+    )
+
+    merged_items.extend(
+        ioc_items
+    )
+
+    # ─────────────────────────────────────────
+    # MITRE MAPPING
+    # ─────────────────────────────────────────
+
+    mitre_items = map_mitre(
+        merged_items
+    )
+
+    merged_items.extend(
+        mitre_items
+    )
+
+    print(
+        f"  [MITRE] Generated {len(mitre_items)} mappings"
+    )
+
+    # ─────────────────────────────────────────
+    # SAVE IOC RAW OUTPUT
+    # ─────────────────────────────────────────
+
+    os.makedirs(
+        "output/raw",
+        exist_ok=True
+    )
+
+    with open(
+        "output/raw/ioc_output.json",
+        "w"
+    ) as f:
+
+        json.dump(
+            {
+                "tool": "ioc_engine",
+                "items": ioc_items
+            },
+            f,
+            indent=2
+        )
+
+    print(
+        f"  [SAVED] {len(ioc_items)} IOC items → output/raw/ioc_output.json"
+    )
+
+    # ─────────────────────────────────────────
+    # REPORT STATS
+    # ─────────────────────────────────────────
+
+    report_stats = {
+
+        "artifact_id":
+            "report_stats",
+
+        "evidence_type":
+            "report_stats",
+
+        "value": {
+
+            "total_items":
+                len(merged_items),
+
+            "ioc_count":
+                len(ioc_items),
+
+            "critical_count":
+                len([
+                    x for x in merged_items
+                    if x.get("severity") == "critical"
+                ])
+        },
+
+        "severity":
+            "info",
+
+        "confidence":
+            1.0
+    }
+
+    merged_items.append(
+        report_stats
+    )
+
+    # ─────────────────────────────────────────
+    # SAVE UNIFIED EVIDENCE
+    # ─────────────────────────────────────────
+
+    os.makedirs(
+        "output",
+        exist_ok=True
+    )
+
+    with open(
+        "output/unified_evidence.json",
+        "w"
+    ) as f:
+
+        json.dump(
+            merged_items,
+            f,
+            indent=2
+        )
+
+    print(
+        f"\n[MERGE] {len(merged_items)} total evidence items saved"
+    )
 
     return all_raw_outputs
 
@@ -260,3 +412,4 @@ if __name__ == "__main__":
             print(
                 f"  ⚠ {tool}: no data / skipped"
             )
+

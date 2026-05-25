@@ -1,0 +1,67 @@
+{
+  "_comment": "IOC catalog for post-aggregation severity re-scoring. All 'match'/'keyword' entries are lowercase and matched as case-insensitive substrings against an evidence item's value + evidence_type. Severity is a FLOOR: an item is boosted up to this level on match, never downgraded.",
+  "indicators": [
+    {
+      "id": "wannacry_dropper",
+      "match": ["tasksche.exe", "mssecsvc.exe", "mssecsvc2.0", "wannacry", "wanacry", "wcry"],
+      "severity": "critical",
+      "category": "known_malware"
+    },
+    {
+      "id": "wannacry_decryptor",
+      "match": ["@wanadecryptor@", "wanadecryptor", ".wncry", ".wncryt", ".wcry", "wana decrypt0r"],
+      "severity": "critical",
+      "category": "ransomware_marker"
+    },
+    {
+      "id": "ransomware_family",
+      "match": ["ryuk", "lockbit", "revil", "sodinokibi", "conti", "blackcat", "alphv", "maze", "egregor", "darkside", "cl0p", "clop"],
+      "severity": "critical",
+      "category": "known_malware"
+    },
+    {
+      "id": "ransom_note_markers",
+      "match": ["ransom", "decrypt your files", "your files have been encrypted", "bitcoin", "btc wallet", "tor browser", ".locked", "readme.txt restore", "how to decrypt"],
+      "severity": "high",
+      "category": "ransomware_marker"
+    },
+    {
+      "id": "credential_tooling",
+      "match": ["mimikatz", "sekurlsa", "lsass dump", "lsass.dmp", "procdump", "comsvcs.dll minidump", "wce.exe", "pwdump", "gsecdump"],
+      "severity": "high",
+      "category": "attacker_tooling"
+    },
+    {
+      "id": "offensive_tooling",
+      "match": ["cobaltstrike", "cobalt strike", "beacon.dll", "psexec", "psexesvc", "meterpreter", "metasploit", "bloodhound", "sharphound", "rubeus", "powersploit", "nishang"],
+      "severity": "high",
+      "category": "attacker_tooling"
+    },
+    {
+      "id": "lolbin_abuse",
+      "match": ["certutil -urlcache", "certutil.exe -decode", "mshta.exe http", "regsvr32 /s /n /u", "rundll32 javascript", "bitsadmin /transfer", "wmic process call create"],
+      "severity": "high",
+      "category": "living_off_the_land"
+    },
+    {
+      "id": "persistence_runkey",
+      "match": ["currentversion\\run", "currentversion\\runonce", "userinit", "\\winlogon\\shell", "schtasks /create"],
+      "severity": "high",
+      "category": "persistence"
+    },
+    {
+      "id": "code_injection",
+      "match": ["page_execute_readwrite", "rwx", "injected_code", "process hollowing", "reflective"],
+      "severity": "high",
+      "category": "code_injection"
+    }
+  ],
+  "c2_ports": {
+    "ports": [4444, 4445, 1337, 31337, 8888, 9999, 6667, 6668, 6669],
+    "severity": "high"
+  },
+  "exfil_keywords": {
+    "keywords": ["exfil", "dns tunnel", "covert post", "data staged", "rclone", "megacmd", "outbound upload", "/api/metrics/run", "/api/join/"],
+    "severity": "high"
+  }
+}
