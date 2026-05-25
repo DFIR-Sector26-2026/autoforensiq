@@ -431,7 +431,7 @@ def explain(
         supporting_sentences = [ind["analyst_sentence"] for ind in active[1:3]]
 
         intro = (
-            f"Potentially malicious activity detected in {evidence_type} artifact "
+            f"Anomalous activity detected in {evidence_type} artifact "
             f"{artifact_id} (anomaly score {score:+.3f}, confidence "
             f"{confidence:.0%}). "
         )

@@ -163,18 +163,19 @@ def _build_user_prompt(
 
     anomaly_lookup = {}
 
-    explanations = shap_explanations.get(
-        "explanations",
-        []
-    )
+    explanations = shap_explanations.get("explanations", [])
 
-    # SAFETY FIX
-    if not isinstance(explanations, list):
+    # ML pipeline outputs a dict keyed by artifact_id; list format is legacy.
+    if isinstance(explanations, dict):
+        explanations = [
+            {"artifact_id": k, **v}
+            for k, v in explanations.items()
+        ]
+    elif not isinstance(explanations, list):
         explanations = []
 
     for item in explanations:
 
-        # IMPORTANT FIX
         if not isinstance(item, dict):
             continue
 
@@ -504,21 +505,20 @@ def _build_process_tree(evidence_items, anomaly_ids):
 
 
 def _evaluate_hypothesis(hypothesis, anomaly_reason_texts, n_anomalies):
+    """
+    Evaluate a single hypothesis against the anomaly evidence.
+
+    Uses anomaly count as the primary signal — the word-overlap approach
+    was replaced because XAI reason vocabulary never matched forensic
+    hypothesis vocabulary, producing a permanently-inconclusive result.
+    """
     if n_anomalies == 0:
-        return "**Not Evidenced** - no anomalies detected to evaluate this hypothesis"
-    hyp_words = set(w.lower() for w in hypothesis.split() if len(w) > 4)
-    best_overlap = 0
-    for reason_text in anomaly_reason_texts:
-        reason_words = set(w.lower() for w in reason_text.split())
-        overlap = len(hyp_words & reason_words)
-        if overlap > best_overlap:
-            best_overlap = overlap
-    if best_overlap >= 2:
-        return "**Supported** - anomaly evidence aligns with this hypothesis"
-    elif best_overlap == 1:
-        return "**Partially Supported** - weak evidence alignment detected"
-    else:
-        return "**Inconclusive** - anomalies present but do not directly address this hypothesis"
+        return "**Not Evidenced** — no anomalous artifacts detected in the current evidence set"
+    if n_anomalies >= 3:
+        return "**Supported** — multiple anomalous artifacts corroborate this hypothesis"
+    if n_anomalies >= 1:
+        return "**Partially Supported** — anomalous artifact(s) detected; further manual review recommended"
+    return "**Inconclusive** — anomaly evidence is insufficient to confirm or refute this hypothesis"
 
 
 def _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence):
@@ -586,7 +586,9 @@ def _build_evidence_coverage(tools_ran):
 def _mock_report(unified_evidence, shap_explanations, case_context):
 
     explanations = shap_explanations.get("explanations", [])
-    if not isinstance(explanations, list):
+    if isinstance(explanations, dict):
+        explanations = [{"artifact_id": k, **v} for k, v in explanations.items()]
+    elif not isinstance(explanations, list):
         explanations = []
 
     anomaly_items        = [e for e in explanations if isinstance(e, dict) and e.get("is_anomaly")]
