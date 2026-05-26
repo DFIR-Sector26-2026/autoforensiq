@@ -51,7 +51,7 @@ def _clear_stale_outputs():
 # STAGE 1 — CLASSIFIER
 # ─────────────────────────────────────────────────────────────
 
-def run_classifier(report_path: str):
+def run_classifier(report_path: str, config_override: dict = None):
 
     _stage(1, "Intent Classifier", "P1")
 
@@ -66,7 +66,7 @@ def run_classifier(report_path: str):
 
     output_path = ROOT_DIR / cfg["paths"]["case_context_output"]
 
-    return classify_file(report_path, str(output_path))
+    return classify_file(report_path, str(output_path), config_override=config_override)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -240,7 +240,8 @@ def run_ml_pipeline():
 def run_report_generator(
     unified_evidence: dict,
     shap_explanations: dict,
-    case_context: dict
+    case_context: dict,
+    config_override: dict = None
 ):
 
     _stage(7, "Report Generator", "P1")
@@ -256,7 +257,8 @@ def run_report_generator(
         return generate_report(
             unified_evidence,
             shap_explanations,
-            case_context
+            case_context,
+            config_override=config_override
         )
 
     except Exception as exc:
@@ -303,6 +305,27 @@ def parse_args():
             "Restrict which forensic tools run. Default: all tools selected by the DTSA. "
             "Valid names: volatility3 tshark tsk_fls regripper plaso email browser. "
             "Example: --tools volatility3 tshark"
+        )
+    )
+
+    parser.add_argument(
+        "--provider",
+        default=None,
+        metavar="PROVIDER",
+        help=(
+            "LLM provider to use. Overrides config.yaml. "
+            "Valid values: anthropic openai deepseek. "
+            "Example: --provider deepseek"
+        )
+    )
+
+    parser.add_argument(
+        "--model",
+        default=None,
+        metavar="MODEL",
+        help=(
+            "LLM model to use. Overrides config.yaml. "
+            "Example: --model deepseek-chat"
         )
     )
 
@@ -479,6 +502,8 @@ def main(args=None):
     print(f"  Evidence: {args.evidence or 'none'}")
     print(f"  Tools:    {', '.join(args.tools) if args.tools else 'all (DTSA)'}")
     print(f"  Mock LLM: {args.mock}")
+    if args.provider:
+        print(f"  Provider: {args.provider}" + (f" / {args.model}" if args.model else ""))
 
     _ensure_output_dir()
 
@@ -512,8 +537,22 @@ def main(args=None):
 
     os.chdir(ROOT_DIR)
 
+    # Build config override from CLI flags
+    config_override = None
+    if args.provider or args.model or args.mock:
+        llm_override = {}
+        if args.mock:
+            llm_override["mock_mode"] = True
+        if args.provider:
+            llm_override["provider"] = args.provider
+            # Map provider+model into the right model key
+            if args.model:
+                model_key = f"{args.provider}_model"
+                llm_override[model_key] = args.model
+        config_override = {"llm": llm_override}
+
     # STAGE 1
-    case_context = run_classifier(args.report)
+    case_context = run_classifier(args.report, config_override=config_override)
 
     if args.skip_tools:
         print("\n[SKIP] --skip-tools enabled")
@@ -550,7 +589,7 @@ def main(args=None):
     shap_explanations = run_ml_pipeline()
 
     # STAGE 7
-    run_report_generator(unified_evidence, shap_explanations, case_context)
+    run_report_generator(unified_evidence, shap_explanations, case_context, config_override=config_override)
 
     # Dev convenience: one HTML page with every output artifact.
     try:
