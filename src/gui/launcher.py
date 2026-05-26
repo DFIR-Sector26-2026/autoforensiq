@@ -57,6 +57,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 _PROVIDER_MODELS: dict[str, list[str]] = {
     "anthropic": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-7"],
     "openai":    ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
+    "deepseek":  ["deepseek-chat", "deepseek-reasoner"],
 }
 
 # Tool name → display label
@@ -521,6 +522,14 @@ class AutoForensiqGUI(ctk.CTk):
         selected_tools = [name for name, _ in _TOOLS if self._tool_vars[name].get()]
         if selected_tools and len(selected_tools) < len(_TOOLS):
             cmd += ["--tools"] + selected_tools
+
+        if not self._mock_mode.get():
+            provider = self._provider.get()
+            model    = self._model.get()
+            if provider:
+                cmd += ["--provider", provider]
+            if model:
+                cmd += ["--model", model]
 
         self.after(0, self._console_write, f"$ {' '.join(cmd)}\n\n")
 

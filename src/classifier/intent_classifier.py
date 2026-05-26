@@ -265,6 +265,36 @@ def _call_openai(report_text: str, cfg: dict) -> dict:
     return _parse_llm_json(raw)
 
 
+def _call_deepseek(report_text: str, cfg: dict) -> dict:
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise ImportError("openai package not installed. Run: pip install openai")
+
+    api_key = os.environ.get(cfg["llm"]["deepseek_api_key_env"])
+    if not api_key:
+        raise EnvironmentError(
+            f"API key not found. Set the {cfg['llm']['deepseek_api_key_env']} "
+            "environment variable, or enable mock_mode in config.yaml."
+        )
+
+    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+    model  = cfg["llm"]["deepseek_model"]
+
+    response = client.chat.completions.create(
+        model=model,
+        max_tokens=cfg["llm"]["max_tokens"],
+        temperature=cfg["llm"]["temperature"],
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": report_text},
+        ],
+    )
+
+    raw = response.choices[0].message.content.strip()
+    return _parse_llm_json(raw)
+
+
 def _parse_llm_json(raw: str) -> dict:
     """
     Strip markdown fences if present, parse JSON.
@@ -319,8 +349,11 @@ def classify(report_text: str, config_override: dict = None) -> dict:
     elif provider == "openai":
         print(f"[CLASSIFIER] Calling OpenAI ({cfg['llm']['openai_model']})")
         result = _call_openai(report_text, cfg)
+    elif provider == "deepseek":
+        print(f"[CLASSIFIER] Calling DeepSeek ({cfg['llm']['deepseek_model']})")
+        result = _call_deepseek(report_text, cfg)
     else:
-        raise ValueError(f"Unknown LLM provider: '{provider}'. Use 'anthropic' or 'openai'.")
+        raise ValueError(f"Unknown LLM provider: '{provider}'. Use 'anthropic', 'openai', or 'deepseek'.")
 
     # Ensure required fields that the LLM might miss in live mode
     if "case_id" not in result or not result["case_id"]:

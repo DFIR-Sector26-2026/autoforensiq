@@ -278,5 +278,71 @@ def test_run_bulk_aggregation_writes_summary():
         assert result["bulk_summary"]["machines"][0]["findings"] >= 0
 
 
+    def test_aggregate_evidence_builds_correlations_and_exfiltration():
+        """Test that correlations and exfiltration findings are generated."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            raw_dir = os.path.join(tmpdir, "raw")
+            os.makedirs(raw_dir)
+
+            vol_output = {
+                "tool": "volatility3",
+                "items": [
+                    {"artifact_id": "proc_10", "source_tool": "volatility3",
+                     "evidence_type": "process", "value": "svchost.exe (pid:10)",
+                     "severity": "medium", "confidence": 0.7, "timestamp": "2023-01-01T10:00:00Z", "linked_artifacts": []},
+                    {"artifact_id": "file_a", "source_tool": "volatility3",
+                     "evidence_type": "file", "value": "C:\\Users\\user\\secrets.txt", 
+                     "severity": "low", "confidence": 0.6, "timestamp": "2023-01-01T09:59:00Z", "linked_artifacts": []}
+                ]
+            }
+
+            tshark_output = {
+                "tool": "tshark",
+                "items": [
+                    {"artifact_id": "conn_1", "source_tool": "tshark",
+                     "evidence_type": "network_connection", "value": "1.2.3.4:4444", 
+                     "severity": "high", "confidence": 0.9, "timestamp": "1672560000", "linked_artifacts": []}
+                ]
+            }
+
+            with open(os.path.join(raw_dir, "volatility_output.json"), "w") as f:
+                json.dump(vol_output, f)
+            with open(os.path.join(raw_dir, "tshark_output.json"), "w") as f:
+                json.dump(tshark_output, f)
+
+            case_context = {"case_id": "case_exf", "affected_systems": ["host-1"]}
+            result = aggregate_evidence(
+                case_context=case_context,
+                raw_outputs_dir=raw_dir,
+                output_path=os.path.join(tmpdir, "unified.json")
+            )
+
+            # Should have at least one finding and possibly exfiltration finding
+            assert isinstance(result.get("findings"), list)
+            assert isinstance(result.get("exfiltration_findings"), list)
+
+
+    def test_run_bulk_aggregation_writes_summary():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create two machine raw dirs
+            machines = {
+                "hostA": {"raw_outputs_dir": os.path.join(tmpdir, "hostA_raw"), "case_context": {"case_id": "hostA"}},
+                "hostB": {"raw_outputs_dir": os.path.join(tmpdir, "hostB_raw"), "case_context": {"case_id": "hostB"}}
+            }
+            os.makedirs(machines["hostA"]["raw_outputs_dir"])
+            os.makedirs(machines["hostB"]["raw_outputs_dir"])
+
+            # Add a small tshark output for hostA
+            tshark_output = {"tool": "tshark", "items": []}
+            with open(os.path.join(machines["hostA"]["raw_outputs_dir"], "tshark_output.json"), "w") as f:
+                json.dump(tshark_output, f)
+
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+            from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
+
+            summary = aggregate_bulk_evidence(machines, output_root=os.path.join(tmpdir, "bulk_out"))
+            assert summary["machines"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

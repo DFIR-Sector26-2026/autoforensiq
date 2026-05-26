@@ -38,49 +38,43 @@ class TsharkWrapper(BaseWrapper):
         items = []
         if code != 0 or not stdout.strip():
             return items
-
-        conversations = {}
+        # Aggregate bytes/packets per (src,dst,dport) to derive totals for heuristics
+        aggregates = {}
         for line in stdout.strip().splitlines():
             parts = line.split("\t")
             if len(parts) < 5:
                 continue
             try:
-                src, dst, dport, length, timestamp = (
-                    parts[0], parts[1], parts[2], parts[3], parts[4]
-                )
-                key = f"{src}-{dst}-{dport}"
-                record = conversations.setdefault(
-                    key,
-                    {
-                        "src": src,
-                        "dst": dst,
-                        "dport": dport,
-                        "timestamp": timestamp,
-                        "bytes": 0,
-                        "packets": 0,
-                    }
-                )
-                record["packets"] += 1
-                if length.isdigit():
-                    record["bytes"] += int(length)
-                if not record.get("timestamp") and timestamp:
-                    record["timestamp"] = timestamp
+                src = parts[0]
+                dst = parts[1]
+                dport = parts[2]
+                length = int(parts[3]) if parts[3].isdigit() else 0
+                timestamp = float(parts[4]) if len(parts) > 4 and parts[4] else None
+                key = (src, dst, dport)
+                agg = aggregates.setdefault(key, {"bytes": 0, "packets": 0, "first_ts": None})
+                agg["bytes"] += length
+                agg["packets"] += 1
+                if timestamp is not None:
+                    if agg["first_ts"] is None or timestamp < agg["first_ts"]:
+                        agg["first_ts"] = timestamp
             except Exception:
                 continue
-        for record in conversations.values():
-            port = int(record["dport"]) if str(record["dport"]).isdigit() else 0
-            severity = "high" if port in SUSPICIOUS_PORTS else "low"
-            items.append(self.make_evidence_item(
-                artifact_id=f"conn_{record['src'].replace('.','_')}_{record['dport']}",
-                evidence_type="network_connection",
-                value=(
-                    f"TCP {record['src']} → {record['dst']}:{record['dport']} "
-                    f"({record['bytes']} bytes, {record['packets']} packets)"
-                ),
-                severity=severity,
-                confidence=0.75,
-                timestamp=record.get("timestamp", "")
-            ))
+
+        for (src, dst, dport), agg in aggregates.items():
+            try:
+                port = int(dport) if dport.isdigit() else 0
+                severity = "high" if port in SUSPICIOUS_PORTS else "low"
+                ts = str(agg["first_ts"]) if agg.get("first_ts") is not None else ""
+                items.append(self.make_evidence_item(
+                    artifact_id=f"conn_{src.replace('.','_')}_{dst.replace('.','_')}_{dport}_{int(agg['first_ts'])}",
+                    evidence_type="network_connection",
+                    value=f"TCP {src} → {dst}:{dport} ({agg['bytes']} bytes, {agg['packets']} packets)",
+                    severity=severity,
+                    confidence=0.75,
+                    timestamp=ts
+                ))
+            except Exception:
+                continue
         print(f"  [TSHARK] Conversations → {len(items)} items")
         return items
 

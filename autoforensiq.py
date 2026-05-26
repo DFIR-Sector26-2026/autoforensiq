@@ -51,7 +51,7 @@ def _clear_stale_outputs():
 # STAGE 1 — CLASSIFIER
 # ─────────────────────────────────────────────────────────────
 
-def run_classifier(report_path: str):
+def run_classifier(report_path: str, config_override: dict = None):
 
     _stage(1, "Intent Classifier", "P1")
 
@@ -66,7 +66,7 @@ def run_classifier(report_path: str):
 
     output_path = ROOT_DIR / cfg["paths"]["case_context_output"]
 
-    return classify_file(report_path, str(output_path))
+    return classify_file(report_path, str(output_path), config_override=config_override)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -333,7 +333,8 @@ def run_ml_pipeline():
 def run_report_generator(
     unified_evidence: dict,
     shap_explanations: dict,
-    case_context: dict
+    case_context: dict,
+    config_override: dict = None
 ):
 
     _stage(7, "Report Generator", "P1")
@@ -349,7 +350,8 @@ def run_report_generator(
         return generate_report(
             unified_evidence,
             shap_explanations,
-            case_context
+            case_context,
+            config_override=config_override
         )
 
     except Exception as exc:
@@ -400,6 +402,27 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--provider",
+        default=None,
+        metavar="PROVIDER",
+        help=(
+            "LLM provider to use. Overrides config.yaml. "
+            "Valid values: anthropic openai deepseek. "
+            "Example: --provider deepseek"
+        )
+    )
+
+    parser.add_argument(
+        "--model",
+        default=None,
+        metavar="MODEL",
+        help=(
+            "LLM model to use. Overrides config.yaml. "
+            "Example: --model deepseek-chat"
+        )
+    )
+
+    parser.add_argument(
         "--mock",
         action="store_true"
     )
@@ -407,10 +430,8 @@ def parse_args():
     parser.add_argument(
         "--bulk-manifest",
         default=None,
-        help=(
-            "JSON manifest describing one or more machines to aggregate. "
-            "Each machine entry needs a raw_outputs_dir and can include a case_context."
-        )
+        help=("Path to a JSON manifest describing multiple machine raw output locations. "
+              "If provided, runs bulk aggregation and exits.")
     )
 
     parser.add_argument(
@@ -481,6 +502,83 @@ def _map_evidence_files(paths: list):
 
 
 # ─────────────────────────────────────────────────────────────
+# PRE-FLIGHT CHECK
+# ─────────────────────────────────────────────────────────────
+
+# Maps each forensic tool name → the evidence key it requires
+_TOOL_EVIDENCE_MAP = {
+    "volatility3": "memory_dump",
+    "tshark":      "pcap",
+    "tsk_fls":     "disk_image",
+    "regripper":   "registry_hive",
+    "plaso":       "log_files",
+    "email":       "email",
+    "browser":     "browser",
+}
+
+_TOOL_DISPLAY = {
+    "volatility3": "Volatility3       (memory analysis)",
+    "tshark":      "tshark            (network capture analysis)",
+    "tsk_fls":     "The Sleuth Kit    (disk image analysis)",
+    "regripper":   "RegRipper         (registry hive analysis)",
+    "plaso":       "Plaso             (log / event-log timeline)",
+    "email":       "Email analyzer    (email artifact analysis)",
+    "browser":     "Browser analyzer  (browser history analysis)",
+}
+
+_ACQUIRE_HINT = {
+    "memory_dump":    "Acquire a memory dump (.dmp / .mem) using WinPmem, DumpIt, or LiME.",
+    "pcap":           "Capture network traffic (.pcap) via Wireshark or tcpdump.",
+    "disk_image":     "Acquire a disk image (.img / .dd / .e01) using FTK Imager or dd.",
+    "registry_hive":  "Export registry hives (NTUSER.DAT / SYSTEM / SOFTWARE) from the affected host.",
+    "log_files":      "Export Windows event logs (.evtx) via Event Viewer or wevtutil.",
+    "email":          "Export email artifacts (.eml / .msg) from the affected mail client.",
+    "browser":        "Export browser History files from the user profile directory.",
+}
+
+
+def preflight_check(evidence_files: dict, execution_plan: dict):
+    """
+    Print a pre-flight summary of which tools will run and which will be
+    skipped based on the evidence files that were supplied.
+
+    For each skipped tool a one-line acquisition hint is printed so the
+    investigator knows exactly what to collect to enable full coverage.
+    """
+    print("\n" + "─" * 60)
+    print("  PRE-FLIGHT CHECK")
+    print("─" * 60)
+
+    tools_in_plan = [t["name"] for t in execution_plan.get("tools", [])]
+
+    will_run  = []
+    will_skip = []
+
+    for tool in tools_in_plan:
+        required_ev = _TOOL_EVIDENCE_MAP.get(tool)
+        if required_ev is None or required_ev in evidence_files:
+            will_run.append(tool)
+        else:
+            will_skip.append((tool, required_ev))
+
+    if will_run:
+        print("  Tools that WILL run:")
+        for t in will_run:
+            label = _TOOL_DISPLAY.get(t, t)
+            print(f"    [OK]  {label}")
+
+    if will_skip:
+        print("  Tools that will be SKIPPED (evidence not provided):")
+        for t, ev in will_skip:
+            label = _TOOL_DISPLAY.get(t, t)
+            hint  = _ACQUIRE_HINT.get(ev, f"Provide a '{ev}' artifact to enable this tool.")
+            print(f"    [--]  {label}")
+            print(f"          Hint: {hint}")
+
+    print("─" * 60)
+
+
+# ─────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────
 
@@ -498,25 +596,60 @@ def main(args=None):
     print(f"  Tools:    {', '.join(args.tools) if args.tools else 'all (DTSA)'}")
     print(f"  Mock LLM: {args.mock}")
     print(f"  Bulk:     {args.bulk_manifest or 'none'}")
-
-    if args.bulk_manifest:
-        run_bulk_aggregation(args.bulk_manifest)
-        print("\n" + "=" * 60)
-        print("  BULK AGGREGATION COMPLETE")
-        print("=" * 60 + "\n")
-        return
+    if args.provider:
+        print(f"  Provider: {args.provider}" + (f" / {args.model}" if args.model else ""))
 
     _ensure_output_dir()
 
+    # If bulk manifest provided, run bulk aggregation and exit early
+    if args.bulk_manifest:
+        print(f"\n[BULK] Loading manifest: {args.bulk_manifest}")
+        try:
+            with open(args.bulk_manifest) as f:
+                manifest = json.load(f)
+        except Exception as exc:
+            print(f"  [ERROR] Failed to load bulk manifest: {exc}")
+            return
+
+        machine_runs = manifest.get("machines") or manifest
+
+        try:
+            sys.path.insert(0, str(ROOT_DIR))
+            from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
+
+            summary = aggregate_bulk_evidence(
+                machine_runs, output_root=str(ROOT_DIR / "output" / "bulk")
+            )
+            summary_path = ROOT_DIR / "output" / "bulk_summary.json"
+            with open(summary_path, "w") as f:
+                json.dump(summary, f, indent=2)
+            print(f"  [BULK] Summary written → {summary_path}")
+            return
+        except Exception as exc:
+            print(f"  [ERROR] Bulk aggregation failed: {exc}")
+            return
+
     os.chdir(ROOT_DIR)
 
+    # Build config override from CLI flags
+    config_override = None
+    if args.provider or args.model or args.mock:
+        llm_override = {}
+        if args.mock:
+            llm_override["mock_mode"] = True
+        if args.provider:
+            llm_override["provider"] = args.provider
+            # Map provider+model into the right model key
+            if args.model:
+                model_key = f"{args.provider}_model"
+                llm_override[model_key] = args.model
+        config_override = {"llm": llm_override}
+
     # STAGE 1
-    case_context = run_classifier(args.report)
+    case_context = run_classifier(args.report, config_override=config_override)
 
     if args.skip_tools:
-
         print("\n[SKIP] --skip-tools enabled")
-
         return
 
     # STAGE 2
@@ -536,15 +669,12 @@ def main(args=None):
     evidence_files = _map_evidence_files(args.evidence)
 
     if evidence_files:
-        priority_list = [
-            f"#{i + 1} {k}" for i, k in enumerate(evidence_files)
-        ]
-        print(f"  [PRIORITY] {' → '.join(priority_list)}")
+        priority_list = [f"#{i + 1} {k}" for i, k in enumerate(evidence_files)]
+        print(f"  [PRIORITY] {' -> '.join(priority_list)}")
+        
+    preflight_check(evidence_files, execution_plan)
 
-    raw_outputs = run_orchestrator(
-        execution_plan,
-        evidence_files
-    )
+    raw_outputs = run_orchestrator(execution_plan, evidence_files)
 
     # STAGE 4
     unified_evidence = run_aggregator(case_context)
@@ -553,22 +683,23 @@ def main(args=None):
     shap_explanations = run_ml_pipeline()
 
     # STAGE 7
-    run_report_generator(
-        unified_evidence,
-        shap_explanations,
-        case_context
-    )
+    run_report_generator(unified_evidence, shap_explanations, case_context, config_override=config_override)
+
+    # Dev convenience: one HTML page with every output artifact.
+    try:
+        from src.utils.dev_report import generate_dev_report
+        html_path = generate_dev_report(ROOT_DIR / "output")
+        print(f"  [DEV] HTML report → {html_path}")
+    except Exception as e:
+        print(f"  [DEV] HTML report skipped: {e}")
 
     print("\n" + "=" * 60)
     print("  PIPELINE COMPLETE")
     print("=" * 60)
-
     print(f"  case_type  : {case_context['case_type']}")
     print(f"  confidence : {case_context['classifier_confidence']}")
     print(f"  artifacts  : {', '.join(case_context['artifact_types'])}")
-
     print("  output/    : final_report.md")
-
     print("=" * 60 + "\n")
 
 

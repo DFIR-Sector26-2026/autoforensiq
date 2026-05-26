@@ -71,17 +71,49 @@
 
 - Python 3.10+
 - One of: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (optional — mock mode works without either)
-- Forensic tools installed on PATH for live evidence runs: `vol3`, `tshark`, `fls` (SleuthKit), `rip.pl` (RegRipper), `log2timeline.py` (Plaso)
+- Python packages from `requirements.txt`:
+  - `anthropic`, `openai`, `pyyaml`, `python-dotenv`, `jsonschema`
+  - `scikit-learn`, `shap`, `lime`, `numpy`, `pandas`, `volatility3`
+  - `customtkinter`, `tqdm`, `pytest`
+- Forensic tools installed on PATH for live evidence runs: `vol` / `vol3`, `tshark`, `fls` (SleuthKit), `perl`, `log2timeline.py` or `log2timeline`, plus RegRipper (`REGRIPPER_PATH` or a common `rip.pl` location such as `~/regripper/rip.pl`)
 
 ---
 
 ## Installation
+
+### Option 1: automatic bootstrap
+
+Use the OS-specific helper to create a virtual environment and install the Python dependencies:
+
+```bash
+# Linux / macOS
+bash scripts/bootstrap.sh
+
+# Windows PowerShell
+pwsh -File scripts/bootstrap.ps1
+```
+
+The helpers install everything from `requirements.txt` and then report any missing forensic binaries that still need to be installed separately.
+
+### Option 2: manual setup
 
 ```bash
 git clone https://github.com/your-org/autoforensiq.git
 cd autoforensiq
 pip install -r requirements.txt
 ```
+
+### External tools for live runs
+
+Install these separately if you want the full evidence-processing workflow instead of mock mode:
+
+| Tool | Why it is needed | Typical install note |
+|---|---|---|
+| Volatility 3 | Memory-dump analysis | Installed via `pip` from `requirements.txt` |
+| Tshark | PCAP parsing | Install your Wireshark package (`tshark`) |
+| SleuthKit `fls` | Disk-image triage | Install the SleuthKit package (`fls`) |
+| RegRipper `rip.pl` | Registry hive parsing | Set `REGRIPPER_PATH` or place `rip.pl` in a common location such as `~/regripper/rip.pl` |
+| Plaso `log2timeline.py` | Timeline generation | Install Plaso so `log2timeline.py` or `log2timeline` is on PATH |
 
 > **NumPy compatibility note:** `requirements.txt` pins `numpy<2.0` for scikit-learn/scipy compatibility.
 > If you hit a NumPy version conflict after upgrading other packages, run:

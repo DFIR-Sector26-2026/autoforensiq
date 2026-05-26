@@ -25,11 +25,142 @@ from collections import defaultdict
 from typing import Any
 import jsonschema
 
+from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 # Severity ranking for sorting
 SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 
+# IOC catalog for post-aggregation severity re-scoring (loaded once).
+_IOC_CATALOG = load_ioc_catalog()
+
+
+def load_json(path: str) -> dict[str, Any]:
+    """Load a JSON file."""
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+_SCHEMAS_DIR = ROOT_DIR / "src" / "schemas"
+_EVIDENCE_ITEM_SCHEMA = load_json(str(_SCHEMAS_DIR / "evidence_item.json")) if (_SCHEMAS_DIR / "evidence_item.json").exists() else None
+_UNIFIED_EVIDENCE_SCHEMA = load_json(str(_SCHEMAS_DIR / "unified_evidence.json")) if (_SCHEMAS_DIR / "unified_evidence.json").exists() else None
+
+
+def write_json(path: str, data: dict[str, Any]) -> None:
+    """Write a JSON file, creating parent directory if needed."""
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+
+
+def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
+    """
+    Load all raw/<tool>_output.json files.
+    Returns a dict mapping tool names to lists of evidence items.
+    """
+    all_outputs = {}
+
+    if not os.path.isdir(raw_dir):
+        print(f"  [WARN] Raw outputs directory not found: {raw_dir}")
+        return all_outputs
+
+    for filename in sorted(os.listdir(raw_dir)):
+        if not filename.endswith("_output.json"):
+            continue
+
+        filepath = os.path.join(raw_dir, filename)
+        try:
+            data = load_json(filepath)
+            tool_name = data.get("tool", filename.replace("_output.json", ""))
+            items = data.get("items", [])
+            if items:
+                if _EVIDENCE_ITEM_SCHEMA:
+                    for item in items:
+                        try:
+                            jsonschema.validate(instance=item, schema=_EVIDENCE_ITEM_SCHEMA)
+                        except jsonschema.ValidationError as ve:
+                            print(f"    [WARN] Schema violation in {filename}: {ve.message}")
+                all_outputs[tool_name] = items
+                print(f"    [LOAD] {tool_name}: {len(items)} items from {filename}")
+            else:
+                print(f"    [SKIP] {tool_name}: no items (empty)")
+        except Exception as e:
+            print(f"    [ERROR] Failed to load {filename}: {e}")
+
+    return all_outputs
+
+
+def deduplicate_items(all_items: list[dict]) -> tuple[list[dict], int]:
+    """
+    Deduplicate evidence items by artifact_id.
+    Keeps first occurrence, removes duplicates.
+    Returns (deduplicated_list, count_removed).
+    """
+    seen = {}
+    deduplicated = []
+    removed_count = 0
+
+    for item in all_items:
+        artifact_id = item.get("artifact_id")
+        if not artifact_id:
+            print(f"  [WARN] Skipping item missing artifact_id: {item.get('value', '<no value>')}")
+            deduplicated.append(item)
+            continue
+        if artifact_id not in seen:
+            deduplicated.append(item)
+            seen[artifact_id] = True
+        else:
+            removed_count += 1
+
+    return deduplicated, removed_count
+
+
+def sort_evidence_items(items: list[dict]) -> list[dict]:
+    """
+    Sort evidence items by:
+      1. Severity (critical → high → medium → low)
+      2. Confidence (high → low)
+      3. Source tool (alphabetical for stability)
+    """
+    def sort_key(item: dict) -> tuple:
+        severity_val = SEVERITY_ORDER.get(item.get("severity", "low"), 0)
+        confidence_val = -item.get("confidence", 0.5)  # negative for desc order
+        tool = item.get("source_tool", "")
+        return (-severity_val, confidence_val, tool)
+
+    return sorted(items, key=sort_key)
+
+
+def build_indices(items: list[dict]) -> dict[str, dict]:
+    """
+    Build lookup indices for evidence items.
+    Returns {
+      'by_type': {evidence_type: [items]},
+      'by_tool': {source_tool: [items]},
+      'by_machine': {machine_id: [items]}
+    }
+    """
+    by_type = defaultdict(list)
+    by_tool = defaultdict(list)
+    by_machine = defaultdict(list)
+
+    for item in items:
+        by_type[item.get("evidence_type", "unknown")].append(item)
+        by_tool[item.get("source_tool", "unknown")].append(item)
+        by_machine[item.get("machine_id", "unknown")].append(item)
+
+    return {
+        "by_type": dict(by_type),
+        "by_tool": dict(by_tool),
+        "by_machine": dict(by_machine)
+    }
+
+
+# --- Normalisation / signal extraction helpers --------------------------------
 PID_RE = re.compile(r"\bpid[:\s#]*(\d+)\b", re.IGNORECASE)
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 WINDOWS_PATH_RE = re.compile(r"(?:[A-Za-z]:\\[^|<>\"\r\n\t]+|\\\\[^|<>\"\r\n\t]+)")
@@ -215,130 +346,6 @@ def enrich_evidence_items(items: list[dict], case_context: dict) -> tuple[list[d
         enriched_items.append(enriched_item)
 
     return enriched_items, signals_by_artifact
-
-
-def load_json(path: str) -> dict[str, Any]:
-    """Load a JSON file."""
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-_SCHEMAS_DIR = ROOT_DIR / "src" / "schemas"
-_EVIDENCE_ITEM_SCHEMA = load_json(str(_SCHEMAS_DIR / "evidence_item.json")) if (_SCHEMAS_DIR / "evidence_item.json").exists() else None
-_UNIFIED_EVIDENCE_SCHEMA = load_json(str(_SCHEMAS_DIR / "unified_evidence.json")) if (_SCHEMAS_DIR / "unified_evidence.json").exists() else None
-
-
-def write_json(path: str, data: dict[str, Any]) -> None:
-    """Write a JSON file, creating parent directory if needed."""
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-
-
-def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
-    """
-    Load all raw/<tool>_output.json files.
-    Returns a dict mapping tool names to lists of evidence items.
-    """
-    all_outputs = {}
-
-    if not os.path.isdir(raw_dir):
-        print(f"  [WARN] Raw outputs directory not found: {raw_dir}")
-        return all_outputs
-
-    for filename in sorted(os.listdir(raw_dir)):
-        if not filename.endswith("_output.json"):
-            continue
-
-        filepath = os.path.join(raw_dir, filename)
-        try:
-            data = load_json(filepath)
-            tool_name = data.get("tool", filename.replace("_output.json", ""))
-            items = data.get("items", [])
-            if items:
-                if _EVIDENCE_ITEM_SCHEMA:
-                    for item in items:
-                        try:
-                            jsonschema.validate(instance=item, schema=_EVIDENCE_ITEM_SCHEMA)
-                        except jsonschema.ValidationError as ve:
-                            print(f"    [WARN] Schema violation in {filename}: {ve.message}")
-                all_outputs[tool_name] = items
-                print(f"    [LOAD] {tool_name}: {len(items)} items from {filename}")
-            else:
-                print(f"    [SKIP] {tool_name}: no items (empty)")
-        except Exception as e:
-            print(f"    [ERROR] Failed to load {filename}: {e}")
-
-    return all_outputs
-
-
-def deduplicate_items(all_items: list[dict]) -> tuple[list[dict], int]:
-    """
-    Deduplicate evidence items by artifact_id.
-    Keeps first occurrence, removes duplicates.
-    Returns (deduplicated_list, count_removed).
-    """
-    seen = {}
-    deduplicated = []
-    removed_count = 0
-
-    for item in all_items:
-        artifact_id = item.get("artifact_id")
-        if not artifact_id:
-            print(f"  [WARN] Skipping item missing artifact_id: {item.get('value', '<no value>')}")
-            deduplicated.append(item)
-            continue
-        if artifact_id not in seen:
-            deduplicated.append(item)
-            seen[artifact_id] = True
-        else:
-            removed_count += 1
-
-    return deduplicated, removed_count
-
-
-def sort_evidence_items(items: list[dict]) -> list[dict]:
-    """
-    Sort evidence items by:
-      1. Severity (critical → high → medium → low)
-      2. Confidence (high → low)
-      3. Source tool (alphabetical for stability)
-    """
-    def sort_key(item: dict) -> tuple:
-        severity_val = SEVERITY_ORDER.get(item.get("severity", "low"), 0)
-        confidence_val = -item.get("confidence", 0.5)  # negative for desc order
-        tool = item.get("source_tool", "")
-        return (-severity_val, confidence_val, tool)
-
-    return sorted(items, key=sort_key)
-
-
-def build_indices(items: list[dict]) -> dict[str, dict]:
-    """
-    Build lookup indices for evidence items.
-    Returns {
-      'by_type': {evidence_type: [items]},
-      'by_tool': {source_tool: [items]},
-      'by_machine': {machine_id: [items]}
-    }
-    """
-    by_type = defaultdict(list)
-    by_tool = defaultdict(list)
-    by_machine = defaultdict(list)
-
-    for item in items:
-        by_type[item.get("evidence_type", "unknown")].append(item)
-        by_tool[item.get("source_tool", "unknown")].append(item)
-        by_machine[item.get("machine_id", "unknown")].append(item)
-
-    return {
-        "by_type": dict(by_type),
-        "by_tool": dict(by_tool),
-        "by_machine": dict(by_machine)
-    }
 
 
 def _select_anchor(items: list[dict]) -> dict:
@@ -610,12 +617,8 @@ def aggregate_bulk_evidence(
         machine_raw_dir = machine_spec.get("raw_outputs_dir")
         machine_output_path = machine_spec.get(
             "output_path",
+            os.path.join(output_root, f"{machine_name}_unified_evidence.json"),
         )
-        if not machine_output_path:
-            machine_output_path = os.path.join(
-                output_root,
-                f"{machine_name}_unified_evidence.json"
-            )
         if not machine_raw_dir:
             continue
 
@@ -698,17 +701,23 @@ def aggregate_evidence(
     unique_items, removed_count = deduplicate_items(all_items)
     print(f"  [DEDUP] Removed {removed_count} duplicates → {len(unique_items)} unique")
 
+    # Step 3b: IOC re-scoring (boost severity on known indicators).
+    # Must run BEFORE sort, which keys on severity.
+    unique_items, boosted_count = rescore_items(unique_items, _IOC_CATALOG, case_context)
+    print(f"  [IOC] Re-scored severity on {boosted_count} item(s)")
+
     # Step 4: Enrich items with normalized values and machine grouping
     enriched_items, signals_by_artifact = enrich_evidence_items(unique_items, case_context)
-    
+
     # Step 5: Sort by severity and confidence
     sorted_items = sort_evidence_items(enriched_items)
-    
+
     # Step 6: Build correlations and indices
     annotated_items, findings = build_correlations(sorted_items, signals_by_artifact)
     exfiltration_findings = [finding for finding in findings if finding.get("correlation_type") == "exfiltration"]
-    indices = build_indices(sorted_items)
-    
+    indices = build_indices(annotated_items)
+
+
     # Step 7: Build unified_evidence output
     unified = {
         "case_id": case_context.get("case_id", "unknown"),
@@ -727,7 +736,7 @@ def aggregate_evidence(
         "exfiltration_findings": exfiltration_findings,
         "bulk_summary": build_bulk_summary({"evidence_items": annotated_items, "findings": findings, "exfiltration_findings": exfiltration_findings}),
     }
-    
+
     # Step 8: Validate output schema
     if _UNIFIED_EVIDENCE_SCHEMA:
         try:
@@ -742,7 +751,7 @@ def aggregate_evidence(
     # Step 9: Write output
     write_json(output_path, unified)
     print(f"  [SAVE] Wrote unified_evidence.json ({len(annotated_items)} items, {len(findings)} findings)")
-    
+
     return unified
 
 
@@ -750,19 +759,19 @@ if __name__ == "__main__":
     # Standalone test: aggregate outputs from a recent run
     import sys
     sys.path.insert(0, str(ROOT_DIR))
-    
+
     # Try to load case_context to get case_id
     case_context = {}
     case_context_path = ROOT_DIR / "output" / "case_context.json"
     if case_context_path.exists():
         case_context = load_json(str(case_context_path))
-    
+
     result = aggregate_evidence(
         case_context=case_context,
         raw_outputs_dir=str(ROOT_DIR / "output" / "raw"),
         output_path=str(ROOT_DIR / "output" / "unified_evidence.json")
     )
-    
+
     print(f"\n  [DONE] Aggregator complete")
     print(f"        Case ID: {result.get('case_id')}")
     print(f"        Tools: {', '.join(result.get('tools_aggregated', []))}")
