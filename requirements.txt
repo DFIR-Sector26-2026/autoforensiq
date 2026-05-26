@@ -30,3 +30,6 @@ customtkinter>=5.2.0       # modern dark-themed Tkinter widgets (launcher GUI)
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 tqdm>=4.66.0               # progress bars for long-running tool executions
+
+# ── Test / dev ───────────────────────────────────────────────────────────────
+pytest>=8.0.0              # local test suite

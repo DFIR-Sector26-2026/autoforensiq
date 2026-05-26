@@ -2,8 +2,22 @@ import os
 import json
 from src.wrappers.base_wrapper import BaseWrapper
 
-# ✅ FIXED PATH
-REGRIPPER_PATH = os.path.expanduser("~/regripper/rip.pl")
+def _resolve_regripper_path() -> str | None:
+    candidate_paths = [
+        os.environ.get("REGRIPPER_PATH", ""),
+        "~/regripper/rip.pl",
+        "~/RegRipper3.0/rip.pl",
+        "~/RegRipper/rip.pl",
+        "~/Desktop/RegRipper3.0/rip.pl",
+    ]
+
+    for candidate in candidate_paths:
+        if not candidate:
+            continue
+        resolved = os.path.expanduser(candidate)
+        if os.path.exists(resolved):
+            return resolved
+    return None
 
 SUSPICIOUS_KEYS = [
     "run", "runonce", "userinit", "shell", "load",
@@ -19,21 +33,25 @@ class RegRipperWrapper(BaseWrapper):
             print(f"  [ERROR] Registry hive not found: {hive_path}")
             return []
 
-        if not os.path.exists(REGRIPPER_PATH):
-            print(f"  [ERROR] RegRipper not found at {REGRIPPER_PATH}")
-            print("  Run: git clone https://github.com/keydet89/RegRipper3.0.git ~/regripper")
+        regripper_path = _resolve_regripper_path()
+        if not regripper_path:
+            print("  [ERROR] RegRipper not found.")
+            print("  Set REGRIPPER_PATH or install one of:")
+            print("    ~/regripper/rip.pl")
+            print("    ~/RegRipper3.0/rip.pl")
+            print("    ~/RegRipper/rip.pl")
             return []
 
         all_items = []
-        all_items.extend(self._run_plugin(hive_path, "ntuser"))
-        all_items.extend(self._run_plugin(hive_path, "run"))
-        all_items.extend(self._run_plugin(hive_path, "autoruns"))
+        all_items.extend(self._run_plugin(hive_path, "ntuser", regripper_path))
+        all_items.extend(self._run_plugin(hive_path, "run", regripper_path))
+        all_items.extend(self._run_plugin(hive_path, "autoruns", regripper_path))
         return all_items
 
-    def _run_plugin(self, hive_path: str, plugin: str) -> list:
+    def _run_plugin(self, hive_path: str, plugin: str, regripper_path: str) -> list:
         print(f"  [REGRIP] Running plugin: {plugin}...")
         stdout, _, code = self.run_command(
-            ["perl", REGRIPPER_PATH, "-r", hive_path, "-p", plugin],   # ✅ FIXED
+            ["perl", regripper_path, "-r", hive_path, "-p", plugin],
             input_files=[hive_path],
             timeout=60
         )

@@ -55,7 +55,12 @@ _TOOL_BINARIES: dict[str, list[list[tuple[str, str]]]] = {
     "tshark":      [[("which", "tshark")]],          # tshark_wrapper
     "tsk_fls":     [[("which", "fls")]],             # tsk_wrapper (sleuthkit)
     # regripper_wrapper runs `perl ~/regripper/rip.pl ...` — needs both.
-    "regripper":   [[("which", "perl")], [("path", "~/regripper/rip.pl")]],
+    "regripper":   [[("which", "perl")], [
+        ("path", "~/regripper/rip.pl"),
+        ("path", "~/RegRipper3.0/rip.pl"),
+        ("path", "~/RegRipper/rip.pl"),
+        ("path", "~/Desktop/RegRipper3.0/rip.pl"),
+    ]],
     # plaso_wrapper resolves either the .py or bare name via shutil.which.
     "plaso":       [[("which", "log2timeline.py"), ("which", "log2timeline")]],
     "email":       [],   # email_wrapper — pure Python
