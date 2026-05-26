@@ -498,6 +498,31 @@ def _call_openai(user_prompt, cfg):
     return resp.choices[0].message.content
 
 
+def _call_deepseek(user_prompt, cfg):
+
+    from openai import OpenAI
+
+    api_key = os.environ.get(
+        cfg["llm"].get("deepseek_api_key_env", "DEEPSEEK_API_KEY")
+    )
+
+    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+
+    model = cfg["llm"].get("deepseek_model", "deepseek-chat")
+
+    resp = client.chat.completions.create(
+        model=model,
+        max_tokens=cfg["llm"].get("max_tokens", 2048),
+        temperature=cfg["llm"].get("temperature", 0.2),
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": user_prompt},
+        ]
+    )
+
+    return resp.choices[0].message.content
+
+
 # ─────────────────────────────────────────────────────────────
 # MOCK REPORT HELPERS
 # ─────────────────────────────────────────────────────────────
@@ -958,7 +983,12 @@ def generate_report(
         user_prompt = _build_user_prompt(unified_evidence, shap_explanations, case_context)
         try:
             print(f"  [LIVE] Calling {provider}...")
-            report_text = _call_openai(user_prompt, cfg)
+            if provider == "deepseek":
+                report_text = _call_deepseek(user_prompt, cfg)
+            elif provider == "anthropic":
+                report_text = _call_openai(user_prompt, cfg)  # fallback: no Anthropic in report gen yet
+            else:
+                report_text = _call_openai(user_prompt, cfg)
         except Exception as exc:
             print(f"  [WARN] LLM failed ({exc})")
             print("  [FALLBACK] Using mock report.")

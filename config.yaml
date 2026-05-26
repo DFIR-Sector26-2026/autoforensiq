@@ -3,14 +3,16 @@
 
 llm:
   # LLM provider to use for the Intent Classifier and Report Generator.
-  # Options: "anthropic" | "openai"
+  # Options: "anthropic" | "openai" | "deepseek"
   provider: "anthropic"
 
   # Model to use per provider.
   # Anthropic options: "claude-sonnet-4-6", "claude-haiku-4-5-20251001"
   # OpenAI options:    "gpt-4o", "gpt-4o-mini"
+  # DeepSeek options:  "deepseek-chat", "deepseek-reasoner"
   anthropic_model: "claude-sonnet-4-6"
   openai_model: "gpt-4o"
+  deepseek_model: "deepseek-chat"
 
   # Set mock_mode: true to run without a real API key.
   # The classifier will return a deterministic mock case_context.json
@@ -21,6 +23,7 @@ llm:
   # Do NOT paste keys directly here — set them in your shell or .env file.
   anthropic_api_key_env: "ANTHROPIC_API_KEY"
   openai_api_key_env: "OPENAI_API_KEY"
+  deepseek_api_key_env: "DEEPSEEK_API_KEY"
 
   # Max tokens for LLM responses (keep low — outputs are structured JSON)
   max_tokens: 1024
