@@ -577,7 +577,7 @@ def main(args=None):
     if evidence_files:
         priority_list = [f"#{i + 1} {k}" for i, k in enumerate(evidence_files)]
         print(f"  [PRIORITY] {' -> '.join(priority_list)}")
-
+        
     preflight_check(evidence_files, execution_plan)
 
     raw_outputs = run_orchestrator(execution_plan, evidence_files)
