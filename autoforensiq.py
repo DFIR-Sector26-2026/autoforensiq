@@ -53,7 +53,7 @@ def _clear_stale_outputs():
 
 def run_classifier(report_path: str, config_override: dict = None):
 
-    _stage(1, "Intent Classifier", "P1")
+    _stage(1, "Intent Classifier")
 
     from src.classifier.intent_classifier import classify_file
 
@@ -75,7 +75,7 @@ def run_classifier(report_path: str, config_override: dict = None):
 
 def run_tool_selector(case_context: dict):
 
-    _stage(2, "Dynamic Tool Selector", "P2")
+    _stage(2, "Dynamic Tool Selector")
 
     out_path = ROOT_DIR / "output" / "execution_plan.json"
 
@@ -127,7 +127,7 @@ def run_tool_selector(case_context: dict):
 
 def run_orchestrator(execution_plan: dict, evidence_files: dict):
 
-    _stage(3, "Execution Orchestrator", "P3")
+    _stage(3, "Execution Orchestrator")
 
     if not evidence_files:
         _stub(
@@ -144,7 +144,7 @@ def run_orchestrator(execution_plan: dict, evidence_files: dict):
 
         from src.orchestrator import run_tools
 
-        print("  [LIVE] Running P3 orchestrator...")
+        print("  [LIVE] Running orchestrator...")
 
         return run_tools(execution_plan, evidence_files)
 
@@ -161,7 +161,7 @@ def run_orchestrator(execution_plan: dict, evidence_files: dict):
 
 def run_aggregator(case_context: dict):
 
-    _stage(4, "Evidence Aggregator", "P4")
+    _stage(4, "Evidence Aggregator")
 
     unified_path = ROOT_DIR / "output" / "unified_evidence.json"
 
@@ -173,7 +173,7 @@ def run_aggregator(case_context: dict):
             aggregate_evidence
         )
 
-        print("  [LIVE] Running P4 aggregator...")
+        print("  [LIVE] Running aggregator...")
 
         return aggregate_evidence(
             case_context=case_context,
@@ -241,7 +241,7 @@ def _load_bulk_manifest(manifest_path: str) -> tuple[dict[str, dict], str, str]:
 
 def run_bulk_aggregation(manifest_path: str):
 
-    _stage(4, "Bulk Evidence Aggregator", "P4")
+    _stage(4, "Bulk Evidence Aggregator")
 
     try:
         sys.path.insert(0, str(ROOT_DIR))
@@ -337,7 +337,7 @@ def run_report_generator(
     config_override: dict = None
 ):
 
-    _stage(7, "Report Generator", "P1")
+    _stage(7, "Report Generator")
 
     try:
 
