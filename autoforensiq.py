@@ -386,6 +386,83 @@ def _map_evidence_files(paths: list):
 
 
 # ─────────────────────────────────────────────────────────────
+# PRE-FLIGHT CHECK
+# ─────────────────────────────────────────────────────────────
+
+# Maps each forensic tool name → the evidence key it requires
+_TOOL_EVIDENCE_MAP = {
+    "volatility3": "memory_dump",
+    "tshark":      "pcap",
+    "tsk_fls":     "disk_image",
+    "regripper":   "registry_hive",
+    "plaso":       "log_files",
+    "email":       "email",
+    "browser":     "browser",
+}
+
+_TOOL_DISPLAY = {
+    "volatility3": "Volatility3       (memory analysis)",
+    "tshark":      "tshark            (network capture analysis)",
+    "tsk_fls":     "The Sleuth Kit    (disk image analysis)",
+    "regripper":   "RegRipper         (registry hive analysis)",
+    "plaso":       "Plaso             (log / event-log timeline)",
+    "email":       "Email analyzer    (email artifact analysis)",
+    "browser":     "Browser analyzer  (browser history analysis)",
+}
+
+_ACQUIRE_HINT = {
+    "memory_dump":    "Acquire a memory dump (.dmp / .mem) using WinPmem, DumpIt, or LiME.",
+    "pcap":           "Capture network traffic (.pcap) via Wireshark or tcpdump.",
+    "disk_image":     "Acquire a disk image (.img / .dd / .e01) using FTK Imager or dd.",
+    "registry_hive":  "Export registry hives (NTUSER.DAT / SYSTEM / SOFTWARE) from the affected host.",
+    "log_files":      "Export Windows event logs (.evtx) via Event Viewer or wevtutil.",
+    "email":          "Export email artifacts (.eml / .msg) from the affected mail client.",
+    "browser":        "Export browser History files from the user profile directory.",
+}
+
+
+def preflight_check(evidence_files: dict, execution_plan: dict):
+    """
+    Print a pre-flight summary of which tools will run and which will be
+    skipped based on the evidence files that were supplied.
+
+    For each skipped tool a one-line acquisition hint is printed so the
+    investigator knows exactly what to collect to enable full coverage.
+    """
+    print("\n" + "─" * 60)
+    print("  PRE-FLIGHT CHECK")
+    print("─" * 60)
+
+    tools_in_plan = [t["name"] for t in execution_plan.get("tools", [])]
+
+    will_run  = []
+    will_skip = []
+
+    for tool in tools_in_plan:
+        required_ev = _TOOL_EVIDENCE_MAP.get(tool)
+        if required_ev is None or required_ev in evidence_files:
+            will_run.append(tool)
+        else:
+            will_skip.append((tool, required_ev))
+
+    if will_run:
+        print("  Tools that WILL run:")
+        for t in will_run:
+            label = _TOOL_LABELS.get(t, t)
+            print(f"    [OK]  {label}")
+
+    if will_skip:
+        print("  Tools that will be SKIPPED (evidence not provided):")
+        for t, ev in will_skip:
+            label = _TOOL_LABELS.get(t, t)
+            hint  = _ACQUIRE_HINT.get(ev, f"Provide a '{ev}' artifact to enable this tool.")
+            print(f"    [--]  {label}")
+            print(f"          Hint: {hint}")
+
+    print("─" * 60)
+
+
+# ─────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────
 
@@ -415,14 +492,15 @@ def main(args=None):
             print(f"  [ERROR] Failed to load bulk manifest: {exc}")
             return
 
-        # manifest expected to be { "machines": { name: { raw_outputs_dir, case_context, output_path? } } }
         machine_runs = manifest.get("machines") or manifest
 
         try:
             sys.path.insert(0, str(ROOT_DIR))
             from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
 
-            summary = aggregate_bulk_evidence(machine_runs, output_root=str(ROOT_DIR / "output" / "bulk"))
+            summary = aggregate_bulk_evidence(
+                machine_runs, output_root=str(ROOT_DIR / "output" / "bulk")
+            )
             summary_path = ROOT_DIR / "output" / "bulk_summary.json"
             with open(summary_path, "w") as f:
                 json.dump(summary, f, indent=2)
@@ -438,9 +516,7 @@ def main(args=None):
     case_context = run_classifier(args.report)
 
     if args.skip_tools:
-
         print("\n[SKIP] --skip-tools enabled")
-
         return
 
     # STAGE 2
@@ -460,15 +536,12 @@ def main(args=None):
     evidence_files = _map_evidence_files(args.evidence)
 
     if evidence_files:
-        priority_list = [
-            f"#{i + 1} {k}" for i, k in enumerate(evidence_files)
-        ]
-        print(f"  [PRIORITY] {' → '.join(priority_list)}")
+        priority_list = [f"#{i + 1} {k}" for i, k in enumerate(evidence_files)]
+        print(f"  [PRIORITY] {' -> '.join(priority_list)}")
 
-    raw_outputs = run_orchestrator(
-        execution_plan,
-        evidence_files
-    )
+    preflight_check(evidence_files, execution_plan)
+
+    raw_outputs = run_orchestrator(execution_plan, evidence_files)
 
     # STAGE 4
     unified_evidence = run_aggregator(case_context)
@@ -477,30 +550,23 @@ def main(args=None):
     shap_explanations = run_ml_pipeline()
 
     # STAGE 7
-    run_report_generator(
-        unified_evidence,
-        shap_explanations,
-        case_context
-    )
+    run_report_generator(unified_evidence, shap_explanations, case_context)
 
-    # Dev convenience: one HTML page with every output artifact (auto-opens).
+    # Dev convenience: one HTML page with every output artifact.
     try:
         from src.utils.dev_report import generate_dev_report
         html_path = generate_dev_report(ROOT_DIR / "output")
         print(f"  [DEV] HTML report → {html_path}")
-    except Exception as e:  # never let the dev report break the pipeline
+    except Exception as e:
         print(f"  [DEV] HTML report skipped: {e}")
 
     print("\n" + "=" * 60)
     print("  PIPELINE COMPLETE")
     print("=" * 60)
-
     print(f"  case_type  : {case_context['case_type']}")
     print(f"  confidence : {case_context['classifier_confidence']}")
     print(f"  artifacts  : {', '.join(case_context['artifact_types'])}")
-
     print("  output/    : final_report.md")
-
     print("=" * 60 + "\n")
 
 
