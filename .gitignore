@@ -9,4 +9,5 @@ output/
 *.json
 !src/data/ioc_patterns.json
 data/live_case/
+dashboard/node_modules/
 .venv/

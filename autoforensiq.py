@@ -192,6 +192,99 @@ def run_aggregator(case_context: dict):
         }
 
 
+def _load_bulk_manifest(manifest_path: str) -> tuple[dict[str, dict], str, str]:
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+
+    if isinstance(manifest, dict) and "machines" in manifest:
+        machine_specs = manifest["machines"]
+    elif isinstance(manifest, dict):
+        machine_specs = [
+            {"machine_name": machine_name, **spec}
+            for machine_name, spec in manifest.items()
+        ]
+    elif isinstance(manifest, list):
+        machine_specs = manifest
+    else:
+        raise ValueError("Bulk manifest must be a list or object")
+
+    machine_runs = {}
+    for index, spec in enumerate(machine_specs, 1):
+        if not isinstance(spec, dict):
+            raise ValueError("Each bulk manifest entry must be an object")
+
+        machine_name = (
+            spec.get("machine_name")
+            or spec.get("machine_id")
+            or f"machine_{index}"
+        )
+        raw_outputs_dir = spec.get("raw_outputs_dir") or spec.get("raw_dir")
+        if not raw_outputs_dir:
+            raise ValueError(
+                f"Missing raw_outputs_dir for bulk machine '{machine_name}'"
+            )
+
+        case_context = spec.get("case_context") or {}
+        if "case_id" not in case_context:
+            case_context["case_id"] = machine_name
+
+        machine_runs[machine_name] = {
+            "case_context": case_context,
+            "raw_outputs_dir": raw_outputs_dir,
+            "output_path": spec.get("output_path"),
+        }
+
+    output_root = manifest.get("output_root", str(ROOT_DIR / "output" / "bulk")) if isinstance(manifest, dict) else str(ROOT_DIR / "output" / "bulk")
+    summary_path = manifest.get("summary_path", str(ROOT_DIR / "output" / "bulk_summary.json")) if isinstance(manifest, dict) else str(ROOT_DIR / "output" / "bulk_summary.json")
+    return machine_runs, output_root, summary_path
+
+
+def run_bulk_aggregation(manifest_path: str):
+
+    _stage(4, "Bulk Evidence Aggregator", "P4")
+
+    try:
+        sys.path.insert(0, str(ROOT_DIR))
+
+        from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
+
+        machine_runs, output_root, summary_path = _load_bulk_manifest(manifest_path)
+
+        print(f"  [LIVE] Running bulk aggregation for {len(machine_runs)} machines...")
+
+        bulk_summary = aggregate_bulk_evidence(
+            machine_runs=machine_runs,
+            output_root=output_root,
+        )
+
+        summary = {
+            "generated_at": bulk_summary.get("generated_at", ""),
+            "manifest_path": manifest_path,
+            "bulk_summary": bulk_summary,
+        }
+
+        with open(summary_path, "w") as f:
+            json.dump(summary, f, indent=2)
+
+        print(f"  [SAVE] Wrote bulk summary → {summary_path}")
+
+        return summary
+
+    except Exception as exc:
+
+        print(f"  [ERROR] Bulk aggregation failed: {exc}")
+
+        return {
+            "generated_at": "",
+            "manifest_path": manifest_path,
+            "bulk_summary": {
+                "machines": [],
+                "total_items": 0,
+                "total_findings": 0,
+            },
+        }
+
+
 # ─────────────────────────────────────────────────────────────
 # STAGE 5/6 — ML + XAI
 # ─────────────────────────────────────────────────────────────
@@ -502,6 +595,7 @@ def main(args=None):
     print(f"  Evidence: {args.evidence or 'none'}")
     print(f"  Tools:    {', '.join(args.tools) if args.tools else 'all (DTSA)'}")
     print(f"  Mock LLM: {args.mock}")
+    print(f"  Bulk:     {args.bulk_manifest or 'none'}")
     if args.provider:
         print(f"  Provider: {args.provider}" + (f" / {args.model}" if args.model else ""))
 
@@ -611,7 +705,7 @@ def main(args=None):
 
 if __name__ == "__main__":
     args = parse_args()
-    if args.gui or args.report is None:
+    if args.gui or (args.report is None and not args.bulk_manifest):
         from src.gui.launcher import AutoForensiqGUI
         app = AutoForensiqGUI()
         app.mainloop()

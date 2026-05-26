@@ -42,7 +42,7 @@ class TsharkWrapper(BaseWrapper):
         aggregates = {}
         for line in stdout.strip().splitlines():
             parts = line.split("\t")
-            if len(parts) < 4:
+            if len(parts) < 5:
                 continue
             try:
                 src = parts[0]

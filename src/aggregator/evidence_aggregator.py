@@ -717,6 +717,7 @@ def aggregate_evidence(
     exfiltration_findings = [finding for finding in findings if finding.get("correlation_type") == "exfiltration"]
     indices = build_indices(annotated_items)
 
+
     # Step 7: Build unified_evidence output
     unified = {
         "case_id": case_context.get("case_id", "unknown"),

@@ -235,6 +235,14 @@ python -m src.classifier.intent_classifier tests/incidents/02_apt_intrusion.txt
 python -m src.orchestrator
 ```
 
+Bulk aggregation is available when you already have per-machine raw outputs:
+
+```bash
+python autoforensiq.py --bulk-manifest bulk_manifest.json
+```
+
+Each manifest entry needs a `machine_name` and `raw_outputs_dir`, and can optionally include a `case_context` plus per-machine `output_path`.
+
 Tool `name` values must exactly match the orchestrator's `WRAPPER_MAP` keys.
 </details>
 
