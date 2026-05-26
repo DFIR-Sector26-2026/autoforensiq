@@ -448,13 +448,13 @@ def preflight_check(evidence_files: dict, execution_plan: dict):
     if will_run:
         print("  Tools that WILL run:")
         for t in will_run:
-            label = _TOOL_LABELS.get(t, t)
+            label = _TOOL_DISPLAY.get(t, t)
             print(f"    [OK]  {label}")
 
     if will_skip:
         print("  Tools that will be SKIPPED (evidence not provided):")
         for t, ev in will_skip:
-            label = _TOOL_LABELS.get(t, t)
+            label = _TOOL_DISPLAY.get(t, t)
             hint  = _ACQUIRE_HINT.get(ev, f"Provide a '{ev}' artifact to enable this tool.")
             print(f"    [--]  {label}")
             print(f"          Hint: {hint}")
