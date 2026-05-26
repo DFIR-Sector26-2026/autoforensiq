@@ -38,28 +38,40 @@ class TsharkWrapper(BaseWrapper):
         items = []
         if code != 0 or not stdout.strip():
             return items
-
-        seen = set()
+        # Aggregate bytes/packets per (src,dst,dport) to derive totals for heuristics
+        aggregates = {}
         for line in stdout.strip().splitlines():
             parts = line.split("\t")
             if len(parts) < 4:
                 continue
             try:
-                src, dst, dport, length = parts[0], parts[1], parts[2], parts[3]
-                timestamp = parts[4] if len(parts) > 4 else ""
-                key = f"{src}-{dst}-{dport}"
-                if key in seen:
-                    continue
-                seen.add(key)
+                src = parts[0]
+                dst = parts[1]
+                dport = parts[2]
+                length = int(parts[3]) if parts[3].isdigit() else 0
+                timestamp = float(parts[4]) if len(parts) > 4 and parts[4] else None
+                key = (src, dst, dport)
+                agg = aggregates.setdefault(key, {"bytes": 0, "packets": 0, "first_ts": None})
+                agg["bytes"] += length
+                agg["packets"] += 1
+                if timestamp is not None:
+                    if agg["first_ts"] is None or timestamp < agg["first_ts"]:
+                        agg["first_ts"] = timestamp
+            except Exception:
+                continue
+
+        for (src, dst, dport), agg in aggregates.items():
+            try:
                 port = int(dport) if dport.isdigit() else 0
                 severity = "high" if port in SUSPICIOUS_PORTS else "low"
+                ts = str(agg["first_ts"]) if agg.get("first_ts") is not None else ""
                 items.append(self.make_evidence_item(
-                    artifact_id=f"conn_{src.replace('.','_')}_{dport}",
+                    artifact_id=f"conn_{src.replace('.','_')}_{dst.replace('.','_')}_{dport}_{int(agg['first_ts'])}",
                     evidence_type="network_connection",
-                    value=f"TCP {src} → {dst}:{dport} ({length} bytes)",
+                    value=f"TCP {src} → {dst}:{dport} ({agg['bytes']} bytes, {agg['packets']} packets)",
                     severity=severity,
                     confidence=0.75,
-                    timestamp=timestamp
+                    timestamp=ts
                 ))
             except Exception:
                 continue
