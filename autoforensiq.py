@@ -15,9 +15,9 @@ ROOT_DIR = Path(__file__).resolve().parent
 # Helpers
 # ─────────────────────────────────────────────────────────────
 
-def _stage(num: int, name: str, owner: str):
+def _stage(num: int, name: str):
     print(f"\n{'=' * 60}")
-    print(f"  STAGE {num}: {name}  [{owner}]")
+    print(f"  STAGE {num}: {name}")
     print(f"{'=' * 60}")
 
 
