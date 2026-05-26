@@ -291,7 +291,7 @@ def run_bulk_aggregation(manifest_path: str):
 
 def run_ml_pipeline():
 
-    _stage(5, "Anomaly Detector + XAI Explainer", "P5")
+    _stage(5, "Anomaly Detector + XAI Explainer")
 
     shap_path = ROOT_DIR / "output" / "shap_explanations.json"
 
