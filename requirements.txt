@@ -21,6 +21,7 @@ pandas>=2.2.0
 
 # ── Forensic tool support ─────────────────────────────────────────────────────
 volatility3>=2.5.0         # Volatility 3 memory analysis (P3)
+memprocfs>=5.17.5          # MemProcFS Python API — memory analysis (P3); Linux/Windows x64 only
 
 # ── Report output ─────────────────────────────────────────────────────────────
 # reportlab>=4.1.0         # (optional) PDF generation — uncomment for PDF output
