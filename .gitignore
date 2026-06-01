@@ -8,6 +8,6 @@ output/
 *.raw
 *.json
 !src/data/ioc_patterns.json
-data/live_case/
+data/test_cases/
 dashboard/node_modules/
 .venv/
