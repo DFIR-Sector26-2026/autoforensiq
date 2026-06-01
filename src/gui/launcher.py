@@ -63,6 +63,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
 # Tool name → display label
 _TOOLS: list[tuple[str, str]] = [
     ("volatility3", "Volatility3"),
+    ("memprocfs",   "MemProcFS"),
     ("tshark",      "Tshark"),
     ("tsk_fls",     "SleuthKit"),
     ("regripper",   "RegRipper"),
@@ -461,6 +462,16 @@ class AutoForensiqGUI(ctk.CTk):
             font=(FONT_FAMILY, 10), text_color=TEXT_MUTED,
         ).pack(side="right")
 
+        self._copy_btn = ctk.CTkButton(
+            hdr, text="Copy",
+            command=self._copy_console,
+            width=56, height=24, corner_radius=6,
+            fg_color="transparent", hover_color=BORDER,
+            border_width=1, border_color=BORDER,
+            font=(FONT_FAMILY, 10), text_color=TEXT_MUTED,
+        )
+        self._copy_btn.pack(side="right", padx=(0, 6))
+
         self._console = ctk.CTkTextbox(
             body,
             height=240,
@@ -486,6 +497,18 @@ class AutoForensiqGUI(ctk.CTk):
         self._console.configure(state="normal")
         self._console.delete("1.0", "end")
         self._console.configure(state="disabled")
+
+    def _copy_console(self) -> None:
+        """Copy the entire console output to the clipboard."""
+        text = self._console.get("1.0", "end-1c")
+        if not text:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update_idletasks()
+        # brief visual confirmation on the Copy button
+        self._copy_btn.configure(text="Copied!")
+        self.after(1200, lambda: self._copy_btn.configure(text="Copy"))
 
     # ── Pipeline execution ────────────────────────────────────────────────────
 
