@@ -6,6 +6,23 @@ from src.wrappers.base_wrapper import BaseWrapper
 SUSPICIOUS_PORTS = [4444, 4445, 1337, 31337, 8888, 9999, 6667, 6668]
 SUSPICIOUS_PROTOS = ["dns", "http", "smb", "ftp"]
 
+# Known-good infrastructure — substring match against the full lowercased
+# domain. A random-looking subdomain under one of these (e.g. a hex label
+# under cloudfront.net) is still legitimate, so we match the parent.
+DNS_ALLOWLIST = (
+    "apple.com", "icloud.com", "akamai", "akamaized.net", "akadns.net",
+    "cloudflare", "fastly", "google", "gstatic", "googleapis", "ggpht",
+    "amazonaws", "cloudfront", "azureedge", "microsoft", "windows.com",
+    "windowsupdate", "msftncsi", "msftconnecttest", "mozilla", "ubuntu.com",
+    "debian.org", "fedoraproject.org", "digicert", "verisign",
+)
+# Suffixes that are always local/non-routable noise.
+DNS_ALLOWLIST_SUFFIXES = (".local", ".arpa", ".lan", ".internal", ".home")
+
+# A domain is only "high" when its longest label is BOTH long AND high-entropy.
+DNS_SUSPICIOUS_MIN_LABEL_LEN = 12
+DNS_SUSPICIOUS_ENTROPY = 3.8
+
 class TsharkWrapper(BaseWrapper):
     def __init__(self):
         super().__init__("tshark")
@@ -97,15 +114,24 @@ class TsharkWrapper(BaseWrapper):
             parts = line.split("\t")
             if len(parts) < 3:
                 continue
-            timestamp, src, domain = parts[0], parts[1], parts[2]
+            timestamp, src, domain = parts[0], parts[1], parts[2].lower()
             if not domain:
                 continue
-            entropy = self._string_entropy(domain)
-            severity = "high" if entropy > 3.5 else "low"
+            # Score the most-significant label (not the whole string), and only
+            # flag "high" when it's long AND high-entropy AND not known-good
+            # infrastructure. The allowlist is a suppressor on the high path
+            # only — everything else is already "low".
+            label = self._dns_longest_label(domain)
+            entropy = self._string_entropy(label)
+            looks_random = (
+                len(label) >= DNS_SUSPICIOUS_MIN_LABEL_LEN
+                and entropy >= DNS_SUSPICIOUS_ENTROPY
+            )
+            severity = "high" if looks_random and not self._dns_is_allowlisted(domain) else "low"
             items.append(self.make_evidence_item(
                 artifact_id=f"dns_{domain.replace('.','_')[:30]}",
                 evidence_type="dns_query",
-                value=f"DNS query from {src} → {domain} (entropy: {entropy:.2f})",
+                value=f"DNS query from {src} → {domain} (label entropy: {entropy:.2f})",
                 severity=severity,
                 confidence=0.80,
                 timestamp=timestamp
@@ -179,6 +205,19 @@ class TsharkWrapper(BaseWrapper):
                 ))
         print(f"  [TSHARK] Suspicious ports → {len(items)} items")
         return items
+
+    def _dns_is_allowlisted(self, domain: str) -> bool:
+        return (
+            any(good in domain for good in DNS_ALLOWLIST)
+            or domain.endswith(DNS_ALLOWLIST_SUFFIXES)
+        )
+
+    def _dns_longest_label(self, domain: str) -> str:
+        # Ignore the TLD; score the most-significant remaining label.
+        labels = [l for l in domain.split(".") if l]
+        if len(labels) > 1:
+            labels = labels[:-1]            # drop TLD
+        return max(labels, key=len) if labels else ""
 
     def _string_entropy(self, s: str) -> float:
         import math
