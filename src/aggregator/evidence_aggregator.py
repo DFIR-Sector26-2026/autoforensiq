@@ -38,7 +38,8 @@ _IOC_CATALOG = load_ioc_catalog()
 
 def load_json(path: str) -> dict[str, Any]:
     """Load a JSON file."""
-    with open(path, "r", encoding="utf-8") as f:
+    p = Path(path)
+    with p.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -49,10 +50,10 @@ _UNIFIED_EVIDENCE_SCHEMA = load_json(str(_SCHEMAS_DIR / "unified_evidence.json")
 
 def write_json(path: str, data: dict[str, Any]) -> None:
     """Write a JSON file, creating parent directory if needed."""
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    p = Path(path)
+    if p.parent:
+        p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
         f.write("\n")
 
@@ -68,11 +69,15 @@ def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
         print(f"  [WARN] Raw outputs directory not found: {raw_dir}")
         return all_outputs
 
-    for filename in sorted(os.listdir(raw_dir)):
+    raw_path = Path(raw_dir)
+    if not raw_path.exists():
+        return all_outputs
+
+    for filename in sorted([p.name for p in raw_path.iterdir() if p.is_file()]):
         if not filename.endswith("_output.json"):
             continue
 
-        filepath = os.path.join(raw_dir, filename)
+        filepath = raw_path / filename
         try:
             data = load_json(filepath)
             tool_name = data.get("tool", filename.replace("_output.json", ""))
@@ -610,14 +615,13 @@ def aggregate_bulk_evidence(
         "output_root": output_root,
     }
 
-    os.makedirs(output_root, exist_ok=True)
+    Path(output_root).mkdir(parents=True, exist_ok=True)
 
     for machine_name, machine_spec in machine_runs.items():
         machine_case_context = machine_spec.get("case_context") or {"case_id": machine_name}
         machine_raw_dir = machine_spec.get("raw_outputs_dir")
-        machine_output_path = machine_spec.get(
-            "output_path",
-            os.path.join(output_root, f"{machine_name}_unified_evidence.json"),
+        machine_output_path = machine_spec.get("output_path") or str(
+            Path(output_root) / f"{machine_name}_unified_evidence.json"
         )
         if not machine_raw_dir:
             continue

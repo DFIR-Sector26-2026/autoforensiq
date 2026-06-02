@@ -4,6 +4,7 @@ import json
 import os
 import pytest
 import tempfile
+from pathlib import Path
 from src.aggregator.evidence_aggregator import (
     deduplicate_items,
     sort_evidence_items,
@@ -61,10 +62,11 @@ def test_aggregate_evidence_with_empty_tools():
     """Test aggregation with no raw outputs."""
     with tempfile.TemporaryDirectory() as tmpdir:
         case_context = {"case_id": "test_case_123"}
+        output_path = str(Path(tmpdir) / "unified.json")
         result = aggregate_evidence(
             case_context=case_context,
             raw_outputs_dir=tmpdir,
-            output_path=os.path.join(tmpdir, "unified.json")
+            output_path=output_path
         )
         
         assert result["case_id"] == "test_case_123"
@@ -77,8 +79,8 @@ def test_aggregate_evidence_preserves_provenance():
     """Test that tool provenance is maintained in output."""
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create sample raw outputs
-        raw_dir = os.path.join(tmpdir, "raw")
-        os.makedirs(raw_dir)
+        raw_dir = Path(tmpdir) / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
         
         vol_output = {
             "tool": "volatility3",
@@ -99,16 +101,16 @@ def test_aggregate_evidence_preserves_provenance():
             ]
         }
         
-        with open(os.path.join(raw_dir, "volatility_output.json"), "w") as f:
+        with (raw_dir / "volatility_output.json").open("w") as f:
             json.dump(vol_output, f)
-        with open(os.path.join(raw_dir, "tshark_output.json"), "w") as f:
+        with (raw_dir / "tshark_output.json").open("w") as f:
             json.dump(tshark_output, f)
         
         case_context = {"case_id": "test_case_456"}
         result = aggregate_evidence(
             case_context=case_context,
-            raw_outputs_dir=raw_dir,
-            output_path=os.path.join(tmpdir, "unified.json")
+            raw_outputs_dir=str(raw_dir),
+            output_path=str(Path(tmpdir) / "unified.json")
         )
         
         assert result["total_items"] == 2
@@ -125,8 +127,8 @@ def test_aggregate_evidence_preserves_provenance():
 def test_aggregate_evidence_builds_correlations_and_exfiltration():
     """Test that cross-tool correlations and the exfiltration rule are emitted."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        raw_dir = os.path.join(tmpdir, "raw")
-        os.makedirs(raw_dir)
+        raw_dir = Path(tmpdir) / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
 
         vol_output = {
             "tool": "volatility3",
@@ -194,11 +196,11 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
             ],
         }
 
-        with open(os.path.join(raw_dir, "volatility_output.json"), "w") as f:
+        with (raw_dir / "volatility_output.json").open("w") as f:
             json.dump(vol_output, f)
-        with open(os.path.join(raw_dir, "tshark_output.json"), "w") as f:
+        with (raw_dir / "tshark_output.json").open("w") as f:
             json.dump(tshark_output, f)
-        with open(os.path.join(raw_dir, "tsk_output.json"), "w") as f:
+        with (raw_dir / "tsk_output.json").open("w") as f:
             json.dump(tsk_output, f)
 
         case_context = {
@@ -207,8 +209,8 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
         }
         result = aggregate_evidence(
             case_context=case_context,
-            raw_outputs_dir=raw_dir,
-            output_path=os.path.join(tmpdir, "unified.json")
+            raw_outputs_dir=str(raw_dir),
+            output_path=str(Path(tmpdir) / "unified.json")
         )
 
         assert result["total_items"] == 5
@@ -225,12 +227,12 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
 def test_run_bulk_aggregation_writes_summary():
     """Test that the CLI bulk helper aggregates multiple machine bundles."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        machine_a_raw = os.path.join(tmpdir, "machine_a", "raw")
-        machine_b_raw = os.path.join(tmpdir, "machine_b", "raw")
-        output_root = os.path.join(tmpdir, "bulk_output")
-        summary_path = os.path.join(tmpdir, "bulk_summary.json")
-        os.makedirs(machine_a_raw)
-        os.makedirs(machine_b_raw)
+        machine_a_raw = Path(tmpdir) / "machine_a" / "raw"
+        machine_b_raw = Path(tmpdir) / "machine_b" / "raw"
+        output_root = Path(tmpdir) / "bulk_output"
+        summary_path = Path(tmpdir) / "bulk_summary.json"
+        machine_a_raw.mkdir(parents=True, exist_ok=True)
+        machine_b_raw.mkdir(parents=True, exist_ok=True)
 
         shared_item = {
             "artifact_id": "proc_shared",
@@ -243,36 +245,36 @@ def test_run_bulk_aggregation_writes_summary():
             "linked_artifacts": [],
         }
 
-        with open(os.path.join(machine_a_raw, "volatility_output.json"), "w") as f:
+        with (machine_a_raw / "volatility_output.json").open("w") as f:
             json.dump({"tool": "volatility3", "items": [shared_item]}, f)
 
-        with open(os.path.join(machine_b_raw, "volatility_output.json"), "w") as f:
+        with (machine_b_raw / "volatility_output.json").open("w") as f:
             json.dump({"tool": "volatility3", "items": [shared_item]}, f)
 
-        manifest = {
-            "output_root": output_root,
-            "summary_path": summary_path,
-            "machines": [
-                {
-                    "machine_name": "machine_a",
-                    "raw_outputs_dir": machine_a_raw,
-                    "case_context": {"case_id": "case-a", "affected_systems": ["machine-a"]},
-                },
-                {
-                    "machine_name": "machine_b",
-                    "raw_outputs_dir": machine_b_raw,
-                    "case_context": {"case_id": "case-b", "affected_systems": ["machine-b"]},
-                },
-            ],
-        }
+            manifest = {
+                "output_root": str(output_root),
+                "summary_path": str(summary_path),
+                "machines": [
+                    {
+                        "machine_name": "machine_a",
+                        "raw_outputs_dir": str(machine_a_raw),
+                        "case_context": {"case_id": "case-a", "affected_systems": ["machine-a"]},
+                    },
+                    {
+                        "machine_name": "machine_b",
+                        "raw_outputs_dir": str(machine_b_raw),
+                        "case_context": {"case_id": "case-b", "affected_systems": ["machine-b"]},
+                    },
+                ],
+            }
 
-        manifest_path = os.path.join(tmpdir, "bulk_manifest.json")
-        with open(manifest_path, "w") as f:
+        manifest_path = Path(tmpdir) / "bulk_manifest.json"
+        with manifest_path.open("w") as f:
             json.dump(manifest, f)
 
-        result = run_bulk_aggregation(manifest_path)
+        result = run_bulk_aggregation(str(manifest_path))
 
-        assert os.path.exists(summary_path)
+        assert summary_path.exists()
         assert result["bulk_summary"]["total_items"] == 2
         assert len(result["bulk_summary"]["machines"]) == 2
         assert result["bulk_summary"]["machines"][0]["findings"] >= 0
@@ -281,8 +283,8 @@ def test_run_bulk_aggregation_writes_summary():
     def test_aggregate_evidence_builds_correlations_and_exfiltration():
         """Test that correlations and exfiltration findings are generated."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            raw_dir = os.path.join(tmpdir, "raw")
-            os.makedirs(raw_dir)
+            raw_dir = Path(tmpdir) / "raw"
+            raw_dir.mkdir(parents=True, exist_ok=True)
 
             vol_output = {
                 "tool": "volatility3",
@@ -305,16 +307,16 @@ def test_run_bulk_aggregation_writes_summary():
                 ]
             }
 
-            with open(os.path.join(raw_dir, "volatility_output.json"), "w") as f:
+            with (raw_dir / "volatility_output.json").open("w") as f:
                 json.dump(vol_output, f)
-            with open(os.path.join(raw_dir, "tshark_output.json"), "w") as f:
+            with (raw_dir / "tshark_output.json").open("w") as f:
                 json.dump(tshark_output, f)
 
             case_context = {"case_id": "case_exf", "affected_systems": ["host-1"]}
             result = aggregate_evidence(
                 case_context=case_context,
-                raw_outputs_dir=raw_dir,
-                output_path=os.path.join(tmpdir, "unified.json")
+                raw_outputs_dir=str(raw_dir),
+                output_path=str(Path(tmpdir) / "unified.json")
             )
 
             # Should have at least one finding and possibly exfiltration finding
@@ -326,21 +328,21 @@ def test_run_bulk_aggregation_writes_summary():
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create two machine raw dirs
             machines = {
-                "hostA": {"raw_outputs_dir": os.path.join(tmpdir, "hostA_raw"), "case_context": {"case_id": "hostA"}},
-                "hostB": {"raw_outputs_dir": os.path.join(tmpdir, "hostB_raw"), "case_context": {"case_id": "hostB"}}
+                "hostA": {"raw_outputs_dir": str(Path(tmpdir) / "hostA_raw"), "case_context": {"case_id": "hostA"}},
+                "hostB": {"raw_outputs_dir": str(Path(tmpdir) / "hostB_raw"), "case_context": {"case_id": "hostB"}}
             }
-            os.makedirs(machines["hostA"]["raw_outputs_dir"])
-            os.makedirs(machines["hostB"]["raw_outputs_dir"])
+            Path(machines["hostA"]["raw_outputs_dir"]).mkdir(parents=True)
+            Path(machines["hostB"]["raw_outputs_dir"]).mkdir(parents=True)
 
             # Add a small tshark output for hostA
             tshark_output = {"tool": "tshark", "items": []}
-            with open(os.path.join(machines["hostA"]["raw_outputs_dir"], "tshark_output.json"), "w") as f:
+            with (Path(machines["hostA"]["raw_outputs_dir"]) / "tshark_output.json").open("w") as f:
                 json.dump(tshark_output, f)
 
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
             from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
 
-            summary = aggregate_bulk_evidence(machines, output_root=os.path.join(tmpdir, "bulk_out"))
+            summary = aggregate_bulk_evidence(machines, output_root=str(Path(tmpdir) / "bulk_out"))
             assert summary["machines"]
 
 

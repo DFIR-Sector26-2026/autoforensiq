@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+from pathlib import Path
 
 from src.wrappers.base_wrapper import BaseWrapper
 
@@ -10,6 +11,9 @@ PLUGINS = [
     "windows.cmdline",
     "windows.netstat",
     "windows.malfind",
+    "windows.filescan",
+    "windows.dumpfiles",
+    "windows.yarascan",
     "windows.dlllist"
 ]
 
@@ -79,10 +83,8 @@ class VolatilityWrapper(BaseWrapper):
 
     def run(self, image_path: str) -> list:
 
-        if not os.path.exists(image_path):
-
+        if not Path(image_path).exists():
             print(f"  [ERROR] Memory image not found: {image_path}")
-
             return []
 
         all_items = []
@@ -122,6 +124,8 @@ class VolatilityWrapper(BaseWrapper):
             f"{' '.join(working_command)}"
         )
 
+        combined_output = ""
+
         for plugin in PLUGINS:
 
             print(f"\n  [VOL] Running {plugin}...")
@@ -136,6 +140,10 @@ class VolatilityWrapper(BaseWrapper):
                 input_files=[image_path],
                 timeout=180
             )
+
+            # keep a combined corpus for regex-based extraction
+            if stdout:
+                combined_output += "\n" + stdout
 
             print(f"\n  [DEBUG] Return code: {code}")
 
@@ -177,6 +185,15 @@ class VolatilityWrapper(BaseWrapper):
 
             all_items.extend(items)
 
+        # Run a lightweight string/IOC extraction over all plugin output
+        try:
+            extracted = self._extract_strings(combined_output)
+            if extracted:
+                print(f"  [VOL] Extracted {len(extracted)} string IOCs")
+                all_items.extend(extracted)
+        except Exception as exc:
+            print(f"  [VOL] string extraction failed: {exc}")
+
         return all_items
 
     def _parse(self, plugin: str, output: str) -> list:
@@ -205,6 +222,18 @@ class VolatilityWrapper(BaseWrapper):
         elif plugin == "windows.malfind":
 
             return self._parse_malfind(lines)
+
+        elif plugin == "windows.filescan":
+
+            return self._parse_filescan(lines)
+
+        elif plugin == "windows.dumpfiles":
+
+            return self._parse_dumpfiles(lines)
+
+        elif plugin == "windows.yarascan":
+
+            return self._parse_yarascan(lines)
 
         elif plugin == "windows.dlllist":
 
@@ -508,32 +537,82 @@ class VolatilityWrapper(BaseWrapper):
                 pid = parts[0]
                 name = parts[1]
 
+                flags = " ".join(parts[2:]).lower()
+
                 if pid not in grouped_regions:
 
                     grouped_regions[pid] = {
                         "name": name,
-                        "count": 0
+                        "count": 0,
+                        "has_rwx": False,
+                        "has_pe": False
                     }
 
                 grouped_regions[pid]["count"] += 1
+
+                # heuristics: detect RWX regions or embedded PE/shellcode markers
+                if "rwx" in flags or "rw-x" in flags or "rx" in flags:
+                    grouped_regions[pid]["has_rwx"] = True
+
+                if "mz" in flags or "pe" in flags or "shellcode" in flags:
+                    grouped_regions[pid]["has_pe"] = True
 
             except Exception:
                 continue
 
         for pid, info in grouped_regions.items():
 
+            # determine severity with gating
+            name = info.get("name", "unknown")
+            has_rwx = info.get("has_rwx", False)
+            has_pe = info.get("has_pe", False)
+
+            if has_rwx and has_pe:
+                severity = "critical"
+                confidence = 0.92
+                reasons = ["RWX region and embedded PE/shellcode detected"]
+            elif has_rwx or has_pe:
+                severity = "high"
+                confidence = 0.86
+                reasons = [
+                    "RWX region detected" if has_rwx else "Embedded PE/shellcode detected"
+                ]
+            else:
+                severity = "medium"
+                confidence = 0.70
+                reasons = ["Injected regions detected (no RWX/PE signature)" ]
+
+            # down-rank for common system processes unless corroborated
+            system_allowlist = {
+                "explorer.exe",
+                "chrome.exe",
+                "csrss.exe",
+                "winlogon.exe",
+                "wmiprvse.exe",
+                "svchost.exe"
+            }
+
+            if name.lower() in system_allowlist and severity == "critical":
+                severity = "medium"
+                confidence = 0.75
+                reasons.append("Process is common system process: down-ranked")
+            elif name.lower() in system_allowlist and severity == "high":
+                severity = "medium"
+                confidence = 0.65
+                reasons.append("Process is common system process: down-ranked")
+
             items.append(
                 self.make_evidence_item(
                     artifact_id=f"malfind_{pid}",
                     evidence_type="injected_code",
                     value=(
-                        f"Injected memory regions "
-                        f"detected in "
-                        f"{info['name']} "
-                        f"(PID:{pid})"
+                        f"Injected memory regions detected in {info['name']} (PID:{pid})"
                     ),
-                    severity="critical",
-                    confidence=0.92
+                    severity=severity,
+                    confidence=confidence,
+                    linked_artifacts=[f"proc_{pid}"],
+                    # include reasons to aid downstream gating/rescoring
+                    extra={"reasons": reasons}
                 )
             )
 
@@ -570,6 +649,160 @@ class VolatilityWrapper(BaseWrapper):
                         confidence=0.78
                     )
                 )
+
+        return items
+
+    def _parse_filescan(self, lines: list) -> list:
+
+        items = []
+
+        for line in lines:
+
+            lower = line.lower()
+
+            # crude heuristic: look for absolute paths
+            if "\\\" in line or "/" in line:
+
+                parts = line.split()
+
+                # prefer the last token if it looks like a path
+                candidate = parts[-1]
+
+                if "\\" in candidate or "/" in candidate:
+
+                    items.append(
+                        self.make_evidence_item(
+                            artifact_id=(
+                                f"file_{str(uuid.uuid4())[:8]}"
+                            ),
+                            evidence_type="file_artifact",
+                            value=candidate,
+                            severity="medium",
+                            confidence=0.85
+                        )
+                    )
+
+        return items
+
+    def _parse_dumpfiles(self, lines: list) -> list:
+
+        items = []
+
+        for line in lines:
+
+            if line.strip().startswith("Saved file") or "->" in line:
+
+                # try to extract filename after arrow or prefix
+                if "->" in line:
+                    candidate = line.split("->")[-1].strip()
+                else:
+                    candidate = line.split()[-1]
+
+                items.append(
+                    self.make_evidence_item(
+                        artifact_id=f"dumpfile_{str(uuid.uuid4())[:8]}",
+                        evidence_type="extracted_file",
+                        value=candidate,
+                        severity="medium",
+                        confidence=0.88
+                    )
+                )
+
+        return items
+
+    def _parse_yarascan(self, lines: list) -> list:
+
+        items = []
+
+        for line in lines:
+
+            # yara output typically shows rule names
+            if line.strip():
+
+                items.append(
+                    self.make_evidence_item(
+                        artifact_id=f"yara_{str(uuid.uuid4())[:8]}",
+                        evidence_type="yara_match",
+                        value=line.strip(),
+                        severity="high",
+                        confidence=0.90
+                    )
+                )
+
+        return items
+
+    def _extract_strings(self, corpus: str) -> list:
+
+        import re
+
+        items = []
+
+        if not corpus:
+            return items
+
+        seen = set()
+
+        # onion addresses
+        for m in re.findall(r"[a-z2-7]{16,56}\.onion", corpus, flags=re.IGNORECASE):
+            v = m.lower()
+            if v in seen:
+                continue
+            seen.add(v)
+            items.append(
+                self.make_evidence_item(
+                    artifact_id=f"ioc_{str(uuid.uuid4())[:8]}",
+                    evidence_type="suspicious_domain",
+                    value=v,
+                    severity="high",
+                    confidence=0.95
+                )
+            )
+
+        # bitcoin/wallet-like addresses
+        for m in re.findall(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b", corpus):
+            if m in seen:
+                continue
+            seen.add(m)
+            items.append(
+                self.make_evidence_item(
+                    artifact_id=f"btc_{str(uuid.uuid4())[:8]}",
+                    evidence_type="suspicious_crypto",
+                    value=m,
+                    severity="high",
+                    confidence=0.93
+                )
+            )
+
+        # emails
+        for m in re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", corpus):
+            if m in seen:
+                continue
+            seen.add(m)
+            items.append(
+                self.make_evidence_item(
+                    artifact_id=f"email_{str(uuid.uuid4())[:8]}",
+                    evidence_type="email_address",
+                    value=m,
+                    severity="medium",
+                    confidence=0.85
+                )
+            )
+
+        # domains (coarse)
+        for m in re.findall(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b", corpus, flags=re.IGNORECASE):
+            v = m.lower()
+            if v in seen:
+                continue
+            seen.add(v)
+            items.append(
+                self.make_evidence_item(
+                    artifact_id=f"dom_{str(uuid.uuid4())[:8]}",
+                    evidence_type="suspicious_domain",
+                    value=v,
+                    severity="medium",
+                    confidence=0.80
+                )
+            )
 
         return items
 

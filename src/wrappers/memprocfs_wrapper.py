@@ -1,6 +1,7 @@
 import os
 import json
 import shutil
+import tempfile
 
 from src.wrappers.base_wrapper import BaseWrapper
 from src.utils.audit_log import log_action
@@ -39,6 +40,7 @@ class MemProcFSWrapper(BaseWrapper):
 
         except Exception as exc:
 
+            # log and attempt a secondary API invocation with -pagefile
             log_action(
                 tool_name=self.tool_name,
                 command=audit_cmd,
@@ -48,9 +50,16 @@ class MemProcFSWrapper(BaseWrapper):
                 error=str(exc)[:500],
             )
 
-            print(f"[MemProcFS] API could not parse image: {exc}")
+            print(f"[MemProcFS] API initial parse failed: {exc}")
 
-            return [self._failure_item()]
+            try:
+                print("[MemProcFS] retrying API with '-pagefile' option")
+                vmm = memprocfs.Vmm(["-device", image_path, "-pagefile"])  # retry
+            except Exception as exc2:
+                print(f"[MemProcFS] API retry failed: {exc2}")
+
+                # fall back to binary path if available
+                return self._run_binary(image_path)
 
         # success → record custody entry (hashes the input image)
         log_action(
@@ -120,9 +129,8 @@ class MemProcFSWrapper(BaseWrapper):
                 )
             ]
 
-        mount_dir = "/tmp/memprocfs_mount"
-
-        os.makedirs(mount_dir, exist_ok=True)
+        # Create a temporary mount directory in a portable location
+        mount_dir = tempfile.mkdtemp(prefix="memprocfs_mount_")
 
         command = [
             binary,
@@ -142,6 +150,11 @@ class MemProcFSWrapper(BaseWrapper):
 
             print("[MemProcFS] mount failed")
             print(stderr)
+            # attempt cleanup
+            try:
+                shutil.rmtree(mount_dir)
+            except Exception:
+                pass
 
             return [self._failure_item()]
 
@@ -149,21 +162,35 @@ class MemProcFSWrapper(BaseWrapper):
 
         items = []
 
-        process_path = f"{mount_dir}/forensic/processes"
 
-        if os.path.exists(process_path):
+        try:
+            process_path = Path(mount_dir) / "forensic" / "processes"
 
-            for name in os.listdir(process_path):
-
-                items.append(
-                    self.make_evidence_item(
-                        artifact_id=f"memprocfs_proc_{name}",
-                        evidence_type="memprocfs_process",
-                        value=f"Process artifact found: {name}",
-                        severity="medium",
-                        confidence=0.80,
+            if process_path.exists():
+                for name in os.listdir(process_path):
+                    items.append(
+                        self.make_evidence_item(
+                            artifact_id=f"memprocfs_proc_{name}",
+                            evidence_type="memprocfs_process",
+                            value=f"Process artifact found: {name}",
+                            severity="medium",
+                            confidence=0.80,
+                        )
                     )
-                )
+        finally:
+            # try to unmount if mounted, then remove the temporary dir
+            try:
+                # fusermount on Linux, umount as fallback
+                self.run_command(["fusermount", "-u", mount_dir], timeout=10)
+            except Exception:
+                try:
+                    self.run_command(["umount", mount_dir], timeout=10)
+                except Exception:
+                    pass
+            try:
+                shutil.rmtree(mount_dir)
+            except Exception:
+                pass
 
         if not items:
             items.append(self._no_artifacts_item())

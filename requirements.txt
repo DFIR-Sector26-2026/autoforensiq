@@ -30,9 +30,6 @@ customtkinter>=5.2.0       # modern dark-themed Tkinter widgets (launcher GUI)
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 tqdm>=4.66.0               # progress bars for long-running tool executions
-<<<<<<< HEAD
 
 # ── Test / dev ───────────────────────────────────────────────────────────────
 pytest>=8.0.0              # local test suite
-=======
->>>>>>> 7a8408c (Remove unused LIME dependency)
