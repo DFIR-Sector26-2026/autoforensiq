@@ -671,7 +671,17 @@ def main(args=None):
     if evidence_files:
         priority_list = [f"#{i + 1} {k}" for i, k in enumerate(evidence_files)]
         print(f"  [PRIORITY] {' -> '.join(priority_list)}")
-        
+
+    # Record which evidence file each tool drew from so the report can attribute
+    # findings to their source artifact. Keyed by tool because each tool reads a
+    # single evidence type — avoids threading a source_file field through every
+    # wrapper and the evidence_item schema.
+    case_context["evidence_sources"] = {
+        tool: Path(evidence_files[ev_key]).name
+        for tool, ev_key in _TOOL_EVIDENCE_MAP.items()
+        if ev_key in evidence_files
+    }
+
     preflight_check(evidence_files, execution_plan)
 
     raw_outputs = run_orchestrator(execution_plan, evidence_files)

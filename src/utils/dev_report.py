@@ -89,6 +89,18 @@ def _render_markdown(md_text: str) -> str:
             i += 1
             continue
 
+        # fenced code block — preserve whitespace (process tree indentation)
+        if stripped.startswith("```"):
+            open_ul = close_list(open_ul)
+            i += 1  # skip opening fence
+            code_lines: list[str] = []
+            while i < n and not lines[i].strip().startswith("```"):
+                code_lines.append(lines[i])
+                i += 1
+            i += 1  # skip closing fence (if present)
+            out.append("<pre>" + html.escape("\n".join(code_lines)) + "</pre>")
+            continue
+
         if stripped in ("---", "***", "___"):
             open_ul = close_list(open_ul)
             out.append("<hr>")
