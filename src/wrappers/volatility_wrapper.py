@@ -28,7 +28,30 @@ class ProcessNode:
 
 
 def serialize_tree(node):
+    def summarise_tree(node, depth=0, max_depth=5):
 
+        if not node:
+            return ""
+
+        if depth > max_depth:
+            return ""
+
+        lines = [
+            f"{'  ' * depth}{node.name} (PID:{node.pid})"
+        ]
+
+        for child in node.children:
+
+            child_text = summarise_tree(
+                child,
+                depth + 1,
+                max_depth
+            )
+
+            if child_text:
+                lines.append(child_text)
+
+        return "\n".join(lines)
     return {
         "pid": node.pid,
         "ppid": node.ppid,
@@ -360,10 +383,7 @@ class VolatilityWrapper(BaseWrapper):
                 self.make_evidence_item(
                     artifact_id=f"process_tree_{root.pid}",
                     evidence_type="process_tree",
-                    value=json.dumps(
-                        serialized_tree,
-                        indent=2
-                    ),
+                    value=summarise_tree(root),
                     severity="medium",
                     confidence=0.95,
                     linked_artifacts=[]
