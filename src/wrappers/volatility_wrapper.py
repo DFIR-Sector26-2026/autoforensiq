@@ -27,43 +27,27 @@ class ProcessNode:
         self.reasons = []
 
 
-def serialize_tree(node):
-    def summarise_tree(node, depth=0, max_depth=5):
+def summarise_tree(node, depth=0, max_depth=5):
+    """Human-readable indented process-tree summary used as the evidence value."""
 
-        if not node:
-            return ""
+    if not node:
+        return ""
 
-        if depth > max_depth:
-            return ""
+    if depth > max_depth:
+        return ""
 
-        lines = [
-            f"{'  ' * depth}{node.name} (PID:{node.pid})"
-        ]
+    lines = [
+        f"{'  ' * depth}{node.name} (PID:{node.pid})"
+    ]
 
-        for child in node.children:
+    for child in node.children:
 
-            child_text = summarise_tree(
-                child,
-                depth + 1,
-                max_depth
-            )
+        child_text = summarise_tree(child, depth + 1, max_depth)
 
-            if child_text:
-                lines.append(child_text)
+        if child_text:
+            lines.append(child_text)
 
-        return "\n".join(lines)
-    return {
-        "pid": node.pid,
-        "ppid": node.ppid,
-        "name": node.name,
-        "cmdline": node.cmdline,
-        "suspicious": node.suspicious,
-        "reasons": node.reasons,
-        "children": [
-            serialize_tree(child)
-            for child in node.children
-        ]
-    }
+    return "\n".join(lines)
 
 
 SUSPICIOUS_PARENTS = [
@@ -376,8 +360,6 @@ class VolatilityWrapper(BaseWrapper):
         tree_items = []
 
         for root in roots:
-
-            serialized_tree = serialize_tree(root)
 
             tree_items.append(
                 self.make_evidence_item(
