@@ -38,6 +38,7 @@ _MANIFEST: list[tuple[str, str, str]] = [
     ("unified_evidence.json",   "P4", "Aggregated evidence"),
     ("shap_explanations.json",  "P5", "ML / XAI"),
     ("final_report.md",         "P7", "Final report"),
+    ("ioc_report.md",           "P7", "IOC indicators"),
 ]
 
 _OUTPUT_FILENAME = "dev_report.html"
@@ -51,7 +52,7 @@ def _slug(text: str) -> str:
 # ── markdown ────────────────────────────────────────────────────────────────
 
 def _inline(text: str) -> str:
-    """Apply inline markdown (escape first, then re-introduce **bold** / `code`)."""
+    """Apply inline markdown (escape first, then re-introduce **bold** / `code` / <br>)."""
     out = html.escape(text)
     parts = out.split("`")  # `code` first so backticks aren't disturbed
     for i in range(1, len(parts), 2):
@@ -60,7 +61,17 @@ def _inline(text: str) -> str:
     segs = out.split("**")  # **bold**
     for i in range(1, len(segs), 2):
         segs[i] = f"<strong>{segs[i]}</strong>"
-    return "".join(segs)
+    out = "".join(segs)
+    # _italic_ — only at word boundaries, so intraword underscores (e.g.
+    # wannacry_dropper, ioc_report.md inside a code span) are left alone, matching
+    # GitHub's emphasis rules.
+    out = re.sub(r"(?<!\w)_(?=\S)(.+?)(?<=\S)_(?!\w)", r"<em>\1</em>", out)
+    # Honour an explicit <br> line break (e.g. the IOC badge on its own line in
+    # a table cell) — the only raw-HTML tag allowed; it arrives as &lt;br&gt;
+    # after escaping. Also restore &nbsp; (used to indent the badge), which
+    # html.escape turned into &amp;nbsp;.
+    out = re.sub(r"&lt;br\s*/?&gt;", "<br>", out)
+    return out.replace("&amp;nbsp;", "&nbsp;")
 
 
 def _render_markdown(md_text: str) -> str:
