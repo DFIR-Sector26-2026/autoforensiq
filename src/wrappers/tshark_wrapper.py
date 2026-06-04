@@ -83,7 +83,13 @@ class TsharkWrapper(BaseWrapper):
                 severity = "high" if port in SUSPICIOUS_PORTS else "low"
                 ts = str(agg["first_ts"]) if agg.get("first_ts") is not None else ""
                 items.append(self.make_evidence_item(
-                    artifact_id=f"conn_{src.replace('.','_')}_{dst.replace('.','_')}_{dport}_{int(agg['first_ts'])}",
+                    artifact_id=(
+		        f"conn_"
+                        f"{src.replace('.','_')}_"
+                        f"{dst.replace('.','_')}_"
+                        f"{dport}_"
+                        f"{ts or 'notime'}"
+                   ),
                     evidence_type="network_connection",
                     value=f"TCP {src} → {dst}:{dport} ({agg['bytes']} bytes, {agg['packets']} packets)",
                     severity=severity,
@@ -129,7 +135,12 @@ class TsharkWrapper(BaseWrapper):
             )
             severity = "high" if looks_random and not self._dns_is_allowlisted(domain) else "low"
             items.append(self.make_evidence_item(
-                artifact_id=f"dns_{domain.replace('.','_')[:30]}",
+                artifact_id=(
+                    f"dns_"
+                    f"{src.replace('.','_')}_"
+                    f"{domain.replace('.','_')[:30]}_"
+                    f"{timestamp}"
+                ),
                 evidence_type="dns_query",
                 value=f"DNS query from {src} → {domain} (label entropy: {entropy:.2f})",
                 severity=severity,
@@ -168,14 +179,15 @@ class TsharkWrapper(BaseWrapper):
                     f"http_"
                     f"{src.replace('.','_')}_"
                     f"{host[:20]}_"
-                    f"{hashlib.md5(uri.encode()).hexdigest()[:8]}"
+                    f"{hashlib.md5(uri.encode()).hexdigest()[:8]}_"
+                    f"{timestamp}"
                 ),
                 evidence_type="http_request",
                 value=f"HTTP {src} → {host}{uri}",
                 severity="medium",
                 confidence=0.70,
                 timestamp=timestamp
-            ))
+            ))	
         print(f"  [TSHARK] HTTP requests → {len(items)} items")
         return items
 

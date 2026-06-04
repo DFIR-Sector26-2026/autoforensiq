@@ -54,20 +54,6 @@ def summarise_tree(node, depth=0, max_depth=5):
     return "\n".join(lines)
 
 
-def serialize_tree(node):
-
-    return {
-        "pid": node.pid,
-        "ppid": node.ppid,
-        "name": node.name,
-        "cmdline": node.cmdline,
-        "suspicious": node.suspicious,
-        "reasons": node.reasons,
-        "children": [
-            serialize_tree(child)
-            for child in node.children
-        ]
-    }
 
 SUSPICIOUS_PARENTS = [
     "cmd.exe",
