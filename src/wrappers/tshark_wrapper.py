@@ -2,7 +2,7 @@ import os
 import json
 import subprocess
 from src.wrappers.base_wrapper import BaseWrapper
-
+import hashlib
 SUSPICIOUS_PORTS = [4444, 4445, 1337, 31337, 8888, 9999, 6667, 6668]
 SUSPICIOUS_PROTOS = ["dns", "http", "smb", "ftp"]
 
@@ -164,7 +164,12 @@ class TsharkWrapper(BaseWrapper):
             host = parts[2] if len(parts) > 2 else ""
             uri  = parts[3] if len(parts) > 3 else ""
             items.append(self.make_evidence_item(
-                artifact_id=f"http_{src.replace('.','_')}_{host[:20]}",
+                artifact_id=(
+                    f"http_"
+                    f"{src.replace('.','_')}_"
+                    f"{host[:20]}_"
+                    f"{hashlib.md5(uri.encode()).hexdigest()[:8]}"
+                ),
                 evidence_type="http_request",
                 value=f"HTTP {src} → {host}{uri}",
                 severity="medium",
