@@ -3,7 +3,7 @@ import json
 import uuid
 from pathlib import Path
 
-from src.wrappers.base_wrapper import BaseWrapper
+from .base_wrapper import BaseWrapper
 
 PLUGINS = [
     "windows.pslist",
@@ -550,10 +550,19 @@ class VolatilityWrapper(BaseWrapper):
 
                 grouped_regions[pid]["count"] += 1
 
-                # heuristics: detect RWX regions or embedded PE/shellcode markers
-                if "rwx" in flags or "rw-x" in flags or "rx" in flags:
+                # heuristics: detect RWX regions or PAGE_EXECUTE-style flags
+                # Volatility/OS may report PAGE_EXECUTE_* tokens rather than short 'rwx' tokens
+                if (
+                    "rwx" in flags or
+                    "rw-x" in flags or
+                    "rx" in flags or
+                    "page_execute" in flags or
+                    "page_exec" in flags or
+                    ("execute" in flags and "write" in flags)
+                ):
                     grouped_regions[pid]["has_rwx"] = True
 
+                # detect embedded PE signatures / shellcode markers
                 if "mz" in flags or "pe" in flags or "shellcode" in flags:
                     grouped_regions[pid]["has_pe"] = True
 
@@ -660,8 +669,8 @@ class VolatilityWrapper(BaseWrapper):
 
             lower = line.lower()
 
-            # crude heuristic: look for absolute paths
-            if "\\\" in line or "/" in line:
+            # crude heuristic: look for absolute paths (Windows backslash or Unix slash)
+            if "\\" in line or "/" in line:
 
                 parts = line.split()
 
