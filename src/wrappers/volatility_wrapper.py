@@ -28,6 +28,7 @@ class ProcessNode:
 
 
 def summarise_tree(node, depth=0, max_depth=5):
+    """Human-readable indented process-tree summary used as the evidence value."""
 
     if not node:
         return ""
@@ -67,7 +68,6 @@ def serialize_tree(node):
             for child in node.children
         ]
     }
-
 
 SUSPICIOUS_PARENTS = [
     "cmd.exe",
@@ -379,8 +379,6 @@ class VolatilityWrapper(BaseWrapper):
         tree_items = []
 
         for root in roots:
-
-            serialized_tree = serialize_tree(root)
 
             tree_items.append(
                 self.make_evidence_item(

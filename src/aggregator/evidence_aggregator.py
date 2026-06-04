@@ -128,9 +128,13 @@ def sort_evidence_items(items: list[dict]) -> list[dict]:
     """
     def sort_key(item: dict) -> tuple:
         severity_val = SEVERITY_ORDER.get(item.get("severity", "low"), 0)
+        # Within a tier, rule-based catalog matches (ioc_match populated by the
+        # re-scorer) outrank pure-heuristic items so real IOCs survive the
+        # downstream findings cap
+        has_ioc = 1 if item.get("ioc_match") else 0
         confidence_val = -item.get("confidence", 0.5)  # negative for desc order
         tool = item.get("source_tool", "")
-        return (-severity_val, confidence_val, tool)
+        return (-severity_val, -has_ioc, confidence_val, tool)
 
     return sorted(items, key=sort_key)
 

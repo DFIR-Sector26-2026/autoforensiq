@@ -42,6 +42,20 @@ def test_sort_by_severity_and_confidence():
     assert sorted_items[2]["artifact_id"] == "a"
 
 
+def test_sort_rule_match_outranks_heuristic_within_tier():
+    """Within the same severity, a rule-based ioc_match item must sort above a
+    pure-heuristic item even if the heuristic has higher confidence (4.1)."""
+    items = [
+        {"artifact_id": "heuristic", "severity": "high", "confidence": 0.9,
+         "source_tool": "tshark"},
+        {"artifact_id": "rule", "severity": "high", "confidence": 0.6,
+         "source_tool": "tshark", "ioc_match": ["c2_port"]},
+    ]
+    sorted_items = sort_evidence_items(items)
+    assert sorted_items[0]["artifact_id"] == "rule"
+    assert sorted_items[1]["artifact_id"] == "heuristic"
+
+
 def test_build_indices():
     """Test that indices group items correctly."""
     items = [
