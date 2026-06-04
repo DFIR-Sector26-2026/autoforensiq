@@ -67,20 +67,6 @@ def serialize_tree(node):
             for child in node.children
         ]
     }
-def serialize_tree(node):
-
-    return {
-        "pid": node.pid,
-        "ppid": node.ppid,
-        "name": node.name,
-        "cmdline": node.cmdline,
-        "suspicious": node.suspicious,
-        "reasons": node.reasons,
-        "children": [
-            serialize_tree(child)
-            for child in node.children
-        ]
-    }
 
 
 SUSPICIOUS_PARENTS = [
@@ -411,8 +397,6 @@ class VolatilityWrapper(BaseWrapper):
         items.extend(relation_items)
 
         return items
-
-
     def _parse_cmdline(self, lines: list) -> list:
 
         items = []
@@ -441,9 +425,44 @@ class VolatilityWrapper(BaseWrapper):
 
             lower = line.lower()
 
+            if (
+                "unsatisfied requirement" in lower or
+                "unable to validate" in lower or
+                "traceback" in lower
+            ):
+                items.append(
+                    self.make_evidence_item(
+                        artifact_id=f"cmdline_warning_{len(items)}",
+                        evidence_type="parser_warning",
+                        value=line,
+                        severity="medium",
+                        confidence=1.0
+                    )
+                )
+                continue
+
             parts = line.split()
 
             pid = parts[0] if len(parts) > 0 else "unknown"
+
+            if len(parts) == 1:
+                items.append(
+                    self.make_evidence_item(
+                        artifact_id=f"cmdline_empty_{pid}",
+                        evidence_type="commandline_missing",
+                        value=line,
+                        severity="low",
+                        confidence=1.0
+                    )
+                )
+                continue
+
+            process_name = parts[1]
+
+            cmdline = line
+
+            if len(parts) > 2:
+                cmdline = line.split(process_name, 1)[1].strip()
 
             severity = (
                 "high"
@@ -464,7 +483,7 @@ class VolatilityWrapper(BaseWrapper):
                 self.make_evidence_item(
                     artifact_id=f"cmdline_{pid}",
                     evidence_type="commandline",
-                    value=line,
+                    value=cmdline,
                     severity=severity,
                     confidence=confidence
                 )
