@@ -54,3 +54,36 @@ def test_evidence_item_schema_matches():
     item = w.make_evidence_item("id_001","process","test value")
     for key in schema["required"]:
         assert key in item, f"Schema field '{key}' missing from evidence_item output"
+
+
+# ─────────────────────────────────────────────────────────────
+# Evidence-file mapping (multiple artifacts per type)
+# ─────────────────────────────────────────────────────────────
+
+def test_map_evidence_files_keeps_multiple_memory_images():
+    import autoforensiq
+    mapping = autoforensiq._map_evidence_files([
+        "/case/memory_dump/wannacry.raw",
+        "/case/memory_dump/0zapftis.vmem",
+    ])
+    # Both images survive instead of the second clobbering the first.
+    assert mapping["memory_dump"] == [
+        "/case/memory_dump/wannacry.raw",
+        "/case/memory_dump/0zapftis.vmem",
+    ]
+
+
+def test_map_evidence_files_recognizes_vmem_by_extension():
+    import autoforensiq
+    mapping = autoforensiq._map_evidence_files(["/elsewhere/snapshot.vmem"])
+    assert mapping.get("memory_dump") == ["/elsewhere/snapshot.vmem"]
+
+
+def test_map_evidence_files_separates_types():
+    import autoforensiq
+    mapping = autoforensiq._map_evidence_files([
+        "/c/mem.raw", "/c/cap.pcap", "/c/disk.e01",
+    ])
+    assert mapping["memory_dump"] == ["/c/mem.raw"]
+    assert mapping["pcap"] == ["/c/cap.pcap"]
+    assert mapping["disk_image"] == ["/c/disk.e01"]

@@ -630,6 +630,7 @@ RECOMMENDATIONS_BY_CASE = {
 
 _TOOL_TO_EVIDENCE = {
     "volatility3": "memory_dump",
+    "memprocfs":   "memory_dump",
     "tshark":      "pcap",
     "tsk_fls":     "disk_image",
     "regripper":   "registry_hive",
@@ -663,70 +664,485 @@ def _derive_severity(anomaly_items):
     return best.capitalize() if best else "Informational"
 
 
+def _is_internal_ip(ip):
+    """True for non-routable / local IPs that don't belong in an external IOC
+    table (loopback, broadcast, link-local, and RFC1918 private ranges). The
+    affected host's own internal IP is reported as an affected system, not an
+    indicator of compromise."""
+    octets = ip.split(".")
+    if len(octets) != 4 or not all(o.isdigit() for o in octets):
+        return True
+    a, b = int(octets[0]), int(octets[1])
+    if a in (0, 10, 127, 255):
+        return True
+    if a == 169 and b == 254:
+        return True
+    if a == 172 and 16 <= b <= 31:
+        return True
+    if a == 192 and b == 168:
+        return True
+    return False
+
+
+# ─── IOC extraction (shared) ──────────────────────────────────
+# Module-scope so both the per-item Key Findings "Indicators" column and the
+# deduped _extract_iocs rollup use identical patterns and gating.
+_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_HASH_RE = re.compile(r"\b[0-9a-fA-F]{32,64}\b")
+_DOMAIN_RE = re.compile(r"→\s*([a-z0-9][a-z0-9.\-]*\.[a-z]{2,})", re.IGNORECASE)
+_URL_RE = re.compile(r"→\s*(\S+/\S*)")
+_FNAME_EXTS = (".exe", ".dll", ".bat", ".ps1", ".vbs", ".cmd", ".scr")
+# Aggregate items re-list many process names (the whole tree, a parent->child
+# pair); tokenizing them would stamp the aggregate's severity/ioc_match onto
+# every benign name, so files come only from discrete items.
+_AGG_PROC_TYPES = {"process_tree", "process_relation"}
+
+_IOC_CTX = {
+    "network_connection": "Network connection",
+    "dns_query": "DNS query",
+    "http_request": "HTTP request",
+}
+
+
+# Analyst-facing labels for the Key Findings "Type" column. The raw
+# evidence_type values are pipeline-internal (e.g. memprocfs_process, ioc);
+# this maps them to vocabulary a reader of the report expects. Unknown types
+# fall back to a title-cased form of the raw value.
+_FINDING_TYPE_LABEL = {
+    "process":            "Process",
+    "memprocfs_process":  "Process",
+    "process_relation":   "Process Relationship",
+    "process_tree":       "Process Tree",
+    "injected_code":      "Code Injection",
+    "malfind":            "Code Injection",
+    "network_connection": "Network Connection",
+    "dns_query":          "DNS Query",
+    "http_request":       "HTTP Request",
+    "file_artifact":      "File Artifact",
+    "registry_key":       "Registry Key",
+    "ioc":                "IOC Match",
+}
+
+
+def _finding_type(etype):
+    """Analyst-facing label for an evidence_type (Key Findings 'Type' column)."""
+    if not etype:
+        return "-"
+    return _FINDING_TYPE_LABEL.get(etype, etype.replace("_", " ").title())
+
+
+def _primary_name(val):
+    """The single-token process/file name in a flagged item's value, e.g.
+    "Suspicious process detected: @WanaDecryptor@" or "@WanaDecryptor@ (PID:740 …)"
+    → "@WanaDecryptor@". Returns None when the value isn't a single bare name
+    (e.g. "Process injection detected") so free-text doesn't become a fake IOC."""
+    low = val.lower()
+    if "detected:" in low:
+        val = val[low.index("detected:") + len("detected:"):]
+    name = val.split(" (")[0].strip()
+    return name if name and " " not in name else None
+
+
+def _item_indicators(item):
+    """Atomic IOCs extracted from one evidence item as (type, indicator) tuples
+    (order-stable, undeduped). Shared by the Key Findings inline Indicators
+    column and _extract_iocs (which dedups these across all items)."""
+    if not isinstance(item, dict):
+        return []
+    val = str(item.get("value", ""))
+    etype = item.get("evidence_type", "")
+    out = []
+
+    if etype == "dns_query":
+        m = _DOMAIN_RE.search(val)
+        if m:
+            out.append(("Domain", m.group(1).rstrip(".")))
+    elif etype == "http_request":
+        m = _URL_RE.search(val)
+        if m:
+            out.append(("URL", m.group(1)))
+
+    for ip in _IP_RE.findall(val):
+        if not _is_internal_ip(ip):
+            out.append(("IP Address", ip))
+    for h in _HASH_RE.findall(val):
+        if len(h) == 32:
+            out.append(("MD5 Hash", h))
+        elif len(h) == 64:
+            out.append(("SHA-256 Hash", h))
+
+    # Only surface a filename as an IOC when the item carries actual signal: an
+    # elevated severity or an IOC-catalog match. A bare low-severity process/file
+    # observation isn't an indicator and would just flood with benign binaries.
+    file_signal = (
+        _SEVERITY_RANK.get(str(item.get("severity", "low")).lower(), 0)
+        >= _SEVERITY_RANK["high"]
+        or bool(item.get("ioc_match"))
+    )
+    if etype not in _AGG_PROC_TYPES and file_signal:
+        ext_tokens = [t for t in val.split() if t.lower().endswith(_FNAME_EXTS)]
+        if ext_tokens:
+            for tok in ext_tokens:
+                out.append(("Suspicious File", tok[:60]))
+        elif etype in ("process", "memprocfs_process", "ioc"):
+            # Some flagged binaries have no extension (e.g. "@WanaDecryptor@").
+            # Recover the bare process/file name so the IOC isn't dropped.
+            name = _primary_name(val)
+            if name:
+                out.append(("Suspicious File", name[:60]))
+
+    if val.startswith(("HKEY", "HKLM", "HKCU")):
+        out.append(("Registry Key", val[:60]))
+
+    return out
+
+
+def _indicators_cell(item):
+    """Render the Key Findings 'Indicators / IOC Match' column for one item:
+    the atomic indicators it yielded plus any IOC-catalog match badge."""
+    parts, seen = [], set()
+    for ioc_type, ind in _item_indicators(item):
+        key = (ioc_type, ind)
+        if key in seen:
+            continue
+        seen.add(key)
+        parts.append(f"`{ind}` ({ioc_type})")
+    cell = " · ".join(parts)
+    matches = sorted(set(item.get("ioc_match") or []))
+    if matches:
+        # Put the catalog-match badge on its own line within the same cell.
+        # `<br>` survives _md_cell (no pipe/whitespace) and renders as a line
+        # break in both the dev_report HTML and raw-markdown views. The trailing
+        # &nbsp; indents the badge so it lines up under the indicator above it (a
+        # plain space would be collapsed by the browser after a line break).
+        cell = (cell + "<br>&nbsp;" if cell else "") + f"**IOC: {', '.join(matches)}**"
+    return _md_cell(cell or "-")
+
+
 def _extract_iocs(evidence_items):
-    import re as _re
-    IP_RE = _re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-    HASH_RE = _re.compile(r"\b[0-9a-fA-F]{32,64}\b")
-    FNAME_EXTS = (".exe", ".dll", ".bat", ".ps1", ".vbs", ".cmd", ".scr")
-    iocs = []
-    seen = set()
+    """Deduped IOC rollup: every atomic indicator across all items, annotated
+    with the highest severity it was seen at, the contexts it appeared in, and
+    any IOC-catalog matches. Sorted critical-first. Retained as a reusable
+    indicator export; the report itself now inlines indicators per finding."""
+    records = {}
+
+    def _add(ioc_type, indicator, item, context):
+        if not indicator:
+            return
+        sev = str(item.get("severity", "low")).lower()
+        key = (ioc_type, indicator)
+        rec = records.get(key)
+        if rec is None:
+            rec = {
+                "type": ioc_type,
+                "indicator": indicator,
+                "severity": sev,
+                "tool": item.get("source_tool", "-"),
+                "contexts": set(),
+                "matches": set(),
+                "tools": set(),
+                "artifact_ids": set(),
+            }
+            records[key] = rec
+        # An indicator inherits the highest severity of any item it appeared in.
+        if _SEVERITY_RANK.get(sev, 0) > _SEVERITY_RANK.get(rec["severity"], 0):
+            rec["severity"] = sev
+        if context:
+            rec["contexts"].add(context)
+        for m in (item.get("ioc_match") or []):
+            rec["matches"].add(m)
+        # Track every contributing tool + artifact so the detailed IOC report can
+        # resolve source files and the per-indicator XAI explanation.
+        if item.get("source_tool"):
+            rec["tools"].add(item["source_tool"])
+        if item.get("artifact_id"):
+            rec["artifact_ids"].add(item["artifact_id"])
+
     for item in evidence_items:
         if not isinstance(item, dict):
             continue
-        val = str(item.get("value", ""))
-        tool = item.get("source_tool", "-")
-        for ip in IP_RE.findall(val):
-            parts = ip.split(".")
-            if parts[0] in ("127", "0", "255", "169"):
-                continue
-            key = ("IP Address", ip)
-            if key not in seen:
-                seen.add(key)
-                iocs.append({"type": "IP Address", "indicator": ip, "tool": tool})
-        for h in HASH_RE.findall(val):
-            if len(h) in (32, 64):
-                htype = "MD5 Hash" if len(h) == 32 else "SHA-256 Hash"
-                key = (htype, h)
-                if key not in seen:
-                    seen.add(key)
-                    iocs.append({"type": htype, "indicator": h[:20] + "...", "tool": tool})
-        for ext in FNAME_EXTS:
-            if ext in val.lower():
-                for tok in val.split():
-                    if tok.lower().endswith(ext):
-                        key = ("Suspicious File", tok)
-                        if key not in seen:
-                            seen.add(key)
-                            iocs.append({"type": "Suspicious File", "indicator": tok[:60], "tool": tool})
-        if val.startswith(("HKEY", "HKLM", "HKCU")):
-            key = ("Registry Key", val[:60])
-            if key not in seen:
-                seen.add(key)
-                iocs.append({"type": "Registry Key", "indicator": val[:60], "tool": tool})
+        etype = item.get("evidence_type", "")
+        ctx = _IOC_CTX.get(etype, etype or "evidence")
+        for ioc_type, indicator in _item_indicators(item):
+            _add(ioc_type, indicator, item, ctx)
+
+    iocs = list(records.values())
+    iocs.sort(key=lambda r: (
+        -_SEVERITY_RANK.get(r["severity"], 0),   # critical first
+        0 if r["matches"] else 1,                # catalog matches ahead of bare observations
+        r["type"],
+        r["indicator"],
+    ))
     return iocs
 
 
-def _build_process_tree(evidence_items, anomaly_ids):
-    import re as _re
-    procs = [
-        e for e in evidence_items
-        if isinstance(e, dict)
-        and (e.get("evidence_type") == "process" or "pid" in str(e.get("value", "")).lower())
+def _md_cell(value) -> str:
+    """Make an arbitrary tool string safe inside a GitHub-markdown table cell.
+
+    Newlines split the row and unescaped pipes split the columns, so a value
+    from any tool (e.g. a multiline JSON blob) could otherwise corrupt the
+    table. Collapse whitespace and escape pipes.
+    """
+    if value is None:
+        return "-"
+    s = str(value).replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+    return " ".join(s.split()).strip() or "-"
+
+
+def _truncate(text, limit=100):
+    """Shorten to <= limit chars on a word boundary, adding an ellipsis, so the
+    text isn't cut mid-word (e.g. '...anomaly d'). Short text is returned as-is."""
+    s = str(text)
+    if len(s) <= limit:
+        return s
+    cut = s[:limit].rsplit(" ", 1)[0].rstrip()
+    return (cut or s[:limit].rstrip()) + "…"
+
+
+def _ioc_xai_note(rec, anomaly_lookup, limit=100):
+    """First XAI summary among the indicator's contributing artifacts, if any."""
+    for aid in sorted(rec.get("artifact_ids") or []):
+        note = anomaly_lookup.get(aid)
+        if note and note != "-":
+            return _truncate(note, limit)
+    return "-"
+
+
+def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None):
+    """Standalone, human-readable Indicators-of-Compromise document.
+
+    The final report only carries a brief IOC overview; this is the full list,
+    one row per deduped indicator, with the provenance (source file) and the XAI
+    explanation that the inline Key Findings column can't fit per-indicator.
+    """
+    tool_sources = tool_sources or {}
+    anomaly_lookup = anomaly_lookup or {}
+    iocs = _extract_iocs(all_items)
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    header = (
+        "# AutoForensiq — Indicators of Compromise\n\n"
+        f"_Generated {generated}_\n\n"
+    )
+    if not iocs:
+        return header + "_No indicators of compromise extracted from evidence._\n"
+
+    by_type, by_sev = {}, {}
+    for r in iocs:
+        by_type[r["type"]] = by_type.get(r["type"], 0) + 1
+        by_sev[r["severity"]] = by_sev.get(r["severity"], 0) + 1
+    type_breakdown = ", ".join(f"{n} {t}" for t, n in sorted(by_type.items()))
+    sev_breakdown = ", ".join(
+        f"{by_sev[s]} {s}" for s in ("critical", "high", "medium", "low")
+        if by_sev.get(s)
+    )
+    summary = (
+        f"**{len(iocs)}** unique indicator(s) — {type_breakdown}.\n\n"
+        f"By severity: {sev_breakdown}.\n\n"
+    )
+
+    rows = [
+        "| Indicator | Type | Severity | IOC Match | Context(s) | Source (tool · file) | Why (XAI) |",
+        "|-----------|------|----------|-----------|------------|----------------------|-----------|",
     ]
-    if not procs:
-        return "_No process artifacts in evidence._"
-    lines = []
-    for item in procs[:20]:
+    for r in iocs:
+        matches = ", ".join(sorted(r["matches"])) if r["matches"] else "-"
+        contexts = ", ".join(sorted(r["contexts"])) if r["contexts"] else "-"
+        srcs = []
+        for tool in sorted(r.get("tools") or ([r["tool"]] if r.get("tool") else [])):
+            src_file = tool_sources.get(tool, "-")
+            srcs.append(tool if src_file in ("-", "", None) else f"{tool} · {src_file}")
+        src_cell = "; ".join(srcs) if srcs else "-"
+        xai = _ioc_xai_note(r, anomaly_lookup)
+        rows.append(
+            f"| `{_md_cell(r['indicator'])}` "
+            f"| {_md_cell(r['type'])} "
+            f"| {_md_cell(r['severity'].upper())} "
+            f"| {_md_cell(matches)} "
+            f"| {_md_cell(contexts)} "
+            f"| {_md_cell(src_cell)} "
+            f"| {_md_cell(xai)} |"
+        )
+    return header + summary + "\n".join(rows) + "\n"
+
+
+# Process evidence types we accept into the tree. Deliberately excludes
+# network_connection / injected_code / file_artifact etc. whose free-text value
+# may contain the substring "pid" — those polluted the old heuristic filter.
+_PROCESS_EVIDENCE_TYPES = {"process", "memprocfs_process"}
+
+# Match PID/PPID across each tool's delimiter style (PID:1940, PID 1234,
+# "pid": 1636). The negative lookbehind on (?<![a-z]) stops the bare-PID pattern
+# from matching the "pid" inside "ppid".
+_PID_RE = re.compile(r'(?<![a-z])"?pid"?[\s:=]+(\d+)', re.IGNORECASE)
+_PPID_RE = re.compile(r'"?ppid"?[\s:=]+(\d+)', re.IGNORECASE)
+
+_TREE_ROW_CAP = 40
+
+
+def _parse_flat_pids(value: str):
+    """Extract (pid, ppid) from a flat process item's free-text value.
+
+    Returns string PIDs or None when absent. PPID is parsed first so the
+    bare-PID lookbehind never picks up the digits belonging to "ppid".
+    """
+    ppid_m = _PPID_RE.search(value)
+    pid_m = _PID_RE.search(value)
+    pid = pid_m.group(1) if pid_m else None
+    ppid = ppid_m.group(1) if ppid_m else None
+    return pid, ppid
+
+
+def _build_process_tree(evidence_items, anomaly_ids, tool_sources=None):
+    """Render a parent->child process hierarchy from flat process evidence.
+
+    Volatility's ``process_tree`` value is now a human-readable text summary (not
+    JSON), so the hierarchy is rebuilt from the flat ``process`` /
+    ``memprocfs_process`` items — each carries PID/PPID and the IOC-rescored
+    severity — linked child->parent by PPID. ``process_relation`` items mark
+    suspicious lineage. Only flagged processes and the parent chain that anchors
+    them are shown, with a severity word and the source evidence file per row.
+    """
+    tool_sources = tool_sources or {}
+    items = [e for e in evidence_items if isinstance(e, dict)]
+
+    # node: {pid, ppid, name, suspicious, severity, aid, source_tool, ioc_match}
+    nodes: dict = {}
+    child_order: dict = {}  # pid -> ordered list of child pids
+
+    def _norm_pid(p):
+        return str(p) if p is not None and str(p) != "" else None
+
+    def _ensure(pid, **fields):
+        pid = _norm_pid(pid)
+        if pid is None:
+            return None
+        node = nodes.get(pid)
+        if node is None:
+            node = {"pid": pid, "ppid": None, "name": "", "suspicious": False,
+                    "severity": "", "aid": "", "source_tool": "", "ioc_match": []}
+            nodes[pid] = node
+        for k, v in fields.items():
+            # don't clobber a populated value with an empty one
+            if v not in (None, "", []) and not node.get(k):
+                node[k] = v
+        return node
+
+    def _link(parent_pid, child_pid):
+        parent_pid = _norm_pid(parent_pid)
+        child_pid = _norm_pid(child_pid)
+        if parent_pid is None or child_pid is None or parent_pid == child_pid:
+            return
+        kids = child_order.setdefault(parent_pid, [])
+        if child_pid not in kids:
+            kids.append(child_pid)
+
+    # 1) Flat process items build the node index + PPID hierarchy.
+    for item in items:
+        if item.get("evidence_type") not in _PROCESS_EVIDENCE_TYPES:
+            continue
+        pid, ppid = _parse_flat_pids(str(item.get("value", "")))
+        if pid is None:
+            continue
         val = str(item.get("value", ""))
-        sev = str(item.get("severity", "")).lower()
-        aid = item.get("artifact_id", "")
-        flag = "[!]" if sev in ("critical", "high") or aid in anomaly_ids else "[ ]"
-        pid_m = _re.search(r"pid[:\s=]+(\d+)", val, _re.IGNORECASE)
-        ppid_m = _re.search(r"ppid[:\s=]+(\d+)", val, _re.IGNORECASE)
-        pid = pid_m.group(1) if pid_m else "?"
-        ppid = ppid_m.group(1) if ppid_m else "?"
-        proc_name = (val[:40].split()[0] if val.split() else item.get("artifact_id", "unknown"))
-        lines.append(f"  {flag}  {proc_name:<36}  PID {pid:<6}  PPID {ppid}")
+        name = val.split()[0] if val.split() else item.get("artifact_id", "unknown")
+        _ensure(
+            pid, ppid=ppid, name=name,
+            severity=str(item.get("severity", "")).lower(),
+            aid=item.get("artifact_id", ""),
+            source_tool=item.get("source_tool", ""),
+            ioc_match=item.get("ioc_match", []),
+        )
+        if ppid:
+            _link(ppid, pid)
+
+    if not nodes:
+        return "_No process artifacts in evidence._"
+
+    # 2) process_relation items flag a suspicious parent->child lineage. The child
+    #    PID is the last linked artifact (proc_<child>) or the trailing id segment
+    #    (relation_<parent>_<child>); mark it so the lineage survives the prune.
+    for item in items:
+        if item.get("evidence_type") != "process_relation":
+            continue
+        child_pid = None
+        linked = item.get("linked_artifacts") or []
+        if linked:
+            m = re.search(r"(\d+)", str(linked[-1]))
+            child_pid = m.group(1) if m else None
+        if child_pid is None:
+            m = re.search(r"relation_\d+_(\d+)", str(item.get("artifact_id", "")))
+            child_pid = m.group(1) if m else None
+        if child_pid in nodes:
+            nodes[child_pid]["suspicious"] = True
+
+    # Roots: a PID with no PPID, or whose PPID points outside the captured set
+    # (e.g. System's ppid 0, or a parent that wasn't collected). Derived from the
+    # node's own ppid so a real root isn't hidden behind a phantom parent.
+    roots = sorted(
+        pid for pid in nodes
+        if not nodes[pid]["ppid"] or nodes[pid]["ppid"] not in nodes
+    )
+
+    # 3) Keep only flagged processes and the ancestor chain that anchors them, so
+    #    benign noise drops out while the lineage to a malicious process stays.
+    def _is_flagged(node):
+        return (node["severity"] in ("critical", "high")
+                or node["suspicious"]
+                or node["aid"] in anomaly_ids
+                or bool(node["ioc_match"]))
+
+    keep: set = set()
+    for pid, node in nodes.items():
+        if not _is_flagged(node):
+            continue
+        keep.add(pid)
+        cur = node["ppid"]            # walk ancestors (bounded to guard cycles)
+        seen = 0
+        while cur in nodes and cur not in keep and seen < len(nodes):
+            keep.add(cur)
+            cur = nodes[cur]["ppid"]
+            seen += 1
+
+    if not keep:
+        return (f"_No flagged processes — {len(nodes)} process(es) captured "
+                "(see output/unified_evidence.json)._")
+
+    lines: list = []
+    emitted: set = set()
+
+    def _emit(pid, prefix="", child_prefix=""):
+        # prefix renders before this node's name (box-drawing connectors so the
+        # hierarchy survives renderers that collapse leading whitespace).
+        if pid not in keep or len(lines) >= _TREE_ROW_CAP or pid in emitted:
+            return
+        emitted.add(pid)
+        node = nodes[pid]
+        sev = (node["severity"] or "-").upper()
+        name = node["name"] or node["aid"] or "unknown"
+        label = f"{prefix}{name}"
+        ppid = node["ppid"] or "?"
+        src = tool_sources.get(node["source_tool"], "-")
+        lines.append(
+            f"  {sev:<8}  {label:<44}  PID {pid:<6}  PPID {ppid:<6}  {src}"
+        )
+        kids = [c for c in child_order.get(pid, []) if c in keep]
+        for idx, cpid in enumerate(kids):
+            last = idx == len(kids) - 1
+            _emit(
+                cpid,
+                prefix=child_prefix + ("└─ " if last else "├─ "),
+                child_prefix=child_prefix + ("   " if last else "│  "),
+            )
+
+    for root in roots:
+        _emit(root)
+    # Any kept node never reached from a root (cyclic/orphaned data) — show flat.
+    for pid in sorted(nodes):
+        _emit(pid)
+
+    if len(keep) > len(emitted):
+        lines.append(f"  …  ({len(keep)} flagged/anchor processes; output truncated)")
     return "\n".join(lines)
 
 
@@ -779,12 +1195,14 @@ def _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence):
 
 
 def _build_evidence_coverage(tools_ran):
-    covered = set()
+    # Map each covered evidence type to the tool(s) that actually analysed it,
+    # so a type backed by more than one tool (e.g. memory_dump via volatility3
+    # and memprocfs) is attributed accurately rather than to a single winner.
+    covered = {}
     for t in tools_ran:
         ev = _TOOL_TO_EVIDENCE.get(t)
         if ev:
-            covered.add(ev)
-    tool_by_ev = {v: k for k, v in _TOOL_TO_EVIDENCE.items()}
+            covered.setdefault(ev, []).append(t)
     rows = [
         "| Evidence Type | Status | Forensic Tool | Notes |",
         "|---------------|--------|---------------|-------|",
@@ -792,15 +1210,14 @@ def _build_evidence_coverage(tools_ran):
     for ev in _ALL_EVIDENCE_TYPES:
         ev_label = ev.replace("_", " ").title()
         if ev in covered:
+            tool_str = ", ".join(sorted(set(covered[ev])))
             rows.append(
-                f"| {ev_label} | OK Analysed "
-                f"| {tool_by_ev.get(ev, '-')} | - |"
+                f"| {ev_label} | Analysed | {tool_str} | - |"
             )
         else:
             note = _ACQUIRE_NOTES.get(ev, "Collect evidence to enable analysis.")
             rows.append(
-                f"| {ev_label} | NOT Not provided "
-                f"| - | {note} |"
+                f"| {ev_label} | Not provided | - | {note} |"
             )
     return "\n".join(rows)
 
@@ -819,6 +1236,10 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     summary    = case_context.get("raw_incident_summary", "No summary available.")
     hypotheses = case_context.get("hypotheses", [])
 
+    # tool -> source evidence file (recorded by the orchestrator). Lets findings
+    # be attributed to the artifact they came from.
+    tool_sources = case_context.get("evidence_sources", {})
+
     tools_ran = unified_evidence.get("tools_aggregated", [])
     total     = unified_evidence.get("total_items", 0)
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -832,7 +1253,37 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
 
 
     all_items = [e for e in unified_evidence.get("evidence_items", []) if isinstance(e, dict)]
-    priority_items = [e for e in all_items if e.get("severity") in ("critical", "high")][:15] or all_items[:10]
+    # A "finding" worth its own Key Findings row: elevated severity or a fired
+    # IOC match (e.g. a medium ransom-note binary). Bare low-severity anomalies
+    # are left to the full evidence file so they don't flood the table. The
+    # process_tree aggregate is excluded — it has its own Process Tree section.
+    def _is_finding(e):
+        if e.get("evidence_type") == "process_tree":
+            return False
+        if not (e.get("severity") in ("critical", "high")
+                or bool(e.get("ioc_match"))):
+            return False
+        # Drop rows that would render all-dashes: no extractable indicator, no
+        # catalog match, and no XAI explanation. These are low-information echoes
+        # (e.g. ioc_engine's "Process injection detected") of evidence already
+        # shown richer elsewhere; the full set remains in unified_evidence.json.
+        has_indicator = bool(_item_indicators(e))
+        has_match     = bool(e.get("ioc_match"))
+        has_xai       = anomaly_lookup.get(e.get("artifact_id", "")) not in (None, "-")
+        return has_indicator or has_match or has_xai
+    _seen_findings = set()
+    priority_items = []
+    for e in sorted(
+        (e for e in all_items if _is_finding(e)),
+        key=lambda e: -_SEVERITY_RANK.get(str(e.get("severity", "low")).lower(), 0),
+    ):
+        # Collapse exact-duplicate rows (same type + value + severity).
+        dk = (e.get("evidence_type"), e.get("value"), e.get("severity"))
+        if dk in _seen_findings:
+            continue
+        _seen_findings.add(dk)
+        priority_items.append(e)
+    priority_items = priority_items or all_items[:10]
     for item in priority_items:
         aid = item.get("artifact_id", "")
         if aid in anomaly_lookup:
@@ -869,16 +1320,6 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
         f"| **Generated** | {generated} |"
     )
 
-    # IOC table
-    iocs = _extract_iocs(all_items)
-    if iocs:
-        ioc_rows = ["| Type | Indicator | Source Tool |", "|------|-----------|-------------|"]
-        for ioc in iocs[:30]:
-            ioc_rows.append(f"| {ioc['type']} | `{ioc['indicator']}` | {ioc['tool']} |")
-        ioc_section = "## Indicators of Compromise\n\n" + "\n".join(ioc_rows)
-    else:
-        ioc_section = "## Indicators of Compromise\n\n_No discrete IOCs extracted from evidence._"
-
     # MITRE ATT&CK
     techniques = MITRE_BY_CASE.get(case_type, MITRE_BY_CASE["unknown"])
     basis      = "Anomaly detected" if n_anomalies > 0 else "Inferred from case type"
@@ -887,31 +1328,82 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
         "|--------------|----------------|--------|----------------|",
     ]
     for tid, tname, tactic in techniques:
-        mitre_rows.append(f"| {tid} | {tname} | {tactic} | {basis} |")
+        mitre_rows.append(
+            f"| {_md_cell(tid)} | {_md_cell(tname)} | {_md_cell(tactic)} | {_md_cell(basis)} |"
+        )
     mitre_section = "## MITRE ATT&CK Mapping\n\n" + "\n".join(mitre_rows)
 
     # Process tree
-    proc_tree = _build_process_tree(all_items, anomaly_ids)
-    process_section = f"## Process Tree\n\n```\n{proc_tree}\n```\n_[!] = Critical/High   [ ] = Normal_"
+    proc_tree = _build_process_tree(all_items, anomaly_ids, tool_sources)
+    process_section = (
+        f"## Process Tree\n\n```\n{proc_tree}\n```\n"
+        "_Severity shown per process; only flagged processes and the parent chain "
+        "that anchors them are listed._"
+    )
 
-    # Critical findings
-    table_rows = [
-        "| Severity | Artifact | Tool | Finding | XAI Explanation |",
-        "|----------|----------|------|---------|-----------------|",
-    ]
-    for item in priority_items:
-        if not isinstance(item, dict):
-            continue
-        aid      = item.get("artifact_id", "")
-        xai_note = anomaly_lookup.get(aid, "-")[:80]
-        table_rows.append(
-            f"| {item.get('severity', '-').upper()} "
-            f"| {item.get('evidence_type', '-')} "
-            f"| {item.get('source_tool', '-')} "
-            f"| {str(item.get('value', '-'))[:60]} "
-            f"| {xai_note} |"
+    # Key Findings — one row per notable evidence item, with its extracted
+    # indicators inline (replacing the former separate IOC table) and the XAI
+    # explanation. Capped; overflow points to the full evidence file.
+    KEY_FINDINGS_CAP = 30
+    shown_findings = priority_items[:KEY_FINDINGS_CAP]
+    if shown_findings:
+        kf_rows = [
+            "| Severity | Host | Timestamp | Type | Finding | Indicators / IOC Match | Source · File | Why (XAI) |",
+            "|----------|------|-----------|------|---------|------------------------|---------------|-----------|",
+        ]
+        for item in shown_findings:
+            if not isinstance(item, dict):
+                continue
+            aid      = item.get("artifact_id", "")
+            xai_note = _truncate(anomaly_lookup.get(aid, "-"), 80)
+            tool     = item.get("source_tool", "-")
+            src_file = tool_sources.get(item.get("source_tool", ""), "-")
+            src_cell = tool if src_file in ("-", "", None) else f"{tool} · {src_file}"
+            kf_rows.append(
+                f"| {_md_cell(str(item.get('severity', '-')).upper())} "
+                f"| {_md_cell(item.get('machine_id', '-'))} "
+                f"| {_md_cell(item.get('timestamp', '-'))} "
+                f"| {_md_cell(_finding_type(item.get('evidence_type', '')))} "
+                f"| {_md_cell(str(item.get('value', '-'))[:70])} "
+                f"| {_indicators_cell(item)} "
+                f"| {_md_cell(src_cell)} "
+                f"| {_md_cell(xai_note)} |"
+            )
+        findings_section = "## Key Findings\n\n" + "\n".join(kf_rows)
+        overflow = len(priority_items) - len(shown_findings)
+        if overflow > 0:
+            findings_section += (
+                f"\n\n_…and {overflow} additional finding(s) — "
+                "see `output/unified_evidence.json` for the full set._"
+            )
+    else:
+        findings_section = (
+            "## Key Findings\n\n"
+            "_No critical or high-severity findings extracted from evidence._"
         )
-    findings_section = "## Critical Findings\n\n" + "\n".join(table_rows)
+
+    # Indicators of Compromise — brief overview only. The full per-indicator
+    # list (with provenance + XAI) is written to output/ioc_report.md.
+    iocs = _extract_iocs(all_items)
+    if iocs:
+        by_type = {}
+        for r in iocs:
+            by_type[r["type"]] = by_type.get(r["type"], 0) + 1
+        type_breakdown = ", ".join(f"{n} {t}" for t, n in sorted(by_type.items()))
+        n_critical = sum(1 for r in iocs if r["severity"] == "critical")
+        crit_note = f" ({n_critical} critical)" if n_critical else ""
+        ioc_section = (
+            "## Indicators of Compromise\n\n"
+            f"**{len(iocs)}** unique indicator(s) extracted{crit_note} — "
+            f"{type_breakdown}.\n\n"
+            "_Full indicator detail (severity, context, source file, and "
+            "explanation) in `output/ioc_report.md`._"
+        )
+    else:
+        ioc_section = (
+            "## Indicators of Compromise\n\n"
+            "_No indicators of compromise extracted from evidence._"
+        )
 
     # Hypotheses
 
@@ -944,8 +1436,8 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     )
 
     sections = [
-        cover, exec_summary, classification, ioc_section,
-        mitre_section, process_section, findings_section,
+        cover, exec_summary, classification, findings_section,
+        ioc_section, mitre_section, process_section,
         hyp_section, verdict_section, recs_section,
         coverage_section, audit_section,
     ]
@@ -1003,4 +1495,20 @@ def generate_report(
         f.write(report_text)
 
     print(f"  [DONE] Report written -> {output_path}")
+
+    # Detailed IOC list (data-derived; written in both mock and live modes).
+    try:
+        all_items = [e for e in unified_evidence.get("evidence_items", [])
+                     if isinstance(e, dict)]
+        tool_sources = case_context.get("evidence_sources", {})
+        xai = _xai_lookup(shap_explanations, only_anomalies=True)
+        anomaly_lookup = {aid: d.get("summary", "-") for aid, d in xai.items()}
+        ioc_text = _build_ioc_report(all_items, tool_sources, anomaly_lookup)
+        ioc_path = Path(output_path).parent / "ioc_report.md"
+        with open(ioc_path, "w", encoding="utf-8") as f:
+            f.write(ioc_text)
+        print(f"  [DONE] IOC report written -> {ioc_path}")
+    except Exception as exc:
+        print(f"  [WARN] IOC report generation failed ({exc})")
+
     return report_text
