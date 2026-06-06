@@ -1,5 +1,7 @@
-import os
 import json
+import os
+import re
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -12,7 +14,6 @@ PLUGINS = [
     "windows.netstat",
     "windows.malfind",
     "windows.filescan",
-    "windows.strings",
     "windows.dlllist"
 ]
 
@@ -72,6 +73,30 @@ SUSPICIOUS_RELATIONSHIPS = {
     ("wscript.exe", "powershell.exe"),
     ("explorer.exe", "powershell.exe"),
 }
+
+STAGING_PATH_MARKERS = [
+    "\\temp\\",
+    "\\appdata\\",
+    "\\users\\public\\",
+    "\\programdata\\",
+    "\\downloads\\",
+    "\\desktop\\",
+    "\\startup\\",
+    "\\runonce\\",
+    "\\tasks\\",
+]
+
+PAYLOAD_PATH_MARKERS = [
+    ".onion",
+    ".ps1",
+    ".vbs",
+    ".js",
+    ".hta",
+    ".dll",
+    ".exe",
+    ".bat",
+    ".cmd",
+]
 
 
 class VolatilityWrapper(BaseWrapper):
@@ -181,6 +206,33 @@ class VolatilityWrapper(BaseWrapper):
             )
 
             all_items.extend(items)
+
+        strings_path, strings_cleanup = self._build_strings_file(image_path)
+        try:
+            plugin = "windows.strings"
+            print(f"\n  [VOL] Running {plugin} with generated strings file...")
+            command = working_command + [
+                "-f",
+                image_path,
+                plugin,
+                "--strings-file",
+                strings_path,
+            ]
+            stdout, stderr, code = self.run_command(
+                command,
+                input_files=[image_path, strings_path],
+                timeout=240,
+            )
+
+            if code == 0 and stdout.strip():
+                try:
+                    items = self._parse(plugin, stdout)
+                    print(f"  [VOL] {plugin} -> {len(items)} evidence items")
+                    all_items.extend(items)
+                except Exception as exc:
+                    print(f"  [SKIP] {plugin} parse failed: {exc}")
+        finally:
+            strings_cleanup.cleanup()
 
         # Optional plugin: dumpfiles can write many files to CWD when unfiltered,
         # so keep it opt-in for controlled investigations.
@@ -708,24 +760,8 @@ class VolatilityWrapper(BaseWrapper):
         items = []
         seen = set()
 
-        suspicious_markers = [
-            "\\appdata\\",
-            "\\temp\\",
-            "\\users\\public\\",
-            "\\programdata\\",
-            "\\startup",
-            "\\runonce",
-            "\\tasks\\",
-            ".onion",
-            ".ps1",
-            ".vbs",
-            ".js",
-            ".hta",
-            ".dll",
-            ".exe",
-            ".bat",
-            ".cmd"
-        ]
+        path_markers = STAGING_PATH_MARKERS
+        payload_markers = PAYLOAD_PATH_MARKERS
 
         for line in lines:
 
@@ -744,16 +780,20 @@ class VolatilityWrapper(BaseWrapper):
                     if normalized in seen:
                         continue
 
-                    # relevance gate to avoid flooding with low-signal paths.
-                    marker_hits = sum(
-                        1 for marker in suspicious_markers
-                        if marker in normalized
-                    )
+                    # Relevance gate: only keep staged or execution-context
+                    # paths that also look like payloads, not bare system DLLs.
+                    if not any(marker in normalized for marker in path_markers):
+                        continue
 
-                    if marker_hits == 0:
+                    if not any(marker in normalized for marker in payload_markers):
                         continue
 
                     seen.add(normalized)
+
+                    marker_hits = sum(
+                        1 for marker in path_markers + payload_markers
+                        if marker in normalized
+                    )
 
                     if marker_hits >= 2:
                         severity = "high"
@@ -775,6 +815,48 @@ class VolatilityWrapper(BaseWrapper):
                     )
 
         return items
+
+    def _build_strings_file(self, image_path: str) -> tuple[str, tempfile.TemporaryDirectory]:
+
+        temp_dir = tempfile.TemporaryDirectory(prefix="autoforensiq_strings_")
+        strings_path = Path(temp_dir.name) / f"{Path(image_path).stem}.strings"
+
+        try:
+            self._write_strings_file_from_image(image_path, strings_path)
+        except Exception as exc:
+            print(
+                f"  [WARN] Failed to generate strings file from image: {exc}"
+            )
+            strings_path.write_text("", encoding="utf-8")
+
+        return str(strings_path), temp_dir
+
+    def _write_strings_file_from_image(self, image_path: str, strings_path: Path) -> None:
+
+        printable_pattern = re.compile(rb"[ -~]{4,}")
+        chunk_size = 1024 * 1024
+        overlap = b""
+        overlap_size = 3
+        absolute_offset = 0
+
+        with open(image_path, "rb") as source, open(strings_path, "w", encoding="utf-8") as destination:
+            while True:
+                chunk = source.read(chunk_size)
+                if not chunk:
+                    break
+
+                data = overlap + chunk
+                data_offset = absolute_offset - len(overlap)
+
+                for match in printable_pattern.finditer(data):
+                    if match.start() < len(overlap):
+                        continue
+
+                    string_value = match.group().decode("latin-1", errors="ignore")
+                    destination.write(f"{data_offset + match.start()} {string_value}\n")
+
+                overlap = data[-overlap_size:] if len(data) >= overlap_size else data
+                absolute_offset += len(chunk)
 
     def _parse_dumpfiles(self, lines: list) -> list:
 
