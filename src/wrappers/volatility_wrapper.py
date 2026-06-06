@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import tempfile
 from pathlib import Path
 
 from .base_wrapper import BaseWrapper
@@ -123,6 +124,8 @@ class VolatilityWrapper(BaseWrapper):
             f"{' '.join(working_command)}"
         )
 
+        combined_output = ""
+
         for plugin in PLUGINS:
 
             print(f"\n  [VOL] Running {plugin}...")
@@ -153,6 +156,10 @@ class VolatilityWrapper(BaseWrapper):
                     f"\n  [DEBUG] STDOUT:\n"
                     f"{stdout[:1000]}"
                 )
+
+            # keep a combined corpus for regex-based extraction
+            if stdout:
+                combined_output += "\n" + stdout
 
             if code != 0:
 
@@ -233,9 +240,94 @@ class VolatilityWrapper(BaseWrapper):
                     except Exception as exc:
                         print(f"  [SKIP] {plugin} parse failed: {exc}")
 
+        # Feed windows.strings with a real strings file generated from the
+        # image when possible. This avoids volatility's internal strings
+        # collector returning empty results when no strings source is set.
+        strings_path = None
+        strings_cleanup = None
+        try:
+            strings_path, strings_cleanup = self._build_strings_file(image_path)
+            if strings_path and Path(strings_path).exists():
+                plugin = "windows.strings"
+                print(f"\n  [VOL] Running {plugin} with generated strings file...")
+                command = working_command + ["-f", image_path, plugin, "--strings-file", strings_path]
+                stdout, stderr, code = self.run_command(
+                    command,
+                    input_files=[image_path, strings_path],
+                    timeout=240,
+                )
+                if code == 0 and stdout.strip():
+                    try:
+                        items = self._parse(plugin, stdout)
+                        print(f"  [VOL] {plugin} -> {len(items)} evidence items")
+                        all_items.extend(items)
+                    except Exception as exc:
+                        print(f"  [SKIP] {plugin} parse failed: {exc}")
+        finally:
+            if strings_cleanup is not None:
+                try:
+                    strings_cleanup.cleanup()
+                except Exception:
+                    pass
+
+        # Run a lightweight string/IOC extraction over all plugin output
+        try:
+            extracted = self._extract_strings(combined_output)
+            if extracted:
+                print(f"  [VOL] Extracted {len(extracted)} string IOCs")
+                all_items.extend(extracted)
+        except Exception as exc:
+            print(f"  [VOL] string extraction failed: {exc}")
+
         return all_items
 
     def _parse(self, plugin: str, output: str) -> list:
+
+    def _build_strings_file(self, image_path: str):
+        """
+        Run the system `strings` utility against the raw image to produce a
+        temporary strings file suitable for feeding to volatility's
+        `windows.strings --strings-file` option. Returns (path, cleanup)
+        where cleanup is an object with a `cleanup()` method that removes
+        the tempfile. Returns (None, None) on failure.
+        """
+
+        try:
+            stdout, stderr, code = self.run_command(
+                ["strings", "-a", "-n", "8", image_path],
+                input_files=[image_path],
+                timeout=120,
+            )
+        except Exception:
+            return None, None
+
+        if code != 0 or not stdout.strip():
+            return None, None
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, prefix="af_strings_", suffix=".txt", mode="w", encoding="utf-8")
+        try:
+            tmp.write(stdout)
+            tmp.flush()
+            tmp.close()
+        except Exception:
+            try:
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+            return None, None
+
+        class _Cleanup:
+            def __init__(self, path):
+                self._path = path
+
+            def cleanup(self):
+                try:
+                    if os.path.exists(self._path):
+                        os.unlink(self._path)
+                except Exception:
+                    pass
+
+        return tmp.name, _Cleanup(tmp.name)
 
         lines = [
             l for l in output.strip().splitlines()
@@ -708,6 +800,7 @@ class VolatilityWrapper(BaseWrapper):
         items = []
         seen = set()
 
+        # Markers that indicate staging/execution locations or payloads.
         suspicious_markers = [
             "\\appdata\\",
             "\\temp\\",
@@ -721,11 +814,13 @@ class VolatilityWrapper(BaseWrapper):
             ".vbs",
             ".js",
             ".hta",
-            ".dll",
-            ".exe",
             ".bat",
             ".cmd"
         ]
+
+        # Extensions that are common system binaries; only consider them
+        # suspicious when they appear in staging/execution paths above.
+        binary_exts = {".dll", ".exe"}
 
         for line in lines:
 
@@ -745,10 +840,19 @@ class VolatilityWrapper(BaseWrapper):
                         continue
 
                     # relevance gate to avoid flooding with low-signal paths.
-                    marker_hits = sum(
-                        1 for marker in suspicious_markers
-                        if marker in normalized
-                    )
+                    marker_hits = sum(1 for marker in suspicious_markers if marker in normalized)
+
+                    # If this looks like a plain system binary (dll/exe) but is
+                    # not located in a staging/execution path, skip it to avoid
+                    # mass noise from benign system files.
+                    ext = ""
+                    try:
+                        ext = Path(normalized).suffix
+                    except Exception:
+                        ext = ""
+
+                    if ext in binary_exts and marker_hits == 0:
+                        continue
 
                     if marker_hits == 0:
                         continue
