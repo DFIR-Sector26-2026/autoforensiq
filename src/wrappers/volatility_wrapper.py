@@ -12,8 +12,7 @@ PLUGINS = [
     "windows.netstat",
     "windows.malfind",
     "windows.filescan",
-    "windows.dumpfiles",
-    "windows.yarascan",
+    "windows.strings",
     "windows.dlllist"
 ]
 
@@ -124,8 +123,6 @@ class VolatilityWrapper(BaseWrapper):
             f"{' '.join(working_command)}"
         )
 
-        combined_output = ""
-
         for plugin in PLUGINS:
 
             print(f"\n  [VOL] Running {plugin}...")
@@ -140,10 +137,6 @@ class VolatilityWrapper(BaseWrapper):
                 input_files=[image_path],
                 timeout=180
             )
-
-            # keep a combined corpus for regex-based extraction
-            if stdout:
-                combined_output += "\n" + stdout
 
             print(f"\n  [DEBUG] Return code: {code}")
 
@@ -176,7 +169,11 @@ class VolatilityWrapper(BaseWrapper):
 
                 continue
 
-            items = self._parse(plugin, stdout)
+            try:
+                items = self._parse(plugin, stdout)
+            except Exception as exc:
+                print(f"  [SKIP] {plugin} parse failed: {exc}")
+                continue
 
             print(
                 f"  [VOL] {plugin} → "
@@ -185,14 +182,56 @@ class VolatilityWrapper(BaseWrapper):
 
             all_items.extend(items)
 
-        # Run a lightweight string/IOC extraction over all plugin output
-        try:
-            extracted = self._extract_strings(combined_output)
-            if extracted:
-                print(f"  [VOL] Extracted {len(extracted)} string IOCs")
-                all_items.extend(extracted)
-        except Exception as exc:
-            print(f"  [VOL] string extraction failed: {exc}")
+        # Optional plugin: dumpfiles can write many files to CWD when unfiltered,
+        # so keep it opt-in for controlled investigations.
+        if os.getenv("VOL_ENABLE_DUMPFILES", "").lower() in {"1", "true", "yes"}:
+            plugin = "windows.dumpfiles"
+            print(f"\n  [VOL] Running {plugin} (opt-in)...")
+            command = working_command + ["-f", image_path, plugin]
+            stdout, stderr, code = self.run_command(
+                command,
+                input_files=[image_path],
+                timeout=240
+            )
+            if code == 0 and stdout.strip():
+                try:
+                    items = self._parse(plugin, stdout)
+                    print(f"  [VOL] {plugin} -> {len(items)} evidence items")
+                    all_items.extend(items)
+                except Exception as exc:
+                    print(f"  [SKIP] {plugin} parse failed: {exc}")
+
+        # Optional plugin: yarascan requires explicit rules/file.
+        yara_rules = os.getenv("VOL_YARA_RULES", "").strip()
+        yara_file = os.getenv("VOL_YARA_FILE", "").strip()
+        if yara_rules or yara_file:
+            plugin = "windows.vadyarascan"
+            print(f"\n  [VOL] Running {plugin} (configured)...")
+            command = working_command + ["-f", image_path, plugin]
+            can_run_yara = False
+            if yara_file:
+                if not Path(yara_file).exists():
+                    print(f"  [SKIP] YARA file not found: {yara_file}")
+                else:
+                    command += ["--yara-file", yara_file]
+                    can_run_yara = True
+            else:
+                command += ["--yara-rules", yara_rules]
+                can_run_yara = True
+
+            if can_run_yara:
+                stdout, stderr, code = self.run_command(
+                    command,
+                    input_files=[image_path],
+                    timeout=240
+                )
+                if code == 0 and stdout.strip():
+                    try:
+                        items = self._parse(plugin, stdout)
+                        print(f"  [VOL] {plugin} -> {len(items)} evidence items")
+                        all_items.extend(items)
+                    except Exception as exc:
+                        print(f"  [SKIP] {plugin} parse failed: {exc}")
 
         return all_items
 
@@ -231,9 +270,13 @@ class VolatilityWrapper(BaseWrapper):
 
             return self._parse_dumpfiles(lines)
 
-        elif plugin == "windows.yarascan":
+        elif plugin in {"windows.vadyarascan", "yarascan.YaraScan", "windows.yarascan"}:
 
             return self._parse_yarascan(lines)
+
+        elif plugin == "windows.strings":
+
+            return self._parse_strings(lines)
 
         elif plugin == "windows.dlllist":
 
@@ -615,13 +658,12 @@ class VolatilityWrapper(BaseWrapper):
                     artifact_id=f"malfind_{pid}",
                     evidence_type="injected_code",
                     value=(
-                        f"Injected memory regions detected in {info['name']} (PID:{pid})"
+                        f"Injected memory regions detected in {info['name']} "
+                        f"(PID:{pid}). Reasons: {'; '.join(reasons)}"
                     ),
                     severity=severity,
                     confidence=confidence,
-                    linked_artifacts=[f"proc_{pid}"],
-                    # include reasons to aid downstream gating/rescoring
-                    extra={"reasons": reasons}
+                    linked_artifacts=[f"proc_{pid}"]
                 )
             )
 
@@ -664,10 +706,28 @@ class VolatilityWrapper(BaseWrapper):
     def _parse_filescan(self, lines: list) -> list:
 
         items = []
+        seen = set()
+
+        suspicious_markers = [
+            "\\appdata\\",
+            "\\temp\\",
+            "\\users\\public\\",
+            "\\programdata\\",
+            "\\startup",
+            "\\runonce",
+            "\\tasks\\",
+            ".onion",
+            ".ps1",
+            ".vbs",
+            ".js",
+            ".hta",
+            ".dll",
+            ".exe",
+            ".bat",
+            ".cmd"
+        ]
 
         for line in lines:
-
-            lower = line.lower()
 
             # crude heuristic: look for absolute paths (Windows backslash or Unix slash)
             if "\\" in line or "/" in line:
@@ -679,6 +739,29 @@ class VolatilityWrapper(BaseWrapper):
 
                 if "\\" in candidate or "/" in candidate:
 
+                    normalized = candidate.lower()
+
+                    if normalized in seen:
+                        continue
+
+                    # relevance gate to avoid flooding with low-signal paths.
+                    marker_hits = sum(
+                        1 for marker in suspicious_markers
+                        if marker in normalized
+                    )
+
+                    if marker_hits == 0:
+                        continue
+
+                    seen.add(normalized)
+
+                    if marker_hits >= 2:
+                        severity = "high"
+                        confidence = 0.90
+                    else:
+                        severity = "medium"
+                        confidence = 0.80
+
                     items.append(
                         self.make_evidence_item(
                             artifact_id=(
@@ -686,8 +769,8 @@ class VolatilityWrapper(BaseWrapper):
                             ),
                             evidence_type="file_artifact",
                             value=candidate,
-                            severity="medium",
-                            confidence=0.85
+                            severity=severity,
+                            confidence=confidence
                         )
                     )
 
@@ -695,27 +778,80 @@ class VolatilityWrapper(BaseWrapper):
 
     def _parse_dumpfiles(self, lines: list) -> list:
 
+        import re
+
         items = []
+        seen = set()
+
+        suspicious_markers = [
+            "\\appdata\\",
+            "\\temp\\",
+            "\\users\\public\\",
+            "\\programdata\\",
+            ".exe",
+            ".dll",
+            ".ps1",
+            ".vbs",
+            ".js",
+            ".bat",
+            ".cmd",
+            ".hta"
+        ]
 
         for line in lines:
 
-            if line.strip().startswith("Saved file") or "->" in line:
+            stripped = line.strip()
 
-                # try to extract filename after arrow or prefix
-                if "->" in line:
-                    candidate = line.split("->")[-1].strip()
-                else:
-                    candidate = line.split()[-1]
+            if not stripped:
+                continue
 
-                items.append(
-                    self.make_evidence_item(
-                        artifact_id=f"dumpfile_{str(uuid.uuid4())[:8]}",
-                        evidence_type="extracted_file",
-                        value=candidate,
-                        severity="medium",
-                        confidence=0.88
-                    )
+            if (
+                "Volatility 3 Framework" in stripped or
+                "Progress:" in stripped or
+                stripped.startswith("Cache")
+            ):
+                continue
+
+            # Volatility dumpfiles output is tabular:
+            # Cache  FileObject  FileName  Result
+            cols = re.split(r"\s{2,}", stripped)
+
+            if len(cols) < 4:
+                continue
+
+            file_name = cols[2].strip()
+            result = cols[3].strip()
+
+            if not file_name or file_name in {"N/A", "-"}:
+                continue
+
+            if not result or result in {"N/A", "-"}:
+                continue
+
+            lowered_name = file_name.lower()
+            lowered_result = result.lower()
+
+            if lowered_name in seen:
+                continue
+
+            if not any(marker in lowered_name for marker in suspicious_markers):
+                continue
+
+            # Skip rows where extraction did not actually produce a file.
+            if "error" in lowered_result or "failed" in lowered_result:
+                continue
+
+            seen.add(lowered_name)
+
+            items.append(
+                self.make_evidence_item(
+                    artifact_id=f"dumpfile_{str(uuid.uuid4())[:8]}",
+                    evidence_type="extracted_file",
+                    value=f"{file_name} -> {result}",
+                    severity="high",
+                    confidence=0.90
                 )
+            )
 
         return items
 
@@ -725,20 +861,35 @@ class VolatilityWrapper(BaseWrapper):
 
         for line in lines:
 
-            # yara output typically shows rule names
-            if line.strip():
+            cleaned = line.strip()
 
-                items.append(
-                    self.make_evidence_item(
-                        artifact_id=f"yara_{str(uuid.uuid4())[:8]}",
-                        evidence_type="yara_match",
-                        value=line.strip(),
-                        severity="high",
-                        confidence=0.90
-                    )
+            if (
+                not cleaned or
+                "Volatility 3 Framework" in cleaned or
+                "Progress:" in cleaned
+            ):
+                continue
+
+            if "Offset" in cleaned and "Rule" in cleaned:
+                continue
+
+            items.append(
+                self.make_evidence_item(
+                    artifact_id=f"yara_{str(uuid.uuid4())[:8]}",
+                    evidence_type="yara_match",
+                    value=cleaned,
+                    severity="high",
+                    confidence=0.90
                 )
+            )
 
         return items
+
+    def _parse_strings(self, lines: list) -> list:
+
+        corpus = "\n".join(lines)
+
+        return self._extract_strings(corpus)
 
     def _extract_strings(self, corpus: str) -> list:
 

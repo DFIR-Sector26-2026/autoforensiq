@@ -2,6 +2,7 @@ import os
 import json
 import shutil
 import tempfile
+from pathlib import Path
 
 from src.wrappers.base_wrapper import BaseWrapper
 from src.utils.audit_log import log_action
@@ -119,10 +120,9 @@ class MemProcFSWrapper(BaseWrapper):
                     artifact_id="memprocfs_unavailable",
                     evidence_type="memory_analysis_status",
                     value=(
-                        "MemProcFS is unavailable: the python package is "
-                        "not installed and no binary was found. Install the "
-                        "pip package, or set MEMPROCFS_PATH / add 'memprocfs' "
-                        "to PATH."
+                        "MemProcFS binary fallback is unavailable: no binary "
+                        "was found. Set MEMPROCFS_PATH or add 'memprocfs' to "
+                        "PATH."
                     ),
                     severity="low",
                     confidence=0.60,
