@@ -491,7 +491,7 @@ class VolatilityWrapper(BaseWrapper):
             ):
                 continue
 
-            parts = line.split()
+            parts = line.split(maxsplit=9)
 
             if len(parts) < 8:
                 continue
@@ -505,15 +505,24 @@ class VolatilityWrapper(BaseWrapper):
                 foreign_port = parts[5]
                 pid = parts[7]
 
-                port = (
+                local_p = (
                     int(local_port)
                     if str(local_port).isdigit()
+                    else 0
+                )
+                
+                remote_p = (
+                    int(foreign_port)
+                    if str(foreign_port).isdigit()
                     else 0
                 )
 
                 severity = (
                     "high"
-                    if port in SUSPICIOUS_PORTS
+                    if(
+                        local_p in SUSPICIOUS_PORTS
+                        or remote_p in SUSPICIOUS_PORTS
+                    )
                     else "low"
                 )
 
@@ -523,7 +532,9 @@ class VolatilityWrapper(BaseWrapper):
                             f"netstat_"
                             f"{pid}_"
                             f"{local_addr.replace('.', '_')}_"
-                            f"{local_port}"
+                            f"{local_port}_"
+                            f"{foreign_addr.replace('.', '_')}_"
+                            f"{foreign_port}"
                         ),
                         evidence_type="network_connection",
                         value=(
