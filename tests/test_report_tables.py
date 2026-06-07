@@ -172,6 +172,21 @@ def test_extract_iocs_skips_low_severity_files_without_match():
     assert "@WanaDecryptor@.exe" in files        # low but ioc_match -> kept
 
 
+def test_extract_iocs_rejects_impossible_ip_octets():
+    # The IP regex matches \d{1,3} per octet, so out-of-range dotted-quads
+    # (999.999.999.999, 256.0.0.1) must not be emitted as external IP IOCs.
+    items = [
+        {"evidence_type": "network_connection", "source_tool": "volatility3",
+         "value": "TCP 10.0.0.5:1100 -> 185.62.1.2:4444 ; junk 999.999.999.999 256.0.0.1",
+         "severity": "high", "artifact_id": "net_1"},
+    ]
+    ips = {r["indicator"] for r in _extract_iocs(items) if r["type"] == "IP Address"}
+    assert ips == {"185.62.1.2"}                 # only the real external IP
+    assert "999.999.999.999" not in ips
+    assert "256.0.0.1" not in ips
+    assert "10.0.0.5" not in ips                  # internal, still filtered
+
+
 def test_item_indicators_extracts_extensionless_flagged_name():
     # A flagged binary with no file extension must still surface as an IOC.
     wd = {"evidence_type": "ioc", "source_tool": "ioc_engine",
@@ -296,6 +311,20 @@ def test_process_tree_empty_when_no_processes():
               "artifact_id": "dns_1", "source_tool": "tshark"}]
     assert _build_process_tree(items, anomaly_ids=set()) == \
         "_No process artifacts in evidence._"
+
+
+def test_process_tree_raises_severity_on_repeat_observation():
+    # Same PID seen first as low (e.g. pslist) then high (IOC-rescored copy).
+    # The merge must keep the highest severity so the process stays flagged and
+    # is not pruned out of the tree.
+    items = [
+        _proc(1940, 1636, "tasksche.exe", severity="low"),
+        _proc(1940, 1636, "tasksche.exe", severity="high",
+              ioc_match=["wannacry_dropper"]),
+    ]
+    tree = _build_process_tree(items, anomaly_ids=set())
+    assert "tasksche.exe" in tree     # survives the prune-to-flagged step
+    assert "HIGH" in tree             # highest severity wins, not first-seen low
 
 
 # ─────────────────────────────────────────────────────────────

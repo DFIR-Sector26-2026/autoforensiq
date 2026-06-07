@@ -668,10 +668,13 @@ def _is_internal_ip(ip):
     """True for non-routable / local IPs that don't belong in an external IOC
     table (loopback, broadcast, link-local, and RFC1918 private ranges). The
     affected host's own internal IP is reported as an affected system, not an
-    indicator of compromise."""
+    indicator of compromise. Malformed or out-of-range dotted-quads (e.g.
+    999.999.999.999) are also excluded — they aren't real external indicators."""
     octets = ip.split(".")
     if len(octets) != 4 or not all(o.isdigit() for o in octets):
         return True
+    if not all(0 <= int(o) <= 255 for o in octets):
+        return True            # impossible address — not a real external IOC
     a, b = int(octets[0]), int(octets[1])
     if a in (0, 10, 127, 255):
         return True
@@ -1023,8 +1026,21 @@ def _build_process_tree(evidence_items, anomaly_ids, tool_sources=None):
                     "severity": "", "aid": "", "source_tool": "", "ioc_match": []}
             nodes[pid] = node
         for k, v in fields.items():
+            if k == "severity":
+                # keep the highest severity ever seen for this PID
+                if _SEVERITY_RANK.get(str(v).lower(), 0) > \
+                   _SEVERITY_RANK.get(str(node.get(k, "")).lower(), 0):
+                    node[k] = v
+            elif k == "ioc_match":
+                # union the catalog matches across observations
+                if v:
+                    merged = list(node.get(k) or [])
+                    for m in v:
+                        if m not in merged:
+                            merged.append(m)
+                    node[k] = merged
             # don't clobber a populated value with an empty one
-            if v not in (None, "", []) and not node.get(k):
+            elif v not in (None, "", []) and not node.get(k):
                 node[k] = v
         return node
 
