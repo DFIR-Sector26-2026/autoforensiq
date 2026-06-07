@@ -474,6 +474,84 @@ class VolatilityWrapper(BaseWrapper):
             )
 
         return items
+
+
+    def _parse_netstat(self, lines: list) -> list:
+
+        items = []
+
+        for line in lines:
+
+            line = line.strip()
+
+            if (
+                not line or
+                "Volatility 3 Framework" in line or
+                "Offset" in line
+            ):
+                continue
+
+            parts = line.split(maxsplit=9)
+
+            if len(parts) < 8:
+                continue
+
+            try:
+
+                proto = parts[1]
+                local_addr = parts[2]
+                local_port = parts[3]
+                foreign_addr = parts[4]
+                foreign_port = parts[5]
+                pid = parts[7]
+
+                local_p = (
+                    int(local_port)
+                    if str(local_port).isdigit()
+                    else 0
+                )
+                
+                remote_p = (
+                    int(foreign_port)
+                    if str(foreign_port).isdigit()
+                    else 0
+                )
+
+                severity = (
+                    "high"
+                    if(
+                        local_p in SUSPICIOUS_PORTS
+                        or remote_p in SUSPICIOUS_PORTS
+                    )
+                    else "low"
+                )
+
+                items.append(
+                    self.make_evidence_item(
+                        artifact_id=(
+                            f"netstat_"
+                            f"{pid}_"
+                            f"{local_addr.replace('.', '_')}_"
+                            f"{local_port}_"
+                            f"{foreign_addr.replace('.', '_')}_"
+                            f"{foreign_port}"
+                        ),
+                        evidence_type="network_connection",
+                        value=(
+                            f"{proto} "
+                            f"{local_addr}:{local_port} -> "
+                            f"{foreign_addr}:{foreign_port} "
+                            f"(PID:{pid})"
+                        ),
+                        severity=severity,
+                        confidence=0.75
+                    )
+                )
+
+            except Exception:
+                continue
+
+        return items
     def _parse_malfind(self, lines: list) -> list:
 
         items = []
