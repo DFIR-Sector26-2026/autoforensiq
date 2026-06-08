@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import hashlib
 import tempfile
 from pathlib import Path
 
@@ -642,73 +643,93 @@ class VolatilityWrapper(BaseWrapper):
         items = []
 
         grouped_regions = {}
+        current_pid = None
+
+        def _has_pe_signature(text: str) -> bool:
+
+            lowered = text.lower()
+
+            return (
+                "shellcode" in lowered or
+                " mz" in lowered or
+                lowered.startswith("mz") or
+                "4d 5a" in lowered or
+                "4d5a" in lowered or
+                "50 45 00 00" in lowered
+            )
 
         for line in lines:
 
+            stripped = line.strip()
+
             if (
-                "Volatility 3 Framework" in line or
-                ("PID" in line and "Process" in line) or
-                "Disasm" in line
+                not stripped or
+                "Volatility 3 Framework" in stripped or
+                ("PID" in stripped and "Process" in stripped) or
+                "Disasm" in stripped
             ):
+
+                if "Volatility 3 Framework" in stripped or "PID" in stripped:
+                    current_pid = None
+
                 continue
 
-            parts = line.split()
+            parts = stripped.split()
 
             if len(parts) < 2:
                 continue
 
-            if not parts[0].isdigit():
+            if parts[0].isdigit() and ".exe" in parts[1].lower():
+
+                try:
+
+                    pid = parts[0]
+                    name = parts[1]
+
+                    flags = " ".join(parts[2:]).lower()
+                    current_pid = pid
+
+                    if pid not in grouped_regions:
+
+                        grouped_regions[pid] = {
+                            "name": name,
+                            "count": 0,
+                            "has_rwx": False,
+                            "has_pe": False
+                        }
+
+                    grouped_regions[pid]["count"] += 1
+
+                    if (
+                        "rwx" in flags or
+                        "rw-x" in flags or
+                        "rx" in flags or
+                        "page_execute" in flags or
+                        "page_exec" in flags or
+                        ("execute" in flags and "write" in flags)
+                    ):
+                        grouped_regions[pid]["has_rwx"] = True
+
+                    if _has_pe_signature(stripped) or "mz" in flags or "pe" in flags:
+                        grouped_regions[pid]["has_pe"] = True
+
+                except Exception:
+                    continue
+
                 continue
 
-            if len(parts) < 2:
-                continue
+            if current_pid and current_pid in grouped_regions:
 
-            if ".exe" not in parts[1].lower():
-                continue
-
-            try:
-
-                pid = parts[0]
-                name = parts[1]
-
-                flags = " ".join(parts[2:]).lower()
-
-                if pid not in grouped_regions:
-
-                    grouped_regions[pid] = {
-                        "name": name,
-                        "count": 0,
-                        "has_rwx": False,
-                        "has_pe": False
-                    }
-
-                grouped_regions[pid]["count"] += 1
-
-                # heuristics: detect RWX regions or PAGE_EXECUTE-style flags
-                # Volatility/OS may report PAGE_EXECUTE_* tokens rather than short 'rwx' tokens
-                if (
-                    "rwx" in flags or
-                    "rw-x" in flags or
-                    "rx" in flags or
-                    "page_execute" in flags or
-                    "page_exec" in flags or
-                    ("execute" in flags and "write" in flags)
-                ):
-                    grouped_regions[pid]["has_rwx"] = True
-
-                # detect embedded PE signatures / shellcode markers
-                if "mz" in flags or "pe" in flags or "shellcode" in flags:
-                    grouped_regions[pid]["has_pe"] = True
-
-            except Exception:
-                continue
+                # Continuation lines often carry MZ/hexdump markers.
+                if _has_pe_signature(stripped):
+                    grouped_regions[current_pid]["has_pe"] = True
 
         for pid, info in grouped_regions.items():
 
-            # determine severity with gating
             name = info.get("name", "unknown")
             has_rwx = info.get("has_rwx", False)
             has_pe = info.get("has_pe", False)
+            corroborated = has_rwx or has_pe
 
             if has_rwx and has_pe:
                 severity = "critical"
@@ -723,9 +744,8 @@ class VolatilityWrapper(BaseWrapper):
             else:
                 severity = "medium"
                 confidence = 0.70
-                reasons = ["Injected regions detected (no RWX/PE signature)" ]
+                reasons = ["Injected regions detected (no RWX/PE signature)"]
 
-            # down-rank for common system processes unless corroborated
             system_allowlist = {
                 "explorer.exe",
                 "chrome.exe",
@@ -735,14 +755,12 @@ class VolatilityWrapper(BaseWrapper):
                 "svchost.exe"
             }
 
-            if name.lower() in system_allowlist and severity == "critical":
-                severity = "medium"
-                confidence = 0.75
-                reasons.append("Process is common system process: down-ranked")
-            elif name.lower() in system_allowlist and severity == "high":
+            if name.lower() in system_allowlist and not corroborated and severity in {"critical", "high"}:
                 severity = "medium"
                 confidence = 0.65
-                reasons.append("Process is common system process: down-ranked")
+                reasons.append("Process is common system process without corroborating IOC: down-ranked")
+            elif name.lower() in system_allowlist and corroborated:
+                reasons.append("Corroborated by another IOC; system-process down-rank skipped")
 
             items.append(
                 self.make_evidence_item(
@@ -796,6 +814,8 @@ class VolatilityWrapper(BaseWrapper):
 
     def _parse_filescan(self, lines: list) -> list:
 
+        import re
+
         items = []
         seen = set()
 
@@ -816,6 +836,25 @@ class VolatilityWrapper(BaseWrapper):
             ".bat",
             ".cmd"
         ]
+
+        def _has_suspicious_staging_path(path: str) -> bool:
+
+            lowered = path.lower().replace("/", "\\")
+            segments = [segment for segment in lowered.split("\\") if segment]
+
+            for index, segment in enumerate(segments[:-1]):
+                if segment == "intel" and index + 1 < len(segments):
+                    child = segments[index + 1]
+
+                    if (
+                        len(child) >= 12 and
+                        re.match(r"^[a-z0-9]+$", child) and
+                        re.search(r"[a-z]", child) and
+                        re.search(r"\d", child)
+                    ):
+                        return True
+
+            return False
 
         # Extensions that are common system binaries; only consider them
         # suspicious when they appear in staging/execution paths above.
@@ -840,6 +879,9 @@ class VolatilityWrapper(BaseWrapper):
 
                     # relevance gate to avoid flooding with low-signal paths.
                     marker_hits = sum(1 for marker in suspicious_markers if marker in normalized)
+
+                    if marker_hits == 0 and _has_suspicious_staging_path(normalized):
+                        marker_hits = 1
 
                     # If this looks like a plain system binary (dll/exe) but is
                     # not located in a staging/execution path, skip it to avoid
@@ -1005,67 +1047,111 @@ class VolatilityWrapper(BaseWrapper):
 
         seen = set()
 
-        # onion addresses
-        for m in re.findall(r"[a-z2-7]{16,56}\.onion", corpus, flags=re.IGNORECASE):
-            v = m.lower()
-            if v in seen:
-                continue
-            seen.add(v)
+        file_extension_tlds = {
+            "bat", "cmd", "dll", "doc", "docx", "exe", "gif",
+            "hta", "htm", "html", "ico", "jar", "jpeg", "jpg", "js",
+            "lnk", "log", "msi", "pdf", "png", "ps1", "sys", "txt",
+            "vbs", "xml", "zip", "rar", "7z", "tar", "gz", "bin",
+            "dat", "csv", "json", "ini", "cfg", "bak"
+        }
+
+        def _add_item(value: str, evidence_type: str, severity: str, confidence: float, artifact_prefix: str):
+
+            normalized = value.lower()
+
+            if normalized in seen:
+                return
+
+            seen.add(normalized)
             items.append(
                 self.make_evidence_item(
-                    artifact_id=f"ioc_{str(uuid.uuid4())[:8]}",
-                    evidence_type="suspicious_domain",
-                    value=v,
-                    severity="high",
-                    confidence=0.95
+                    artifact_id=f"{artifact_prefix}_{str(uuid.uuid4())[:8]}",
+                    evidence_type=evidence_type,
+                    value=value,
+                    severity=severity,
+                    confidence=confidence
                 )
             )
 
-        # bitcoin/wallet-like addresses
-        for m in re.findall(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b", corpus):
-            if m in seen:
-                continue
-            seen.add(m)
-            items.append(
-                self.make_evidence_item(
-                    artifact_id=f"btc_{str(uuid.uuid4())[:8]}",
-                    evidence_type="suspicious_crypto",
-                    value=m,
-                    severity="high",
-                    confidence=0.93
-                )
-            )
+        def _base58_decode(value: str):
 
-        # emails
-        for m in re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", corpus):
-            if m in seen:
-                continue
-            seen.add(m)
-            items.append(
-                self.make_evidence_item(
-                    artifact_id=f"email_{str(uuid.uuid4())[:8]}",
-                    evidence_type="email_address",
-                    value=m,
-                    severity="medium",
-                    confidence=0.85
-                )
-            )
+            alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+            decoded = bytearray()
+            num = 0
 
-        # domains (coarse)
-        for m in re.findall(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b", corpus, flags=re.IGNORECASE):
-            v = m.lower()
-            if v in seen:
+            for char in value:
+                index = alphabet.find(char)
+                if index == -1:
+                    return None
+                num = num * 58 + index
+
+            while num > 0:
+                num, remainder = divmod(num, 256)
+                decoded.insert(0, remainder)
+
+            leading_zeros = len(value) - len(value.lstrip("1"))
+            return bytearray(b"\x00" * leading_zeros) + decoded
+
+        def _is_valid_btc_address(value: str) -> bool:
+
+            if not re.fullmatch(r"[13][1-9A-HJ-NP-Za-km-z]{25,33}", value):
+                return False
+
+            decoded = _base58_decode(value)
+            if not decoded or len(decoded) < 5:
+                return False
+
+            payload = bytes(decoded[:-4])
+            checksum = bytes(decoded[-4:])
+            digest = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+
+            return digest == checksum and len(payload) == 21
+
+        for match in re.finditer(r"[a-z2-7]{16,56}\.onion", corpus, flags=re.IGNORECASE):
+
+            _add_item(match.group(0).lower(), "suspicious_domain", "high", 0.95, "ioc")
+
+        for match in re.finditer(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b", corpus):
+
+            candidate = match.group(0)
+
+            if _is_valid_btc_address(candidate):
+                _add_item(candidate, "suspicious_crypto", "high", 0.93, "btc")
+
+        for match in re.finditer(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", corpus):
+
+            _add_item(match.group(0), "email_address", "medium", 0.85, "email")
+
+        registry_patterns = [
+            r"(?:HKLM|HKEY_LOCAL_MACHINE|HKCU|HKEY_CURRENT_USER|HKCR|HKEY_CLASSES_ROOT|HKU|HKEY_USERS)\\[^\s\"']+",
+            r"\\Registry\\Machine\\[^\s\"']+",
+            r"\\Registry\\User\\[^\s\"']+",
+        ]
+
+        for pattern in registry_patterns:
+
+            for match in re.finditer(pattern, corpus, flags=re.IGNORECASE):
+
+                _add_item(match.group(0), "registry_key", "medium", 0.88, "reg")
+
+        domain_pattern = re.compile(
+            r"(?<![@/\\])\b(?:[a-z0-9-]{1,63}\.)+(?P<tld>[a-z]{2,24})\b",
+            flags=re.IGNORECASE,
+        )
+
+        for match in domain_pattern.finditer(corpus):
+
+            value = match.group(0).lower()
+            tld = match.group("tld").lower()
+
+            if tld in file_extension_tlds:
                 continue
-            seen.add(v)
-            items.append(
-                self.make_evidence_item(
-                    artifact_id=f"dom_{str(uuid.uuid4())[:8]}",
-                    evidence_type="suspicious_domain",
-                    value=v,
-                    severity="medium",
-                    confidence=0.80
-                )
-            )
+
+            labels = value.split(".")
+            if any(not label or label.startswith("-") or label.endswith("-") for label in labels):
+                continue
+
+            _add_item(value, "suspicious_domain", "medium", 0.80, "dom")
 
         return items
 
