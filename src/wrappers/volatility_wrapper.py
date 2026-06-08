@@ -282,53 +282,6 @@ class VolatilityWrapper(BaseWrapper):
         return all_items
 
     def _parse(self, plugin: str, output: str) -> list:
-
-    def _build_strings_file(self, image_path: str):
-        """
-        Run the system `strings` utility against the raw image to produce a
-        temporary strings file suitable for feeding to volatility's
-        `windows.strings --strings-file` option. Returns (path, cleanup)
-        where cleanup is an object with a `cleanup()` method that removes
-        the tempfile. Returns (None, None) on failure.
-        """
-
-        try:
-            stdout, stderr, code = self.run_command(
-                ["strings", "-a", "-n", "8", image_path],
-                input_files=[image_path],
-                timeout=120,
-            )
-        except Exception:
-            return None, None
-
-        if code != 0 or not stdout.strip():
-            return None, None
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, prefix="af_strings_", suffix=".txt", mode="w", encoding="utf-8")
-        try:
-            tmp.write(stdout)
-            tmp.flush()
-            tmp.close()
-        except Exception:
-            try:
-                os.unlink(tmp.name)
-            except Exception:
-                pass
-            return None, None
-
-        class _Cleanup:
-            def __init__(self, path):
-                self._path = path
-
-            def cleanup(self):
-                try:
-                    if os.path.exists(self._path):
-                        os.unlink(self._path)
-                except Exception:
-                    pass
-
-        return tmp.name, _Cleanup(tmp.name)
-
         lines = [
             l for l in output.strip().splitlines()
             if l.strip()
@@ -375,6 +328,52 @@ class VolatilityWrapper(BaseWrapper):
             return self._parse_dlllist(lines)
 
         return []
+
+    def _build_strings_file(self, image_path: str):
+        """
+        Run the system `strings` utility against the raw image to produce a
+        temporary strings file suitable for feeding to volatility's
+        `windows.strings --strings-file` option. Returns (path, cleanup)
+        where cleanup is an object with a `cleanup()` method that removes
+        the tempfile. Returns (None, None) on failure.
+        """
+
+        try:
+            stdout, stderr, code = self.run_command(
+                ["strings", "-a", "-n", "8", image_path],
+                input_files=[image_path],
+                timeout=120,
+            )
+        except Exception:
+            return None, None
+
+        if code != 0 or not stdout.strip():
+            return None, None
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, prefix="af_strings_", suffix=".txt", mode="w", encoding="utf-8")
+        try:
+            tmp.write(stdout)
+            tmp.flush()
+            tmp.close()
+        except Exception:
+            try:
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+            return None, None
+
+        class _Cleanup:
+            def __init__(self, path):
+                self._path = path
+
+            def cleanup(self):
+                try:
+                    if os.path.exists(self._path):
+                        os.unlink(self._path)
+                except Exception:
+                    pass
+
+        return tmp.name, _Cleanup(tmp.name)
 
     def _parse_pslist(self, lines: list) -> list:
 
