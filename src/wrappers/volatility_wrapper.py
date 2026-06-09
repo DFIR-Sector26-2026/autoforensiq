@@ -679,10 +679,8 @@ class VolatilityWrapper(BaseWrapper):
             if len(parts) < 2:
                 continue
 
-            if parts[0].isdigit() and ".exe" in parts[1].lower():
-
+            if parts[0].isdigit():
                 try:
-
                     pid = parts[0]
                     name = parts[1]
 
@@ -712,9 +710,8 @@ class VolatilityWrapper(BaseWrapper):
 
                     if _has_pe_signature(stripped) or "mz" in flags or "pe" in flags:
                         grouped_regions[pid]["has_pe"] = True
-
                 except Exception:
-                    continue
+                    pass
 
                 continue
 
@@ -729,7 +726,7 @@ class VolatilityWrapper(BaseWrapper):
             name = info.get("name", "unknown")
             has_rwx = info.get("has_rwx", False)
             has_pe = info.get("has_pe", False)
-            corroborated = has_rwx or has_pe
+            corroborated = has_rwx and has_pe
 
             if has_rwx and has_pe:
                 severity = "critical"
@@ -752,7 +749,8 @@ class VolatilityWrapper(BaseWrapper):
                 "csrss.exe",
                 "winlogon.exe",
                 "wmiprvse.exe",
-                "svchost.exe"
+                "svchost.exe",
+                "system"
             }
 
             if name.lower() in system_allowlist and not corroborated and severity in {"critical", "high"}:
@@ -828,6 +826,7 @@ class VolatilityWrapper(BaseWrapper):
             "\\startup",
             "\\runonce",
             "\\tasks\\",
+            "\\intel\\",
             ".onion",
             ".ps1",
             ".vbs",
@@ -1047,18 +1046,13 @@ class VolatilityWrapper(BaseWrapper):
 
         seen = set()
 
-        file_extension_tlds = {
-            "bat", "cmd", "dll", "doc", "docx", "exe", "gif",
-            "hta", "htm", "html", "ico", "jar", "jpeg", "jpg", "js",
-            "lnk", "log", "msi", "pdf", "png", "ps1", "sys", "txt",
-            "vbs", "xml", "zip", "rar", "7z", "tar", "gz", "bin",
-            "dat", "csv", "json", "ini", "cfg", "bak"
+        valid_tlds = {
+            "com", "net", "org", "info", "biz", "us", "uk", "ru", "cn", 
+            "onion", "io", "cc", "ws", "xyz", "co", "me", "to", "tv", "eu"
         }
 
         def _add_item(value: str, evidence_type: str, severity: str, confidence: float, artifact_prefix: str):
-
             normalized = value.lower()
-
             if normalized in seen:
                 return
 
@@ -1093,8 +1087,7 @@ class VolatilityWrapper(BaseWrapper):
             return bytearray(b"\x00" * leading_zeros) + decoded
 
         def _is_valid_btc_address(value: str) -> bool:
-
-            if not re.fullmatch(r"[13][1-9A-HJ-NP-Za-km-z]{25,33}", value):
+            if not re.fullmatch(r"^[13][1-9A-HJ-NP-Za-km-z]{25,34}$", value):
                 return False
 
             decoded = _base58_decode(value)
@@ -1107,7 +1100,7 @@ class VolatilityWrapper(BaseWrapper):
 
             return digest == checksum and len(payload) == 21
 
-        for match in re.finditer(r"[a-z2-7]{16,56}\.onion", corpus, flags=re.IGNORECASE):
+        for match in re.finditer(r"[a-z0-9]{16,56}\.onion", corpus, flags=re.IGNORECASE):
 
             _add_item(match.group(0).lower(), "suspicious_domain", "high", 0.95, "ioc")
 
@@ -1135,7 +1128,7 @@ class VolatilityWrapper(BaseWrapper):
                 _add_item(match.group(0), "registry_key", "medium", 0.88, "reg")
 
         domain_pattern = re.compile(
-            r"(?<![@/\\])\b(?:[a-z0-9-]{1,63}\.)+(?P<tld>[a-z]{2,24})\b",
+            r"(?<![@\\])\b(?:[a-z0-9-]{1,63}\.)+(?P<tld>[a-z]{2,24})\b",
             flags=re.IGNORECASE,
         )
 
@@ -1144,7 +1137,7 @@ class VolatilityWrapper(BaseWrapper):
             value = match.group(0).lower()
             tld = match.group("tld").lower()
 
-            if tld in file_extension_tlds:
+            if tld not in valid_tlds:
                 continue
 
             labels = value.split(".")
