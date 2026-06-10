@@ -454,7 +454,13 @@ def parse_args():
 
 def _map_evidence_files(paths: list):
 
+    # Each evidence type maps to a *list* of paths so that supplying more than
+    # one artifact of the same kind (e.g. two memory images) analyses all of
+    # them rather than silently keeping only the last one.
     mapping = {}
+
+    def _add(key, path):
+        mapping.setdefault(key, []).append(path)
 
     for path in paths:
 
@@ -464,18 +470,18 @@ def _map_evidence_files(paths: list):
 
         # MEMORY
         if (
-            ext in [".dmp", ".mem", ".raw"]
+            ext in [".dmp", ".mem", ".raw", ".vmem"]
             or "memory" in lower
         ):
-            mapping["memory_dump"] = path
+            _add("memory_dump", path)
 
         # PCAP
         elif ext in [".pcap", ".pcapng"]:
-            mapping["pcap"] = path
+            _add("pcap", path)
 
         # DISK IMAGE
         elif ext in [".img", ".dd", ".e01"]:
-            mapping["disk_image"] = path
+            _add("disk_image", path)
 
         # REGISTRY
         elif (
@@ -484,19 +490,19 @@ def _map_evidence_files(paths: list):
             or "software" in lower
             or ext in [".dat", ".hiv"]
         ):
-            mapping["registry_hive"] = path
+            _add("registry_hive", path)
 
         # EMAIL
         elif ext in [".eml", ".msg"]:
-            mapping["email"] = path
+            _add("email", path)
 
         # BROWSER
         elif "history" in lower:
-            mapping["browser"] = path
+            _add("browser", path)
 
         # LOGS
         elif ext in [".log", ".evtx"]:
-            mapping["log_files"] = path
+            _add("log_files", path)
 
     return mapping
 
@@ -508,6 +514,7 @@ def _map_evidence_files(paths: list):
 # Maps each forensic tool name → the evidence key it requires
 _TOOL_EVIDENCE_MAP = {
     "volatility3": "memory_dump",
+    "memprocfs":   "memory_dump",
     "tshark":      "pcap",
     "tsk_fls":     "disk_image",
     "regripper":   "registry_hive",
@@ -671,7 +678,17 @@ def main(args=None):
     if evidence_files:
         priority_list = [f"#{i + 1} {k}" for i, k in enumerate(evidence_files)]
         print(f"  [PRIORITY] {' -> '.join(priority_list)}")
-        
+
+    # Record which evidence file each tool drew from so the report can attribute
+    # findings to their source artifact. Keyed by tool because each tool reads a
+    # single evidence type — avoids threading a source_file field through every
+    # wrapper and the evidence_item schema.
+    case_context["evidence_sources"] = {
+        tool: ", ".join(Path(p).name for p in evidence_files[ev_key])
+        for tool, ev_key in _TOOL_EVIDENCE_MAP.items()
+        if ev_key in evidence_files
+    }
+
     preflight_check(evidence_files, execution_plan)
 
     raw_outputs = run_orchestrator(execution_plan, evidence_files)

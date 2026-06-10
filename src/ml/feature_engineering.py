@@ -158,10 +158,10 @@ def extract_features(record: Dict[str, Any]) -> List[float]:
             if exe_match:
                 process_name = exe_match[0].lower()
 
-    # ── Derive port from value text when evidence record ─────────────────────
-    # e.g. "connection to 192.168.1.5:4444"
-    if port == 0 and value:
-        port_match = re.search(r":(\d{2,5})\b", value)
+    # ── Derive port only from network evidence with an IP:PORT pattern ───────
+# Avoid treating non-network fields like "(PID:596)" as port observations.
+    if port == 0 and value and evidence_type == "network":
+        port_match = re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}:(\d{2,5})\b", value)
         if port_match:
             port = int(port_match.group(1))
 

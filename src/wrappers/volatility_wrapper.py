@@ -32,20 +32,32 @@ class ProcessNode:
         self.reasons = []
 
 
-def serialize_tree(node):
+def summarise_tree(node, depth=0, max_depth=5):
+    """Human-readable indented process-tree summary used as the evidence value."""
 
-    return {
-        "pid": node.pid,
-        "ppid": node.ppid,
-        "name": node.name,
-        "cmdline": node.cmdline,
-        "suspicious": node.suspicious,
-        "reasons": node.reasons,
-        "children": [
-            serialize_tree(child)
-            for child in node.children
-        ]
-    }
+    if not node:
+        return ""
+
+    if depth > max_depth:
+        return ""
+
+    lines = [
+        f"{'  ' * depth}{node.name} (PID:{node.pid})"
+    ]
+
+    for child in node.children:
+
+        child_text = summarise_tree(
+            child,
+            depth + 1,
+            max_depth
+        )
+
+        if child_text:
+            lines.append(child_text)
+
+    return "\n".join(lines)
+
 
 
 SUSPICIOUS_PARENTS = [
@@ -518,16 +530,11 @@ class VolatilityWrapper(BaseWrapper):
 
         for root in roots:
 
-            serialized_tree = serialize_tree(root)
-
             tree_items.append(
                 self.make_evidence_item(
                     artifact_id=f"process_tree_{root.pid}",
                     evidence_type="process_tree",
-                    value=json.dumps(
-                        serialized_tree,
-                        indent=2
-                    ),
+                    value=summarise_tree(root),
                     severity="medium",
                     confidence=0.95,
                     linked_artifacts=[]
@@ -538,7 +545,6 @@ class VolatilityWrapper(BaseWrapper):
         items.extend(relation_items)
 
         return items
-
     def _parse_cmdline(self, lines: list) -> list:
 
         items = []
@@ -556,32 +562,83 @@ class VolatilityWrapper(BaseWrapper):
 
         for line in lines:
 
+            line = line.strip()
+
+            if (
+                not line or
+                "Volatility 3 Framework" in line or
+                ("PID" in line and "Process" in line)
+            ):
+                continue
+
             lower = line.lower()
 
-            if any(
-                kw in lower
-                for kw in suspicious_keywords
+            if (
+                "unsatisfied requirement" in lower or
+                "unable to validate" in lower or
+                "traceback" in lower
             ):
-
-                parts = line.split()
-
-                pid = (
-                    parts[1]
-                    if len(parts) > 1
-                    else "unknown"
-                )
-
                 items.append(
                     self.make_evidence_item(
-                        artifact_id=f"cmdline_{pid}",
-                        evidence_type="commandline",
-                        value=line.strip(),
-                        severity="high",
-                        confidence=0.90
+                        artifact_id=f"cmdline_warning_{len(items)}",
+                        evidence_type="parser_warning",
+                        value=line,
+                        severity="medium",
+                        confidence=1.0
                     )
                 )
+                continue
+
+            parts = line.split()
+
+            pid = parts[0] if len(parts) > 0 else "unknown"
+
+            if len(parts) == 1:
+                items.append(
+                    self.make_evidence_item(
+                        artifact_id=f"cmdline_empty_{pid}",
+                        evidence_type="commandline_missing",
+                        value=line,
+                        severity="low",
+                        confidence=1.0
+                    )
+                )
+                continue
+
+            process_name = parts[1]
+
+            cmdline = line
+
+            if len(parts) > 2:
+                cmdline = line.split(process_name, 1)[1].strip()
+
+            severity = (
+                "high"
+                if any(
+                    kw in lower
+                    for kw in suspicious_keywords
+                )
+                else "low"
+            )
+
+            confidence = (
+                0.90
+                if severity == "high"
+                else 0.60
+            )
+
+            items.append(
+                self.make_evidence_item(
+                    artifact_id=f"cmdline_{pid}",
+                    evidence_type="commandline",
+                    value=cmdline,
+                    severity=severity,
+                    confidence=confidence
+                )
+            )
 
         return items
+
 
     def _parse_netstat(self, lines: list) -> list:
 
@@ -589,13 +646,16 @@ class VolatilityWrapper(BaseWrapper):
 
         for line in lines:
 
+            line = line.strip()
+
             if (
+                not line or
                 "Volatility 3 Framework" in line or
                 "Offset" in line
             ):
                 continue
 
-            parts = line.split()
+            parts = line.split(maxsplit=9)
 
             if len(parts) < 8:
                 continue
@@ -603,33 +663,52 @@ class VolatilityWrapper(BaseWrapper):
             try:
 
                 proto = parts[1]
-                local = f"{parts[2]}:{parts[3]}"
-                foreign = f"{parts[4]}:{parts[5]}"
-                state = parts[6]
+                local_addr = parts[2]
+                local_port = parts[3]
+                foreign_addr = parts[4]
+                foreign_port = parts[5]
                 pid = parts[7]
 
-                port = int(parts[5])
+                local_p = (
+                    int(local_port)
+                    if str(local_port).isdigit()
+                    else 0
+                )
+                
+                remote_p = (
+                    int(foreign_port)
+                    if str(foreign_port).isdigit()
+                    else 0
+                )
 
                 severity = (
                     "high"
-                    if port in SUSPICIOUS_PORTS
-                    else "medium"
+                    if(
+                        local_p in SUSPICIOUS_PORTS
+                        or remote_p in SUSPICIOUS_PORTS
+                    )
+                    else "low"
                 )
 
                 items.append(
                     self.make_evidence_item(
-                        artifact_id=f"net_{pid}_{port}",
+                        artifact_id=(
+                            f"netstat_"
+                            f"{pid}_"
+                            f"{local_addr.replace('.', '_')}_"
+                            f"{local_port}_"
+                            f"{foreign_addr.replace('.', '_')}_"
+                            f"{foreign_port}"
+                        ),
                         evidence_type="network_connection",
                         value=(
                             f"{proto} "
-                            f"{local} -> {foreign} "
-                            f"[{state}] PID:{pid}"
+                            f"{local_addr}:{local_port} -> "
+                            f"{foreign_addr}:{foreign_port} "
+                            f"(PID:{pid})"
                         ),
                         severity=severity,
-                        confidence=0.80,
-                        linked_artifacts=[
-                            f"proc_{pid}"
-                        ]
+                        confidence=0.75
                     )
                 )
 
@@ -637,7 +716,6 @@ class VolatilityWrapper(BaseWrapper):
                 continue
 
         return items
-
     def _parse_malfind(self, lines: list) -> list:
 
         items = []

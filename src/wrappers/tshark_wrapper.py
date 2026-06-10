@@ -2,7 +2,7 @@ import os
 import json
 import subprocess
 from src.wrappers.base_wrapper import BaseWrapper
-
+import hashlib
 SUSPICIOUS_PORTS = [4444, 4445, 1337, 31337, 8888, 9999, 6667, 6668]
 SUSPICIOUS_PROTOS = ["dns", "http", "smb", "ftp"]
 
@@ -83,7 +83,13 @@ class TsharkWrapper(BaseWrapper):
                 severity = "high" if port in SUSPICIOUS_PORTS else "low"
                 ts = str(agg["first_ts"]) if agg.get("first_ts") is not None else ""
                 items.append(self.make_evidence_item(
-                    artifact_id=f"conn_{src.replace('.','_')}_{dst.replace('.','_')}_{dport}_{int(agg['first_ts'])}",
+                    artifact_id=(
+		        f"conn_"
+                        f"{src.replace('.','_')}_"
+                        f"{dst.replace('.','_')}_"
+                        f"{dport}_"
+                        f"{ts or 'notime'}"
+                   ),
                     evidence_type="network_connection",
                     value=f"TCP {src} → {dst}:{dport} ({agg['bytes']} bytes, {agg['packets']} packets)",
                     severity=severity,
@@ -129,7 +135,12 @@ class TsharkWrapper(BaseWrapper):
             )
             severity = "high" if looks_random and not self._dns_is_allowlisted(domain) else "low"
             items.append(self.make_evidence_item(
-                artifact_id=f"dns_{domain.replace('.','_')[:30]}",
+                artifact_id=(
+                    f"dns_"
+                    f"{src.replace('.','_')}_"
+                    f"{domain.replace('.','_')[:30]}_"
+                    f"{timestamp}"
+                ),
                 evidence_type="dns_query",
                 value=f"DNS query from {src} → {domain} (label entropy: {entropy:.2f})",
                 severity=severity,
@@ -164,13 +175,19 @@ class TsharkWrapper(BaseWrapper):
             host = parts[2] if len(parts) > 2 else ""
             uri  = parts[3] if len(parts) > 3 else ""
             items.append(self.make_evidence_item(
-                artifact_id=f"http_{src.replace('.','_')}_{host[:20]}",
+                artifact_id=(
+                    f"http_"
+                    f"{src.replace('.','_')}_"
+                    f"{host[:20]}_"
+                    f"{hashlib.md5(uri.encode()).hexdigest()[:8]}_"
+                    f"{timestamp}"
+                ),
                 evidence_type="http_request",
                 value=f"HTTP {src} → {host}{uri}",
                 severity="medium",
                 confidence=0.70,
                 timestamp=timestamp
-            ))
+            ))	
         print(f"  [TSHARK] HTTP requests → {len(items)} items")
         return items
 

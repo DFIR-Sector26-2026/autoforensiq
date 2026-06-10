@@ -150,8 +150,10 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             )
 
         # ─────────────────────────────────────────
-        # VALIDATE EVIDENCE PATH
+        # VALIDATE EVIDENCE PATH(S)
         # ─────────────────────────────────────────
+        # A single evidence type may carry more than one artifact (e.g. two
+        # memory images), so normalise to a list and run the tool on each.
 
         if not evidence_path:
 
@@ -163,67 +165,73 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
             continue
 
-        if not os.path.exists(evidence_path):
-
-            print(
-                f"  [SKIP] Evidence path does not exist: {evidence_path}"
-            )
-
-            all_raw_outputs[name] = []
-
-            continue
+        evidence_paths = (
+            evidence_path
+            if isinstance(evidence_path, list)
+            else [evidence_path]
+        )
 
         # ─────────────────────────────────────────
-        # EXECUTE TOOL
+        # EXECUTE TOOL (once per supplied artifact)
         # ─────────────────────────────────────────
 
-        try:
+        items = []
 
-            items = wrapper.run(evidence_path)
+        for path in evidence_paths:
 
-            if items is None:
+            if not os.path.exists(path):
 
-                items = []
-
-            all_raw_outputs[name] = items
-
-            merged_items.extend(items)
-
-            # ─────────────────────────────────────
-            # SAVE RAW TOOL OUTPUT
-            # ─────────────────────────────────────
-
-            os.makedirs(
-                "output/raw",
-                exist_ok=True
-            )
-
-            out_path = (
-                f"output/raw/{name}_output.json"
-            )
-
-            with open(out_path, "w") as f:
-
-                json.dump(
-                    {
-                        "tool": name,
-                        "items": items
-                    },
-                    f,
-                    indent=2
+                print(
+                    f"  [SKIP] Evidence path does not exist: {path}"
                 )
 
-            print(
-                f"  [SAVED] {len(items)} items → {out_path}"
+                continue
+
+            try:
+
+                out = wrapper.run(path)
+
+                if out:
+
+                    items.extend(out)
+
+            except Exception as e:
+
+                print(
+                    f"  [ERROR] {name} failed on {path}: {e}"
+                )
+
+        all_raw_outputs[name] = items
+
+        merged_items.extend(items)
+
+        # ─────────────────────────────────────────
+        # SAVE RAW TOOL OUTPUT (combined across artifacts)
+        # ─────────────────────────────────────────
+
+        os.makedirs(
+            "output/raw",
+            exist_ok=True
+        )
+
+        out_path = (
+            f"output/raw/{name}_output.json"
+        )
+
+        with open(out_path, "w") as f:
+
+            json.dump(
+                {
+                    "tool": name,
+                    "items": items
+                },
+                f,
+                indent=2
             )
 
-        except Exception as e:
-
-            print(
-                f"  [ERROR] {name} failed: {e}"
-            )
-
-            all_raw_outputs[name] = []
+        print(
+            f"  [SAVED] {len(items)} items → {out_path}"
+        )
 
     # ─────────────────────────────────────────
     # IOC EXTRACTION
