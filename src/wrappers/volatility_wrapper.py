@@ -1075,13 +1075,20 @@ class VolatilityWrapper(BaseWrapper):
             ".cmd"
         ]
 
+        # Parents that don't normally host random-named subfolders, so a
+        # gibberish child under one is a malware-staging hallmark (e.g. WannaCry's
+        # \Intel\<random>\ and \ProgramData\<random>\). Deliberately excludes
+        # \Temp\, \AppData\, \Public\: those legitimately hold random/hash-named
+        # dirs (browser caches, installer temp), which would be false positives.
+        staging_parents = {"intel", "programdata"}
+
         def _has_suspicious_staging_path(path: str) -> bool:
 
             lowered = path.lower().replace("/", "\\")
             segments = [segment for segment in lowered.split("\\") if segment]
 
             for index, segment in enumerate(segments[:-1]):
-                if segment == "intel" and index + 1 < len(segments):
+                if segment in staging_parents and index + 1 < len(segments):
                     child = segments[index + 1]
 
                     if (
@@ -1171,7 +1178,8 @@ class VolatilityWrapper(BaseWrapper):
                     # relevance gate to avoid flooding with low-signal paths.
                     marker_hits = sum(1 for marker in suspicious_markers if marker in normalized)
 
-                    if marker_hits == 0 and _has_suspicious_staging_path(normalized):
+                    in_random_staging = _has_suspicious_staging_path(normalized)
+                    if marker_hits == 0 and in_random_staging:
                         marker_hits = 1
 
                     # If this looks like a plain system binary (dll/exe) but is
@@ -1185,7 +1193,11 @@ class VolatilityWrapper(BaseWrapper):
 
                     seen.add(normalized)
 
-                    if marker_hits >= 2:
+                    # A randomly-named staging directory is a malware hallmark and
+                    # ranks high on its own (3.3-C), as does any path hitting 2+
+                    # markers. A single generic location marker (\temp\, \appdata\)
+                    # stays medium — too noisy to call high on its own.
+                    if marker_hits >= 2 or in_random_staging:
                         severity = "high"
                         confidence = 0.90
                     else:

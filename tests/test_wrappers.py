@@ -266,6 +266,41 @@ def test_parse_filescan_recovers_ransomware_payloads():
     assert not any("kernel32.dll" in v for v in by_value)
 
 
+def test_parse_filescan_random_staging_dir_is_high():
+    # Regression for 3.3-C: a non-payload file in a randomly-named staging
+    # directory is a malware hallmark and must rank high, not medium — and the
+    # detector must not be hard-coded to WannaCry's \Intel\ (it also covers
+    # \ProgramData\<random>\). A single generic location marker (\Temp\) stays
+    # medium, and benign named subfolders under those parents are not promoted.
+    wrapper = VolatilityWrapper()
+
+    mock_output = "\n".join([
+        "Volatility 3 Framework 2.28.0",
+        "Offset\tName",
+        # random staging dir under Intel — high
+        "0x1000\t\\Device\\HarddiskVolume2\\Intel\\ivecuqmanpnirkt615\\config.dat",
+        # random staging dir under ProgramData (not Intel) — generalised, high
+        "0x2000\t\\Device\\HarddiskVolume2\\ProgramData\\ab12cd34ef56gh\\loader.dat",
+        # generic temp location, single marker, not random-named — stays medium
+        "0x3000\t\\Device\\HarddiskVolume2\\Windows\\Temp\\note.dat",
+        # benign NAMED subfolder under a staging parent — flagged by the \intel\
+        # marker but NOT promoted to high (it isn't a random-named dir).
+        "0x4000\t\\Device\\HarddiskVolume2\\Intel\\Logs\\install.log",
+    ])
+
+    items = wrapper._parse("windows.filescan", mock_output)
+    by_value = {it["value"]: it for it in items}
+
+    intel = next(v for v in by_value if "ivecuqmanpnirkt615" in v)
+    pdata = next(v for v in by_value if "ab12cd34ef56gh" in v)
+    temp = next(v for v in by_value if "Temp" in v)
+    logs = next(v for v in by_value if "install.log" in v)
+    assert by_value[intel]["severity"] == "high"
+    assert by_value[pdata]["severity"] == "high"
+    assert by_value[temp]["severity"] == "medium"
+    assert by_value[logs]["severity"] == "medium"  # named dir not promoted
+
+
 def test_extract_strings():
     wrapper = VolatilityWrapper()
 
