@@ -1,3 +1,15 @@
+import re
+
+
+def _slug(text):
+    """Stable, filename-safe token from a matched indicator, used to keep
+    emitted IOC artifact_ids unique. A single source item (e.g. a process_tree
+    text) can match several indicators; without the token suffix every match
+    would collapse onto the same `ioc_<kind>_<artifact_id>` id."""
+    s = re.sub(r"[^a-z0-9]+", "_", str(text).lower()).strip("_")
+    return s or "x"
+
+
 SUSPICIOUS_PROCESSES = [
     "powershell.exe",
     "cmd.exe",
@@ -35,9 +47,17 @@ def extract_iocs(evidence_items):
 
     for item in evidence_items:
 
-        value = str(item.get("value", "")).lower()
-
         evidence_type = item.get("evidence_type", "")
+
+        # Skip the process_tree aggregate: it's a summary blob of processes that
+        # are already scored individually (per-PID `process` items) and as
+        # lineage (`process_relation` items). Scanning it re-derives the same
+        # IOCs from one item, producing duplicate / colliding artifact_ids
+        # (cf. issue 4.4 — process vs process_tree double-scoring).
+        if evidence_type == "process_tree":
+            continue
+
+        value = str(item.get("value", "")).lower()
 
         artifact_id = item.get("artifact_id", "")
 
@@ -54,7 +74,7 @@ def extract_iocs(evidence_items):
             if proc.lower() in value:
 
                 iocs.append({
-                    "artifact_id": f"ioc_proc_{artifact_id}",
+                    "artifact_id": f"ioc_proc_{artifact_id}_{_slug(proc)}",
                     "source_tool": "ioc_engine",
                     "evidence_type": "ioc",
                     "timestamp": "",
@@ -73,7 +93,7 @@ def extract_iocs(evidence_items):
             if keyword.lower() in value:
 
                 iocs.append({
-                    "artifact_id": f"ioc_keyword_{artifact_id}",
+                    "artifact_id": f"ioc_keyword_{artifact_id}_{_slug(keyword)}",
                     "source_tool": "ioc_engine",
                     "evidence_type": "ioc",
                     "timestamp": "",
@@ -109,7 +129,7 @@ def extract_iocs(evidence_items):
             if dll_path in value:
 
                 iocs.append({
-                    "artifact_id": f"ioc_dll_{artifact_id}",
+                    "artifact_id": f"ioc_dll_{artifact_id}_{_slug(dll_path)}",
                     "source_tool": "ioc_engine",
                     "evidence_type": "ioc",
                     "timestamp": "",
@@ -130,7 +150,7 @@ def extract_iocs(evidence_items):
             if relation_string in value:
 
                 iocs.append({
-                    "artifact_id": f"ioc_relation_{artifact_id}",
+                    "artifact_id": f"ioc_relation_{artifact_id}_{_slug(parent)}_{_slug(child)}",
                     "source_tool": "ioc_engine",
                     "evidence_type": "ioc",
                     "timestamp": "",

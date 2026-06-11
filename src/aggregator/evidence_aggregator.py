@@ -304,9 +304,18 @@ def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
     timestamp_value = item.get("timestamp", "")
     timestamp_dt = _parse_timestamp(timestamp_value)
 
-    pids = _extract_pids(combined)
-    ips = _extract_ips(combined)
-    paths = _extract_paths(combined)
+    # The process_tree aggregate summarises an entire subtree, so its value
+    # names every PID/path it contains. Extracting correlation signals from it
+    # would make it spuriously join — and, being high-confidence, anchor —
+    # every PID group, duplicating correlations the per-PID process/cmdline
+    # items already carry. Treat it as a non-participant: keep the item but give
+    # it no correlation signals.
+    if evidence_type == "process_tree":
+        pids, ips, paths = [], [], []
+    else:
+        pids = _extract_pids(combined)
+        ips = _extract_ips(combined)
+        paths = _extract_paths(combined)
     destination_ip, destination_port = _extract_destination(combined)
 
     file_keys = []
@@ -401,7 +410,12 @@ def _make_finding(
         "correlation_type": correlation_type,
         "finding": finding,
         "what_confirmed_it": what_confirmed_it,
-        "artifacts": [anchor.get("artifact_id", "")] + [artifact for artifact in related_artifacts if artifact],
+        # Deduped: the anchor is selected from related_items, so its id is also
+        # in related_artifacts; without dedup it would appear twice and each
+        # consumer (annotate_item_correlations) would record the finding twice.
+        "artifacts": list(dict.fromkeys(
+            [anchor.get("artifact_id", "")] + [artifact for artifact in related_artifacts if artifact]
+        )),
         "source_tools": sorted(set([anchor.get("source_tool", "")] + related_tools)),
     }
     if extra:
@@ -550,7 +564,7 @@ def annotate_item_correlations(items: list[dict], findings: list[dict[str, Any]]
             "reason": finding.get("what_confirmed_it", [""])[0],
             "finding": finding.get("finding", ""),
         }
-        for artifact_id in finding.get("artifacts", []):
+        for artifact_id in dict.fromkeys(finding.get("artifacts", [])):
             if artifact_id:
                 by_artifact[artifact_id].append(correlation_entry)
 

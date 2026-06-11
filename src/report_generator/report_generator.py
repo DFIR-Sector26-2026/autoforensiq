@@ -1246,10 +1246,34 @@ def _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence):
         )
 
 
-def _build_evidence_coverage(tools_ran):
+# Evidence types that are status/diagnostic markers, not real analysis output.
+# A tool whose only items are of these types ran but produced nothing usable
+# (e.g. MemProcFS emits a single `memory_analysis_status` item when it cannot
+# parse the image), so it must not be credited as having "Analysed" the dump.
+_STATUS_EVIDENCE_TYPES = {"memory_analysis_status"}
+
+
+def _build_evidence_coverage(tools_ran, evidence_items=None):
     # Map each covered evidence type to the tool(s) that actually analysed it,
     # so a type backed by more than one tool (e.g. memory_dump via volatility3
     # and memprocfs) is attributed accurately rather than to a single winner.
+    #
+    # A tool is only credited as "Analysed" when it produced at least one
+    # substantive evidence item. If it emitted only a status/failure marker
+    # (e.g. MemProcFS "unavailable" / "mount failure"), it's reported as
+    # "ran but produced no artifacts" instead of being listed as a successful
+    # analyser — otherwise the report contradicts itself (claims MemProcFS
+    # analysed the dump while the evidence shows it was unavailable).
+    produced = {}  # tool -> produced at least one non-status item
+    for e in (evidence_items or []):
+        if not isinstance(e, dict):
+            continue
+        tool = e.get("source_tool")
+        if not tool:
+            continue
+        substantive = e.get("evidence_type") not in _STATUS_EVIDENCE_TYPES
+        produced[tool] = produced.get(tool, False) or substantive
+
     covered = {}
     for t in tools_ran:
         ev = _TOOL_TO_EVIDENCE.get(t)
@@ -1261,10 +1285,23 @@ def _build_evidence_coverage(tools_ran):
     ]
     for ev in _ALL_EVIDENCE_TYPES:
         ev_label = ev.replace("_", " ").title()
-        if ev in covered:
-            tool_str = ", ".join(sorted(set(covered[ev])))
+        tools_for_ev = sorted(set(covered.get(ev, [])))
+        # Default True keeps backward-compatible behaviour when evidence_items
+        # isn't supplied (every covered tool counts as an analyser).
+        analysed  = [t for t in tools_for_ev if produced.get(t, True)]
+        attempted = [t for t in tools_for_ev if not produced.get(t, True)]
+        if analysed:
+            tool_str = ", ".join(analysed)
+            note = (
+                "-" if not attempted
+                else f"{', '.join(attempted)} ran but produced no analysable artifacts."
+            )
+            rows.append(f"| {ev_label} | Analysed | {tool_str} | {note} |")
+        elif attempted:
+            tool_str = ", ".join(attempted)
             rows.append(
-                f"| {ev_label} | Analysed | {tool_str} | - |"
+                f"| {ev_label} | Not analysed | {tool_str} | "
+                "Tool ran but could not parse the evidence; no artifacts extracted. |"
             )
         else:
             note = _ACQUIRE_NOTES.get(ev, "Collect evidence to enable analysis.")
@@ -1478,7 +1515,7 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     recs_section = f"## Recommendations\n\n{rec_lines}"
 
     # Evidence coverage
-    coverage_section = "## Evidence Coverage\n\n" + _build_evidence_coverage(tools_ran)
+    coverage_section = "## Evidence Coverage\n\n" + _build_evidence_coverage(tools_ran, all_items)
 
     # Audit trail
     audit_section = (

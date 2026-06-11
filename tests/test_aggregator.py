@@ -10,7 +10,9 @@ from src.aggregator.evidence_aggregator import (
     sort_evidence_items,
     build_indices,
     aggregate_evidence,
-    load_raw_outputs
+    load_raw_outputs,
+    enrich_evidence_items,
+    build_correlations,
 )
 from autoforensiq import run_bulk_aggregation
 
@@ -199,6 +201,20 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
                     "linked_artifacts": [],
                 },
                 {
+                    # Independent corroboration for PID 4321. The same_pid
+                    # correlation must rest on genuinely separate observations
+                    # (process + cmdline), NOT on the process_tree summary, which
+                    # is now excluded from correlation-signal extraction.
+                    "artifact_id": "cmdline_4321",
+                    "source_tool": "volatility3",
+                    "evidence_type": "commandline",
+                    "value": "powershell.exe -enc <...> (PID:4321)",
+                    "severity": "high",
+                    "confidence": 0.88,
+                    "timestamp": "2026-05-08T12:00:00Z",
+                    "linked_artifacts": [],
+                },
+                {
                     "artifact_id": "proc_tree_4321",
                     "source_tool": "volatility3",
                     "evidence_type": "process_tree",
@@ -268,9 +284,13 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
             output_path=str(Path(tmpdir) / "unified.json")
         )
 
-        assert result["total_items"] == 5
+        assert result["total_items"] == 6
         assert result["evidence_by_machine"]["WIN-ACCT-033"]
-        assert any(f["correlation_type"] == "same_pid" for f in result["findings"])
+        same_pid = [f for f in result["findings"] if f["correlation_type"] == "same_pid"]
+        assert same_pid
+        # The process_tree aggregate must never anchor a same_pid correlation —
+        # it summarises every PID in a subtree, so anchoring on it is wrong.
+        assert all(f.get("item") != "proc_tree_4321" for f in same_pid)
         assert any(f["correlation_type"] == "exfiltration" for f in result["exfiltration_findings"])
         assert any(item.get("correlations") for item in result["evidence_items"])
         exfil = next(f for f in result["exfiltration_findings"] if f["correlation_type"] == "exfiltration")
@@ -399,6 +419,40 @@ def test_run_bulk_aggregation_writes_summary():
 
             summary = aggregate_bulk_evidence(machines, output_root=str(Path(tmpdir) / "bulk_out"))
             assert summary["machines"]
+
+
+def test_process_tree_does_not_contaminate_correlations():
+    """The process_tree aggregate names every PID in a subtree. It must not
+    join (nor anchor) PID correlation groups, and correlations must not be
+    duplicated on the anchor item (regression for the double-listing bug where
+    the anchor id appeared twice in a finding's `artifacts`)."""
+    items = [
+        {"artifact_id": "process_tree_1636", "evidence_type": "process_tree",
+         "source_tool": "volatility3", "severity": "medium",
+         "value": "explorer.exe (1636) -> tasksche.exe (1940) -> @WanaDecryptor@ (740)"},
+        {"artifact_id": "proc_1940_tasksche_exe", "evidence_type": "process",
+         "source_tool": "volatility3", "severity": "high",
+         "value": "tasksche.exe (PID:1940)"},
+        {"artifact_id": "cmdline_1940", "evidence_type": "commandline",
+         "source_tool": "volatility3", "severity": "medium",
+         "value": "C:/Intel/tasksche.exe (PID:1940)"},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "X"})
+    annotated, findings = build_correlations(enriched, signals)
+
+    # the tree participates in no correlation
+    tree = next(i for i in annotated if i["artifact_id"] == "process_tree_1636")
+    assert tree.get("correlations") == []
+
+    same_pid = [f for f in findings if f["correlation_type"] == "same_pid"]
+    assert same_pid, "PID 1940 should still correlate via process + cmdline"
+    # never anchored on the tree
+    assert all(f.get("item") != "process_tree_1636" for f in same_pid)
+
+    # no duplicate correlation entries on any item
+    for item in annotated:
+        entries = [json.dumps(c, sort_keys=True) for c in item.get("correlations", [])]
+        assert len(entries) == len(set(entries)), f"duplicate on {item['artifact_id']}"
 
 
 if __name__ == "__main__":
