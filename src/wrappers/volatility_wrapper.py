@@ -14,9 +14,12 @@ PLUGINS = [
     "windows.netstat",
     "windows.malfind",
     "windows.filescan",
-    "windows.strings",
     "windows.dlllist"
 ]
+# NB: windows.strings is intentionally NOT in PLUGINS. It requires a
+# --strings-file argument, so running it in the main loop (which can't pass one)
+# just triggers a slow, failing vol pass. It is run separately, correctly, in the
+# dedicated strings block in run() with a generated --strings-file.
 
 
 class ProcessNode:
@@ -1179,6 +1182,12 @@ class VolatilityWrapper(BaseWrapper):
                     marker_hits = sum(1 for marker in suspicious_markers if marker in normalized)
 
                     in_random_staging = _has_suspicious_staging_path(normalized)
+                    # Ensure a random-named staging path still clears the
+                    # relevance gate below. Redundant for normal filescan output
+                    # (its parents, intel/programdata, are also markers, so
+                    # marker_hits is already >= 1) but kept as a safety net for
+                    # path forms where the parent isn't substring-matched as a
+                    # `\parent\` marker (e.g. no leading separator).
                     if marker_hits == 0 and in_random_staging:
                         marker_hits = 1
 
