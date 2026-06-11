@@ -29,6 +29,175 @@ PID    Process    Start VPN    End VPN    Tag    Protection    CommitCharge    P
     assert items[0]["evidence_type"] == "injected_code"
 
 
+# Real windows.malfind output from wannacry.raw (csrss/winlogon WannaCry
+# injections). The hexdump continuation lines contain no MZ, and several start
+# with all-decimal bytes ("08 00 ...") that must NOT be misparsed as PID rows.
+WANNACRY_MALFIND = """
+Volatility 3 Framework 2.28.0
+
+PID	Process	Start VPN	End VPN	Tag	Protection	CommitCharge	PrivateMemory	File output	Notes	Hexdump	Disasm
+
+596	csrss.exe	0x7f6f0000	0x7f7effff	Vad 	PAGE_EXECUTE_READWRITE	0	0	Disabled	N/A
+c8 00 00 00 8b 01 00 00 ff ee ff ee 08 70 00 00 .............p..
+08 00 00 00 00 fe 00 00 00 00 10 00 00 20 00 00 ............. ..
+00 02 00 00 00 20 00 00 8d 01 00 00 ff ef fd 7f ..... ..........
+620	winlogon.exe	0x21400000	0x21403fff	VadS	PAGE_EXECUTE_READWRITE	4	1	Disabled	N/A
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+00 00 00 00 28 00 28 00 01 00 00 00 00 00 00 00 ....(.(.........
+"""
+
+
+def test_parse_malfind_core_system_process_kept_high():
+    # csrss/winlogon are core system processes that never legitimately host
+    # RWX — the genuine WannaCry injections must stay high, not down-ranked.
+    wrapper = VolatilityWrapper()
+    items = wrapper._parse("windows.malfind", WANNACRY_MALFIND)
+
+    # Exactly two real processes — no phantom rows from hexdump lines.
+    assert len(items) == 2
+    by_pid = {it["value"].split("PID:")[1].split(")")[0]: it for it in items}
+    assert set(by_pid) == {"596", "620"}
+    assert by_pid["596"]["severity"] == "high"
+    assert by_pid["620"]["severity"] == "high"
+    # No fabricated process names like "00" / "02" leaking from the hexdump.
+    for it in items:
+        assert "csrss.exe" in it["value"] or "winlogon.exe" in it["value"]
+
+
+def test_parse_malfind_ignores_hexdump_decimal_lines():
+    # A bare hexdump (no PID rows) must yield zero items, proving decimal-led
+    # byte lines like "08 00 ..." are not treated as PID rows.
+    wrapper = VolatilityWrapper()
+    hexdump_only = """
+08 00 00 00 00 fe 00 00 00 00 10 00 00 20 00 00 ............. ..
+00 02 00 00 00 20 00 00 8d 01 00 00 ff ef fd 7f ..... ..........
+"""
+    assert wrapper._parse("windows.malfind", hexdump_only) == []
+
+
+def test_parse_malfind_jit_process_downranked():
+    # RWX in a JIT-capable process (chrome) with no PE signature is a common
+    # benign false positive → down-ranked to medium.
+    wrapper = VolatilityWrapper()
+    chrome = """
+PID	Process	Start VPN	End VPN	Tag	Protection	CommitCharge	PrivateMemory	File output	Notes
+1234	chrome.exe	0x1000	0x2000	VadS	PAGE_EXECUTE_READWRITE	4	1	Disabled	N/A
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+"""
+    items = wrapper._parse_malfind([l for l in chrome.splitlines() if l.strip()])
+    assert len(items) == 1
+    assert items[0]["severity"] == "medium"
+    assert "down-ranked" in items[0]["value"]
+
+
+def test_parse_malfind_corroborated_pid_escapes_downrank():
+    # The same chrome hit, but corroborated by another IOC on that PID, keeps
+    # its original (high) severity.
+    wrapper = VolatilityWrapper()
+    chrome = """
+PID	Process	Start VPN	End VPN	Tag	Protection	CommitCharge	PrivateMemory	File output	Notes
+1234	chrome.exe	0x1000	0x2000	VadS	PAGE_EXECUTE_READWRITE	4	1	Disabled	N/A
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+"""
+    lines = [l for l in chrome.splitlines() if l.strip()]
+    items = wrapper._parse_malfind(lines, corroborated_pids={"1234"})
+    assert len(items) == 1
+    assert items[0]["severity"] == "high"
+    assert "Corroborated by another IOC" in items[0]["value"]
+
+
+def test_collect_corroborated_pids():
+    # Only behavioral IOCs (suspicious cmdline / C2 connection) at high/critical
+    # corroborate. A benign low-severity item and a name-based process listing
+    # must NOT, or the down-rank would never apply.
+    wrapper = VolatilityWrapper()
+    items = [
+        # suspicious cmdline (PID in artifact_id) -> corroborates 1234
+        {"artifact_id": "cmdline_1234", "evidence_type": "commandline",
+         "value": "powershell -enc ...", "severity": "high"},
+        # C2 connection (PID in value) -> corroborates 620
+        {"artifact_id": "netstat_620_x", "evidence_type": "network_connection",
+         "value": "TCP 10.0.0.5:49200 -> 9.9.9.9:443 (PID:620)", "severity": "high"},
+        # benign low cmdline -> must NOT corroborate
+        {"artifact_id": "cmdline_999", "evidence_type": "commandline",
+         "value": "C:\\Windows\\explorer.exe", "severity": "low"},
+        # pslist name-heuristic high -> must NOT corroborate (excluded type)
+        {"artifact_id": "proc_4242_evil_exe", "evidence_type": "process",
+         "value": "evil.exe (PID:4242 PPID:1)", "severity": "high"},
+    ]
+    pids = wrapper._collect_corroborated_pids(items)
+    assert pids == {"1234", "620"}
+
+
+def test_dedupe_items_collapses_repeats_keeping_strongest():
+    # Regression for 3.3-F: the string sweep runs over two corpora, so the same
+    # IOC can be emitted twice. Identical (type, value) items collapse to one,
+    # keeping the highest severity/confidence; distinct items are untouched.
+    wrapper = VolatilityWrapper()
+    items = [
+        {"artifact_id": "dom_1", "evidence_type": "suspicious_domain",
+         "value": "evil.com", "severity": "medium", "confidence": 0.80},
+        {"artifact_id": "dom_2", "evidence_type": "suspicious_domain",
+         "value": "evil.com", "severity": "high", "confidence": 0.95},
+        # same value, different type -> kept separate
+        {"artifact_id": "reg_1", "evidence_type": "registry_key",
+         "value": "evil.com", "severity": "medium", "confidence": 0.88},
+        # distinct domain -> kept
+        {"artifact_id": "dom_3", "evidence_type": "suspicious_domain",
+         "value": "other.net", "severity": "medium", "confidence": 0.80},
+    ]
+    out = wrapper._dedupe_items(items)
+
+    assert len(out) == 3
+    dom = next(i for i in out if i["evidence_type"] == "suspicious_domain"
+               and i["value"] == "evil.com")
+    assert dom["severity"] == "high"  # strongest of the two duplicates kept
+    assert any(i["evidence_type"] == "registry_key" for i in out)
+    assert any(i["value"] == "other.net" for i in out)
+
+
+def test_dedupe_items_keeps_distinct_linked_artifacts():
+    # Items whose value omits the PID (process_relation: "parent -> child") must
+    # NOT collapse across distinct PID pairs — linked_artifacts is in the key.
+    wrapper = VolatilityWrapper()
+    items = [
+        {"artifact_id": "relation_8_100", "evidence_type": "process_relation",
+         "value": "Suspicious parent-child relationship: services.exe -> svchost.exe",
+         "severity": "critical", "confidence": 0.92,
+         "linked_artifacts": ["proc_8", "proc_100"]},
+        {"artifact_id": "relation_8_200", "evidence_type": "process_relation",
+         "value": "Suspicious parent-child relationship: services.exe -> svchost.exe",
+         "severity": "critical", "confidence": 0.92,
+         "linked_artifacts": ["proc_8", "proc_200"]},
+    ]
+    out = wrapper._dedupe_items(items)
+    # Same value/type but different linked PIDs -> both retained.
+    assert len(out) == 2
+
+
+def test_memprocfs_find_pagefile(tmp_path, monkeypatch):
+    # Regression for 3.5-A: the API retry must only fire with a real pagefile
+    # (used as `-pagefile0 <path>`); a bare `-pagefile` is invalid. _find_pagefile
+    # resolves an env override or a sibling pagefile.sys, else None.
+    from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
+    w = MemProcFSWrapper()
+
+    img = tmp_path / "mem.raw"
+    img.write_bytes(b"x")
+
+    monkeypatch.delenv("MEMPROCFS_PAGEFILE", raising=False)
+    assert w._find_pagefile(str(img)) is None          # nothing available
+
+    sibling = tmp_path / "pagefile.sys"
+    sibling.write_bytes(b"x")
+    assert w._find_pagefile(str(img)) == str(sibling)   # sibling found
+
+    override = tmp_path / "explicit.sys"
+    override.write_bytes(b"x")
+    monkeypatch.setenv("MEMPROCFS_PAGEFILE", str(override))
+    assert w._find_pagefile(str(img)) == str(override)  # env var wins
+
+
 def test_parse_filescan():
     wrapper = VolatilityWrapper()
 
@@ -44,6 +213,57 @@ Volatility 3 Framework 2.4.0
     assert len(items) == 2
     assert "tasksche.exe" in items[0]["value"]
     assert "malware.exe" in items[1]["value"]
+
+
+def test_parse_filescan_preserves_spaced_paths():
+    # Regression for 3.3-A: filescan paths contain single spaces (the rows are
+    # "Offset<TAB>Name"). Splitting on every space truncated the path and lost
+    # the staging-path marker, silently dropping the payload.
+    wrapper = VolatilityWrapper()
+
+    mock_output = "\n".join([
+        "Volatility 3 Framework 2.28.0",
+        "Offset\tName",
+        "0x1000\t\\Device\\HarddiskVolume2\\Users\\Public\\My Tools\\payload.exe",
+        "0x2000\t\\Device\\HarddiskVolume2\\Windows\\System32\\kernel32.dll",
+    ])
+
+    items = wrapper._parse("windows.filescan", mock_output)
+    values = [it["value"] for it in items]
+
+    # The spaced path is recovered with its marker (\Users\Public\) intact,
+    # not truncated to "Tools\payload.exe"; the benign system dll is skipped.
+    assert len(items) == 1
+    assert "Users\\Public\\My Tools\\payload.exe" in values[0]
+
+
+def test_parse_filescan_recovers_ransomware_payloads():
+    # Regression for 3.3-B: ransomware extensions and named payloads are strong
+    # IOCs on their own and must be recovered (as high) regardless of path —
+    # the staging-marker gate alone misses .WNCRY victim files in a Pictures
+    # folder and named droppers outside staging dirs.
+    wrapper = VolatilityWrapper()
+
+    mock_output = "\n".join([
+        "Volatility 3 Framework 2.28.0",
+        "Offset\tName",
+        # encrypted victim file in a non-staging path
+        "0x1000\t\\Documents and Settings\\All Users\\Default Pictures\\chess.bmp.WNCRY",
+        # named dropper / execution evidence outside any staging marker
+        "0x2000\t\\WINDOWS\\Prefetch\\@WANADECRYPTOR@.EXE-06F053F5.pf",
+        # benign system binary with no marker — must still be skipped
+        "0x3000\t\\Windows\\System32\\kernel32.dll",
+    ])
+
+    items = wrapper._parse("windows.filescan", mock_output)
+    by_value = {it["value"]: it for it in items}
+
+    assert len(items) == 2
+    wncry = next(v for v in by_value if v.endswith(".WNCRY"))
+    pf = next(v for v in by_value if v.endswith(".pf"))
+    assert by_value[wncry]["severity"] == "high"
+    assert by_value[pf]["severity"] == "high"
+    assert not any("kernel32.dll" in v for v in by_value)
 
 
 def test_extract_strings():
@@ -71,6 +291,59 @@ def test_extract_strings():
     assert "suspicious_crypto" in types
     assert "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa" in values
     assert "ignore_this_file.dll" not in values
+
+
+def test_extract_strings_domain_tld_recall_and_denoise():
+    # Regression for 3.3-E: country-code / .gov / .edu C2 domains must be
+    # recovered (the old tiny allowlist dropped them), while filename noise and
+    # TLD/extension collisions stay filtered.
+    wrapper = VolatilityWrapper()
+    corpus = "\n".join([
+        "c2-panel.example.de",        # ccTLD domain -> recovered
+        "exfil.agency.gov",           # .gov -> recovered
+        "login.university.edu",       # .edu -> recovered
+        "ntoskrnl.exe",               # not a TLD -> dropped
+        "symbols.pdb",                # not a TLD -> dropped
+        "l3codecx.ax",                # DirectShow filter (ext==ccTLD) -> dropped
+        "main.py",                    # script ext == ccTLD, 2 labels -> dropped
+        "panel.c2.pl",                # ambiguous TLD but sub-domained -> recovered
+        "t.com",                      # 1-char SLD junk -> dropped
+    ])
+    domains = {
+        it["value"] for it in wrapper._extract_strings(corpus)
+        if it["evidence_type"] == "suspicious_domain"
+    }
+
+    assert "c2-panel.example.de" in domains
+    assert "exfil.agency.gov" in domains
+    assert "login.university.edu" in domains
+    assert "panel.c2.pl" in domains
+    for noise in ("ntoskrnl.exe", "symbols.pdb", "l3codecx.ax", "main.py", "t.com"):
+        assert noise not in domains
+
+
+def test_extract_strings_denoises_prefetch_and_email():
+    # Prefetch filenames (.pf) and gibberish .nc must not leak as domains, and
+    # the email regex must reject filename/binary noise while keeping real ones.
+    wrapper = VolatilityWrapper()
+    corpus = "\n".join([
+        "TASKDL.EXE-01687054.pf",                  # Prefetch -> not a domain
+        "8xm6vk3sh.nc",                            # gibberish ccTLD -> dropped
+        "@WANADECRYPTOR@.EXE-06F053F5.pf",         # not an email (empty label)
+        "5@0.FF",                                  # not an email (bogus TLD)
+        "J.@L.IN",                                 # not an email (1-char SLD)
+        "server-certs@thawte.com",                 # real email -> kept
+    ])
+    items = wrapper._extract_strings(corpus)
+    domains = {i["value"] for i in items if i["evidence_type"] == "suspicious_domain"}
+    emails = {i["value"] for i in items if i["evidence_type"] == "email_address"}
+
+    assert not any(d.endswith(".pf") for d in domains)
+    assert not any(d.endswith(".nc") for d in domains)
+    assert "server-certs@thawte.com" in emails
+    for junk in ("5@0.ff", "j.@l.in"):
+        assert junk not in {e.lower() for e in emails}
+    assert not any(".pf" in e.lower() for e in emails)
 
 
 # ─────────────────────────────────────────────────────────────

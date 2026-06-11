@@ -35,13 +35,14 @@ class MemProcFSWrapper(BaseWrapper):
 
         # synthetic command string, purely for the chain-of-custody log
         audit_cmd = ["memprocfs-api", "-device", image_path]
+        input_files = [image_path]
 
         try:
             vmm = memprocfs.Vmm(["-device", image_path])
 
         except Exception as exc:
 
-            # log and attempt a secondary API invocation with -pagefile
+            # log the initial failure
             log_action(
                 tool_name=self.tool_name,
                 command=audit_cmd,
@@ -53,9 +54,27 @@ class MemProcFSWrapper(BaseWrapper):
 
             print(f"[MemProcFS] API initial parse failed: {exc}")
 
+            # A raw dump often fails to initialise when paged-out memory can't
+            # be reconstructed. MemProcFS can use a pagefile for this, but the
+            # option is `-pagefile0 <path>` and needs a real file — a bare
+            # `-pagefile` is rejected, so only retry when we actually have one.
+            pagefile = self._find_pagefile(image_path)
+
+            if not pagefile:
+                print("[MemProcFS] no pagefile available; skipping API retry")
+                return self._run_binary(image_path)
+
+            audit_cmd = [
+                "memprocfs-api", "-device", image_path,
+                "-pagefile0", pagefile,
+            ]
+            input_files = [image_path, pagefile]
+
             try:
-                print("[MemProcFS] retrying API with '-pagefile' option")
-                vmm = memprocfs.Vmm(["-device", image_path, "-pagefile"])  # retry
+                print(f"[MemProcFS] retrying API with -pagefile0 {pagefile}")
+                vmm = memprocfs.Vmm(
+                    ["-device", image_path, "-pagefile0", pagefile]
+                )
             except Exception as exc2:
                 print(f"[MemProcFS] API retry failed: {exc2}")
 
@@ -66,7 +85,7 @@ class MemProcFSWrapper(BaseWrapper):
         log_action(
             tool_name=self.tool_name,
             command=audit_cmd,
-            input_files=[image_path],
+            input_files=input_files,
             output_files=[],
             status="success",
         )
@@ -102,7 +121,26 @@ class MemProcFSWrapper(BaseWrapper):
 
         return items
 
-    # binary path (fallback: requires FUSE + the memprocfs binary) 
+    def _find_pagefile(self, image_path):
+        """Locate a pagefile to aid reconstruction of paged-out memory: an
+        explicit MEMPROCFS_PAGEFILE env var, else a `pagefile.sys` sitting
+        beside the image. Returns the path, or None when none is available — in
+        which case retrying the API with `-pagefile0` would be pointless."""
+
+        env_pagefile = os.environ.get("MEMPROCFS_PAGEFILE")
+        if env_pagefile and Path(env_pagefile).is_file():
+            return env_pagefile
+
+        try:
+            sibling = Path(image_path).resolve().parent / "pagefile.sys"
+            if sibling.is_file():
+                return str(sibling)
+        except Exception:
+            pass
+
+        return None
+
+    # binary path (fallback: requires FUSE + the memprocfs binary)
     def _run_binary(self, image_path):
 
         # MEMPROCFS_PATH wins; otherwise look up `memprocfs` on PATH.

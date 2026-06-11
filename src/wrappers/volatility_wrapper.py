@@ -139,6 +139,10 @@ class VolatilityWrapper(BaseWrapper):
 
         combined_output = ""
 
+        # malfind is parsed after the loop so cross-plugin corroboration is
+        # available (see below). Stash its raw output here when encountered.
+        malfind_output = None
+
         for plugin in PLUGINS:
 
             print(f"\n  [VOL] Running {plugin}...")
@@ -189,6 +193,13 @@ class VolatilityWrapper(BaseWrapper):
 
                 continue
 
+            if plugin == "windows.malfind":
+                # Defer parsing until after the loop so behavioral IOCs from the
+                # other plugins (suspicious cmdline / C2 connection) can be used
+                # to corroborate — and thus not down-rank — JIT-process hits.
+                malfind_output = stdout
+                continue
+
             try:
                 items = self._parse(plugin, stdout)
             except Exception as exc:
@@ -201,6 +212,28 @@ class VolatilityWrapper(BaseWrapper):
             )
 
             all_items.extend(items)
+
+        # Parse the deferred malfind output now that the other plugins' evidence
+        # is available for cross-IOC corroboration.
+        if malfind_output is not None:
+            corroborated_pids = self._collect_corroborated_pids(all_items)
+            try:
+                malfind_lines = [
+                    l for l in malfind_output.strip().splitlines() if l.strip()
+                ]
+                items = self._parse_malfind(
+                    malfind_lines,
+                    corroborated_pids=corroborated_pids,
+                )
+                if corroborated_pids:
+                    print(
+                        f"  [VOL] malfind corroborated PIDs: "
+                        f"{sorted(corroborated_pids)}"
+                    )
+                print(f"  [VOL] windows.malfind → {len(items)} evidence items")
+                all_items.extend(items)
+            except Exception as exc:
+                print(f"  [SKIP] windows.malfind parse failed: {exc}")
 
         # Optional plugin: dumpfiles can write many files to CWD when unfiltered,
         # so keep it opt-in for controlled investigations.
@@ -276,6 +309,25 @@ class VolatilityWrapper(BaseWrapper):
                         all_items.extend(items)
                     except Exception as exc:
                         print(f"  [SKIP] {plugin} parse failed: {exc}")
+
+                # windows.strings only emits strings it can attribute to a
+                # mapped process, so memory-resident IOCs sitting in unattributed
+                # pool/heap (killswitch domain, .onion C2, BTC wallets, registry
+                # keys) never reach it. Run the IOC sweep directly over the raw
+                # strings file too so those are recovered; the final de-dupe
+                # collapses any overlap with the attributed output.
+                try:
+                    with open(strings_path, "r", errors="ignore") as sf:
+                        raw_strings = sf.read()
+                    extracted = self._extract_strings(raw_strings)
+                    if extracted:
+                        print(
+                            f"  [VOL] Extracted {len(extracted)} IOCs "
+                            f"from raw strings file"
+                        )
+                        all_items.extend(extracted)
+                except Exception as exc:
+                    print(f"  [VOL] raw strings extraction failed: {exc}")
         finally:
             if strings_cleanup is not None:
                 try:
@@ -292,7 +344,58 @@ class VolatilityWrapper(BaseWrapper):
         except Exception as exc:
             print(f"  [VOL] string extraction failed: {exc}")
 
+        # The string sweep runs over both `combined_output` and the separate
+        # windows.strings output, so the same IOC (onion / domain / wallet) can
+        # be emitted twice. Collapse identical (type, value) items, keeping the
+        # strongest, so downstream stages and the P7 findings cap aren't fed
+        # duplicates.
+        before = len(all_items)
+        all_items = self._dedupe_items(all_items)
+        if len(all_items) != before:
+            print(f"  [VOL] de-duplicated {before - len(all_items)} repeat items")
+
         return all_items
+
+    def _dedupe_items(self, items: list) -> list:
+        """Collapse evidence items that share the same (evidence_type, value,
+        linked_artifacts), keeping the one with the highest severity then
+        confidence. Original ordering of the first occurrence is preserved.
+
+        `linked_artifacts` is part of the key so items whose value omits the PID
+        (e.g. process_relation, "parent.name -> child.name") are not merged
+        across distinct PID pairs; string IOCs have no links, so they still
+        de-duplicate as intended (issue 3.3-F)."""
+
+        severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+
+        best = {}
+        order = []
+
+        for it in items:
+            key = (
+                it.get("evidence_type"),
+                str(it.get("value", "")).strip().lower(),
+                tuple(it.get("linked_artifacts") or []),
+            )
+
+            if key not in best:
+                best[key] = it
+                order.append(key)
+                continue
+
+            cur = best[key]
+            challenger = (
+                severity_rank.get(it.get("severity"), 0),
+                it.get("confidence", 0) or 0,
+            )
+            incumbent = (
+                severity_rank.get(cur.get("severity"), 0),
+                cur.get("confidence", 0) or 0,
+            )
+            if challenger > incumbent:
+                best[key] = it
+
+        return [best[k] for k in order]
 
     def _parse(self, plugin: str, output: str) -> list:
         lines = [
@@ -716,9 +819,44 @@ class VolatilityWrapper(BaseWrapper):
                 continue
 
         return items
-    def _parse_malfind(self, lines: list) -> list:
+    def _collect_corroborated_pids(self, items: list) -> set:
+        """PIDs independently flagged by a *behavioral* IOC — a suspicious
+        command line or a C2/external network connection at high/critical
+        severity. Used as the spec's "corroborated by another IOC" escape so a
+        malfind injection in a JIT-capable process (chrome/svchost/...) stays
+        elevated instead of being down-ranked. Deliberately excludes name-based
+        heuristics (e.g. pslist's suspicious-parent flag) to keep corroboration
+        independent of the same allowlist logic malfind already applies.
+        """
+        import re
+
+        corroborating_types = {"commandline", "network_connection"}
+        pids = set()
+
+        for it in items:
+            if it.get("evidence_type") not in corroborating_types:
+                continue
+            if it.get("severity") not in {"high", "critical"}:
+                continue
+
+            aid = str(it.get("artifact_id", ""))
+            m = re.match(r"(?:cmdline|netstat)_(\d+)", aid)
+            if m:
+                pids.add(m.group(1))
+
+            for m in re.finditer(r"pid[:=]?\s*(\d+)", str(it.get("value", "")), re.IGNORECASE):
+                pids.add(m.group(1))
+
+        return pids
+
+    def _parse_malfind(self, lines: list, corroborated_pids: set = None) -> list:
 
         items = []
+
+        # PIDs independently flagged by another IOC (e.g. a suspicious cmdline,
+        # a C2 netstat connection, a recovered payload). Used as the spec's
+        # "corroborated by another IOC" escape from the system-process down-rank.
+        corroborated_pids = {str(p) for p in (corroborated_pids or set())}
 
         grouped_regions = {}
         current_pid = None
@@ -757,7 +895,16 @@ class VolatilityWrapper(BaseWrapper):
             if len(parts) < 2:
                 continue
 
-            if parts[0].isdigit():
+            # A real malfind table row starts with a PID and always carries a
+            # PAGE_* protection column. Hexdump continuation lines also start
+            # with all-decimal bytes (e.g. "08 00 ..."), so isdigit() alone
+            # misparses them as phantom PID rows — require the protection token.
+            is_pid_row = (
+                parts[0].isdigit() and
+                "page_" in stripped.lower()
+            )
+
+            if is_pid_row:
                 try:
                     pid = parts[0]
                     name = parts[1]
@@ -821,22 +968,36 @@ class VolatilityWrapper(BaseWrapper):
                 confidence = 0.70
                 reasons = ["Injected regions detected (no RWX/PE signature)"]
 
-            system_allowlist = {
+            # Processes where RWX/executable private memory is *commonly benign*
+            # — browsers and JIT/.NET hosts allocate RWX for generated code.
+            # These are the real false-positive sources, so injections here are
+            # down-ranked unless corroborated. Core system processes (csrss,
+            # winlogon, lsass, services, smss, wininit) are deliberately NOT in
+            # this set: they never legitimately host RWX/injected code, so a hit
+            # there is a strong signal and must keep its severity.
+            jit_allowlist = {
                 "explorer.exe",
                 "chrome.exe",
-                "csrss.exe",
-                "winlogon.exe",
-                "wmiprvse.exe",
+                "firefox.exe",
+                "msedge.exe",
+                "iexplore.exe",
+                "opera.exe",
+                "brave.exe",
                 "svchost.exe",
-                "system"
+                "wmiprvse.exe",
+                "dllhost.exe",
             }
 
-            if name.lower() in system_allowlist and not corroborated and severity in {"critical", "high"}:
+            # Corroboration: either malfind itself saw RWX *and* a PE/shellcode
+            # signature, or another tool independently flagged this PID.
+            is_corroborated = corroborated or (str(pid) in corroborated_pids)
+
+            if name.lower() in jit_allowlist and not is_corroborated and severity in {"critical", "high"}:
                 severity = "medium"
                 confidence = 0.65
-                reasons.append("Process is common system process without corroborating IOC: down-ranked")
-            elif name.lower() in system_allowlist and corroborated:
-                reasons.append("Corroborated by another IOC; system-process down-rank skipped")
+                reasons.append("Injection in JIT-capable process without corroborating IOC: down-ranked")
+            elif name.lower() in jit_allowlist and is_corroborated:
+                reasons.append("Corroborated by another IOC; down-rank skipped")
 
             items.append(
                 self.make_evidence_item(
@@ -937,21 +1098,74 @@ class VolatilityWrapper(BaseWrapper):
         # suspicious when they appear in staging/execution paths above.
         binary_exts = {".dll", ".exe"}
 
+        # Ransomware / payload signals that are suspicious on their own,
+        # independent of where the file sits. The staging-path gate otherwise
+        # drops these (e.g. WannaCry *.WNCRY encrypted victim files in a
+        # Pictures folder, or a named dropper outside \Intel\).
+        ransom_extensions = {
+            ".wnry", ".wncry", ".wcry", ".wncryt",
+            ".locky", ".zepto", ".odin", ".cerber", ".cerber3",
+            ".crypt", ".crypto", ".crypted", ".encrypted", ".enc",
+            ".locked", ".ecc", ".ezz", ".exx",
+            ".ryuk", ".lockbit", ".conti", ".djvu",
+        }
+
+        malware_filename_markers = [
+            "@wanadecryptor@", "wanadecryptor", "wannadecryptor",
+            "tasksche", "taskdl", "taskse", "mssecsvc",
+            "wannacry", "wanacry", "@please_read_me@",
+        ]
+
         for line in lines:
 
             # crude heuristic: look for absolute paths (Windows backslash or Unix slash)
             if "\\" in line or "/" in line:
 
-                parts = line.split()
-
-                # prefer the last token if it looks like a path
-                candidate = parts[-1]
+                # filescan rows are "Offset<TAB>Name". The Name is a path that
+                # can contain single spaces (e.g. "Documents and Settings",
+                # "Users\Public\My Tools"). Splitting on every space truncates
+                # the path and loses the staging-path marker, dropping the file.
+                # Split only on tabs / runs of 2+ spaces, then take the last
+                # field that still looks like a path.
+                fields = re.split(r"\t+| {2,}", line.strip())
+                candidate = ""
+                for field in reversed(fields):
+                    if "\\" in field or "/" in field:
+                        candidate = field.strip()
+                        break
 
                 if "\\" in candidate or "/" in candidate:
 
                     normalized = candidate.lower()
 
                     if normalized in seen:
+                        continue
+
+                    ext = ""
+                    try:
+                        ext = Path(normalized).suffix
+                    except Exception:
+                        ext = ""
+
+                    basename = normalized.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+
+                    # Known ransomware extension or named payload — a strong
+                    # signal on its own, so flag it high regardless of path
+                    # (bypasses the staging-marker / system-binary gates below).
+                    if (
+                        ext in ransom_extensions or
+                        any(tok in basename for tok in malware_filename_markers)
+                    ):
+                        seen.add(normalized)
+                        items.append(
+                            self.make_evidence_item(
+                                artifact_id=f"file_{str(uuid.uuid4())[:8]}",
+                                evidence_type="file_artifact",
+                                value=candidate,
+                                severity="high",
+                                confidence=0.95
+                            )
+                        )
                         continue
 
                     # relevance gate to avoid flooding with low-signal paths.
@@ -963,12 +1177,6 @@ class VolatilityWrapper(BaseWrapper):
                     # If this looks like a plain system binary (dll/exe) but is
                     # not located in a staging/execution path, skip it to avoid
                     # mass noise from benign system files.
-                    ext = ""
-                    try:
-                        ext = Path(normalized).suffix
-                    except Exception:
-                        ext = ""
-
                     if ext in binary_exts and marker_hits == 0:
                         continue
 
@@ -1124,10 +1332,55 @@ class VolatilityWrapper(BaseWrapper):
 
         seen = set()
 
+        # A domain's final label must be a *registered* TLD. This filters
+        # filename noise (ntdll.dll, ntoskrnl.exe, *.pdb/.sys — none are TLDs)
+        # while still recovering C2 on country-code / .gov / .edu domains that
+        # a tiny allowlist would silently drop.
         valid_tlds = {
-            "com", "net", "org", "info", "biz", "us", "uk", "ru", "cn", 
-            "onion", "io", "cc", "ws", "xyz", "co", "me", "to", "tv", "eu"
+            # common / generic + frequently-abused gTLDs
+            "com", "net", "org", "info", "biz", "gov", "edu", "mil", "int",
+            "name", "pro", "mobi", "asia", "xyz", "top", "site", "online",
+            "club", "shop", "app", "dev", "io", "co", "me", "tv", "cc", "ws",
+            "su", "onion", "tk", "ml", "ga", "cf", "gq", "work", "click",
+            "link", "live", "icu", "fun", "buzz", "host", "space", "website",
+            "press", "party", "stream", "download", "loan", "review", "date",
+            "trade", "racing", "win", "bid", "faith", "cricket", "men", "pw",
+            # ISO 3166 country-code TLDs
+            "ac", "ad", "ae", "af", "ag", "ai", "al", "am", "ao", "ar", "at",
+            "au", "aw", "ax", "az", "ba", "bb", "bd", "be", "bf", "bg", "bh",
+            "bi", "bj", "bm", "bn", "bo", "br", "bs", "bt", "bw", "by", "bz",
+            "ca", "cd", "cg", "ch", "ci", "ck", "cl", "cm", "cn", "cr", "cu",
+            "cv", "cw", "cx", "cy", "cz", "de", "dj", "dk", "dm", "do", "dz",
+            "ec", "ee", "eg", "es", "et", "eu", "fi", "fj", "fk", "fm", "fo",
+            "fr", "gb", "gd", "ge", "gf", "gg", "gh", "gi", "gl", "gm", "gn",
+            "gp", "gr", "gt", "gu", "gw", "gy", "hk", "hn", "hr", "ht", "hu",
+            "id", "ie", "il", "im", "in", "iq", "ir", "is", "it", "je", "jm",
+            "jo", "jp", "ke", "kg", "kh", "ki", "kn", "kp", "kr", "kw", "ky",
+            "kz", "la", "lb", "lc", "li", "lk", "lr", "ls", "lt", "lu", "lv",
+            "ly", "ma", "mc", "mg", "mk", "mm", "mn", "mo", "mp", "mq", "mr",
+            "ms", "mt", "mu", "mv", "mw", "mx", "my", "mz", "na", "nc", "ne",
+            "nf", "ng", "ni", "nl", "no", "np", "nr", "nu", "nz", "om", "pa",
+            "pe", "pg", "ph", "pk", "pn", "pr", "ps", "pt", "qa", "re",
+            "ro", "rw", "sa", "sb", "sc", "sd", "se", "sg", "si", "sk", "sl",
+            "sm", "sn", "sr", "ss", "st", "sv", "sx", "sy", "sz", "tc", "td",
+            "tg", "th", "tj", "tl", "tn", "tr", "tt", "tw", "tz", "ua", "ug",
+            "uk", "us", "uy", "uz", "va", "vc", "ve", "vg", "vi", "vn", "vu",
+            "wf", "ye", "yt", "za", "zm", "zw", "ru", "to",
+            # ccTLDs that also double as script/binary extensions (kept valid
+            # here; the ambiguous-TLD guard below requires a sub-domain).
+            "pl", "py", "pm", "sh", "so", "rs", "md", "ax",
         }
+
+        # Valid ccTLDs that are ALSO common source/script extensions. In a
+        # memory-image string sweep these are overwhelmingly files (main.py,
+        # lib.so, mod.rs, run.sh) rather than 2-label domains, so for these we
+        # require a sub-domain (3+ labels) before treating them as a domain.
+        # "ax" = Åland ccTLD, but also the Windows DirectShow filter extension
+        # (l3codecx.ax, divxdec.ax). "nc" (New Caledonia) is gibberish-prone in
+        # raw strings — both overwhelmingly noise as 2-label "domains".
+        # (".pf" — French Polynesia — is dropped from valid_tlds entirely above:
+        # it's the Prefetch file extension, e.g. TASKDL.EXE-01687054.pf.)
+        ambiguous_code_tlds = {"py", "pl", "sh", "so", "rs", "md", "pm", "ax", "nc"}
 
         def _add_item(value: str, evidence_type: str, severity: str, confidence: float, artifact_prefix: str):
             normalized = value.lower()
@@ -1189,9 +1442,33 @@ class VolatilityWrapper(BaseWrapper):
             if _is_valid_btc_address(candidate):
                 _add_item(candidate, "suspicious_crypto", "high", 0.93, "btc")
 
-        for match in re.finditer(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", corpus):
+        for match in re.finditer(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}", corpus):
 
-            _add_item(match.group(0), "email_address", "medium", 0.85, "email")
+            addr = match.group(0)
+            local, _, domain = addr.partition("@")
+            labels = domain.split(".")
+            tld = labels[-1].lower()
+
+            # Require a well-formed local part and domain with a real TLD.
+            # Rejects filename / binary noise the loose regex otherwise matches,
+            # e.g. "WANADECRYPTOR@.EXE-06F053F5.pf" (empty leading label),
+            # "5@0.FF" (bogus TLD), "J.@L.IN" (1-char SLD / trailing-dot local),
+            # "15090.61304@aaa.zzz.org" (digits-only local).
+            if (
+                len(labels) < 2 or
+                len(labels[-2]) < 2 or
+                tld not in valid_tlds or
+                tld in ambiguous_code_tlds or
+                not any(c.isalpha() for c in local) or
+                local.startswith(".") or local.endswith(".") or ".." in local or
+                any(
+                    not lbl or not lbl[0].isalnum() or not lbl[-1].isalnum()
+                    for lbl in labels
+                )
+            ):
+                continue
+
+            _add_item(addr, "email_address", "medium", 0.85, "email")
 
         registry_patterns = [
             r"(?:HKLM|HKEY_LOCAL_MACHINE|HKCU|HKEY_CURRENT_USER|HKCR|HKEY_CLASSES_ROOT|HKU|HKEY_USERS)\\[^\s\"']+",
@@ -1220,6 +1497,17 @@ class VolatilityWrapper(BaseWrapper):
 
             labels = value.split(".")
             if any(not label or label.startswith("-") or label.endswith("-") for label in labels):
+                continue
+
+            # Drop 1-character second-level labels ("t.com", "h.it", "t.ht") —
+            # almost always string-fragment noise, not real registrations.
+            if len(labels[-2]) < 2:
+                continue
+
+            # Disambiguate ccTLDs that double as script extensions: only accept
+            # them when there's a sub-domain (e.g. "panel.c2.pl"), not a bare
+            # "script.py" / "lib.so".
+            if tld in ambiguous_code_tlds and len(labels) < 3:
                 continue
 
             _add_item(value, "suspicious_domain", "medium", 0.80, "dom")
