@@ -694,6 +694,11 @@ _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _HASH_RE = re.compile(r"\b[0-9a-fA-F]{32,64}\b")
 _DOMAIN_RE = re.compile(r"→\s*([a-z0-9][a-z0-9.\-]*\.[a-z]{2,})", re.IGNORECASE)
 _URL_RE = re.compile(r"→\s*(\S+/\S*)")
+# suspicious_domain / suspicious_crypto items carry the bare indicator as their
+# value (no "→" arrow), so they need their own anchored patterns. The domain
+# pattern also matches .onion hidden services (e.g. <16-56 base32>.onion).
+_SUSP_DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9.\-]*\.[a-z]{2,})\b", re.IGNORECASE)
+_CRYPTO_RE = re.compile(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b")
 _FNAME_EXTS = (".exe", ".dll", ".bat", ".ps1", ".vbs", ".cmd", ".scr")
 # Aggregate items re-list many process names (the whole tree, a parent->child
 # pair); tokenizing them would stamp the aggregate's severity/ioc_match onto
@@ -723,6 +728,8 @@ _FINDING_TYPE_LABEL = {
     "http_request":       "HTTP Request",
     "file_artifact":      "File Artifact",
     "registry_key":       "Registry Key",
+    "suspicious_domain":  "Suspicious Domain",
+    "suspicious_crypto":  "Crypto Wallet",
     "ioc":                "IOC Match",
 }
 
@@ -764,6 +771,22 @@ def _item_indicators(item):
         m = _URL_RE.search(val)
         if m:
             out.append(("URL", m.group(1)))
+    elif etype == "suspicious_domain":
+        # String-sweep C2 indicator: a bare domain or a .onion hidden service.
+        m = _SUSP_DOMAIN_RE.search(val)
+        if m:
+            dom = m.group(1).rstrip(".")
+            label = "Onion Address" if dom.lower().endswith(".onion") else "Domain"
+            out.append((label, dom))
+    elif etype == "suspicious_crypto":
+        # String-sweep crypto indicator (e.g. a ransom BTC wallet). The value is
+        # the bare address, so fall back to it when the regex (legacy BTC only)
+        # doesn't match — otherwise a bech32/ETH wallet P3 may add later would be
+        # silently dropped, the same failure mode the .onion fix removed.
+        m = _CRYPTO_RE.search(val)
+        indicator = m.group(0) if m else val.strip()[:80]
+        if indicator:
+            out.append(("Crypto Wallet", indicator))
 
     for ip in _IP_RE.findall(val):
         if not _is_internal_ip(ip):
@@ -794,7 +817,7 @@ def _item_indicators(item):
             if name:
                 out.append(("Suspicious File", name[:60]))
 
-    if val.startswith(("HKEY", "HKLM", "HKCU")):
+    if val.startswith(("HKEY", "HKLM", "HKCU", "HKCR", "HKU", "\\Registry")):
         out.append(("Registry Key", val[:60]))
 
     return out

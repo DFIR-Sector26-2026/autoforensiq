@@ -201,6 +201,41 @@ def test_item_indicators_extracts_extensionless_flagged_name():
     assert not any(t == "Suspicious File" for t, _ in _item_indicators(inj))
 
 
+def test_item_indicators_surfaces_string_sweep_iocs():
+    # String-sweep C2 / crypto / registry IOCs carry the bare indicator as their
+    # value (no "→" arrow) and must still reach the report's indicators table.
+    dom = {"evidence_type": "suspicious_domain", "source_tool": "volatility3",
+           "value": "iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+           "severity": "high", "artifact_id": "dom_1"}
+    assert ("Domain", "iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com") in \
+        _item_indicators(dom)
+
+    onion = {"evidence_type": "suspicious_domain", "source_tool": "volatility3",
+             "value": "gx7ekbenv2riucmf.onion", "severity": "high",
+             "artifact_id": "ioc_onion"}
+    assert ("Onion Address", "gx7ekbenv2riucmf.onion") in _item_indicators(onion)
+
+    btc = {"evidence_type": "suspicious_crypto", "source_tool": "volatility3",
+           "value": "13AM4VW2dhxYgXeQepoHkHSQuy6NgaEb94", "severity": "high",
+           "artifact_id": "btc_1"}
+    assert ("Crypto Wallet", "13AM4VW2dhxYgXeQepoHkHSQuy6NgaEb94") in \
+        _item_indicators(btc)
+
+    # A non-legacy-BTC wallet (e.g. bech32 / ETH) the regex can't match must
+    # still surface via the bare-value fallback, not be silently dropped.
+    bech32 = {"evidence_type": "suspicious_crypto", "source_tool": "volatility3",
+              "value": "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+              "severity": "high", "artifact_id": "btc_2"}
+    assert ("Crypto Wallet", "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq") in \
+        _item_indicators(bech32)
+
+    reg = {"evidence_type": "registry_key", "source_tool": "volatility3",
+           "value": "\\Registry\\Machine\\SOFTWARE\\WanaCrypt0r",
+           "severity": "medium", "artifact_id": "reg_1"}
+    assert ("Registry Key", "\\Registry\\Machine\\SOFTWARE\\WanaCrypt0r") in \
+        _item_indicators(reg)
+
+
 def test_item_indicators_extracts_atoms_per_item():
     net = {"evidence_type": "network_connection", "source_tool": "volatility3",
            "value": "TCP 10.0.0.5:1100 -> 185.62.1.2:4444 [EST] PID:1940",
