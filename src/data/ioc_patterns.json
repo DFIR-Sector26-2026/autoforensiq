@@ -14,6 +14,27 @@
       "category": "ransomware_marker"
     },
     {
+      "id": "wannacry_killswitch",
+      "_comment": "Canonical WannaCry killswitch/sinkhole domain. Recovered as a string IOC at medium; cataloguing it gives it an ioc_match so it becomes a Key Finding and is escalated.",
+      "match": ["iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea"],
+      "severity": "high",
+      "category": "c2"
+    },
+    {
+      "id": "tor_hidden_service",
+      "_comment": "General rule: any .onion address recovered from memory is C2-grade. Substring-matches the TLD so it generalises to any malware, not just WannaCry's documented onions.",
+      "match": [".onion"],
+      "severity": "high",
+      "category": "c2"
+    },
+    {
+      "id": "wannacry_ransom_wallet",
+      "_comment": "WannaCry hard-coded BTC ransom wallets (lowercased for case-insensitive substring match against the lowercased haystack).",
+      "match": ["13am4vw2dhxygxeqepohkhsquy6ngaeb94", "12t9ydpgwuez9nymgw519p7aa8isjr6smw", "115p7ummngoj1pmvkphijcrdfjnxj6lrln"],
+      "severity": "critical",
+      "category": "ransomware_marker"
+    },
+    {
       "id": "ransomware_family",
       "match": ["ryuk", "lockbit", "revil", "sodinokibi", "conti", "blackcat", "alphv", "maze", "egregor", "darkside", "cl0p", "clop"],
       "severity": "critical",

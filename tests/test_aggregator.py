@@ -57,6 +57,47 @@ def test_sort_rule_match_outranks_heuristic_within_tier():
     assert sorted_items[1]["artifact_id"] == "heuristic"
 
 
+def test_catalog_matches_wannacry_network_iocs():
+    """The IOC catalog must match the WannaCry killswitch / .onion C2 / BTC
+    ransom wallets so they get an ioc_match (→ become Key Findings) and are
+    escalated. Regression for 3.3-I (network IOCs were absent from the catalog).
+    """
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        {"artifact_id": "dom_1", "evidence_type": "suspicious_domain",
+         "value": "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+         "severity": "medium", "source_tool": "volatility3"},
+        {"artifact_id": "onion_1", "evidence_type": "suspicious_domain",
+         "value": "gx7ekbenv2riucmf.onion", "severity": "high",
+         "source_tool": "volatility3"},
+        # case-sensitive base58 address — catalog matches case-insensitively
+        {"artifact_id": "btc_1", "evidence_type": "suspicious_crypto",
+         "value": "12t9YDPgwueZ9NyMgw519p7AA8isjr6SMw", "severity": "high",
+         "source_tool": "volatility3"},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    # killswitch: gains a match and is escalated medium -> high
+    assert by_id["dom_1"]["ioc_match"] == ["wannacry_killswitch"]
+    assert by_id["dom_1"]["severity"] == "high"
+    # any .onion matches the general Tor-hidden-service rule (high floor)
+    assert by_id["onion_1"]["ioc_match"] == ["tor_hidden_service"]
+    assert by_id["onion_1"]["severity"] == "high"
+    # BTC ransom wallet matches the curated named-intel rule and escalates
+    assert by_id["btc_1"]["ioc_match"] == ["wannacry_ransom_wallet"]
+    assert by_id["btc_1"]["severity"] == "critical"
+
+    # The .onion rule is general, not a WannaCry enumeration: an arbitrary
+    # (non-WannaCry) hidden service must match too.
+    novel = [{"artifact_id": "onion_2", "evidence_type": "suspicious_domain",
+              "value": "abcdef0123456789deadbeef.onion", "severity": "medium",
+              "source_tool": "volatility3"}]
+    rescore_items(novel, cat, {})
+    assert novel[0]["ioc_match"] == ["tor_hidden_service"]
+    assert novel[0]["severity"] == "high"
+
+
 def test_build_indices():
     """Test that indices group items correctly."""
     items = [

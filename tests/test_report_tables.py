@@ -10,6 +10,7 @@ from src.report_generator.report_generator import (
     _build_ioc_report,
     _build_process_tree,
     _extract_iocs,
+    _finding_sort_key,
     _indicators_cell,
     _item_indicators,
     _md_cell,
@@ -234,6 +235,24 @@ def test_item_indicators_surfaces_string_sweep_iocs():
            "severity": "medium", "artifact_id": "reg_1"}
     assert ("Registry Key", "\\Registry\\Machine\\SOFTWARE\\WanaCrypt0r") in \
         _item_indicators(reg)
+
+
+def test_finding_sort_key_ranks_ioc_bearing_above_indicatorless():
+    # Within the same severity tier, an item carrying a concrete IOC (a .onion
+    # C2 here) must sort ahead of an indicator-less item (a ransom-note language
+    # file with no extractable indicator and no catalog match), so it isn't cut
+    # by KEY_FINDINGS_CAP (issue 3.3-I).
+    onion = {"evidence_type": "suspicious_domain", "value": "gx7ekbenv2riucmf.onion",
+             "severity": "high", "artifact_id": "onion_1"}
+    wnry = {"evidence_type": "file_artifact",
+            "value": "\\Intel\\ivecuqmanpnirkt615\\msg\\m_russian.wnry",
+            "severity": "high", "artifact_id": "file_wnry"}
+    assert not _item_indicators(wnry) and not wnry.get("ioc_match")  # truly indicator-less
+    assert _finding_sort_key(onion) < _finding_sort_key(wnry)
+    # Severity still dominates the tie-break: a critical indicator-less item
+    # outranks a high IOC-bearing one.
+    crit_blank = {**wnry, "severity": "critical", "artifact_id": "file_crit"}
+    assert _finding_sort_key(crit_blank) < _finding_sort_key(onion)
 
 
 def test_item_indicators_extracts_atoms_per_item():

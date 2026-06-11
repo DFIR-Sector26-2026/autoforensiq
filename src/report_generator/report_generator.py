@@ -823,6 +823,19 @@ def _item_indicators(item):
     return out
 
 
+def _finding_sort_key(item):
+    """Key Findings ordering: severity first, then — within a tier — items
+    carrying a concrete IOC (a catalog ioc_match, or an extractable atomic
+    indicator: domain/onion/wallet/IP/hash/file/registry) ahead of
+    indicator-less ones. Without the tie-break, under KEY_FINDINGS_CAP the
+    high-severity .onion C2 / ransom wallets lose their slots to the many
+    indicator-less ransom-note language files (`*.wnry`) that become
+    finding-eligible only via their XAI note (issue 3.3-I)."""
+    sev = -_SEVERITY_RANK.get(str(item.get("severity", "low")).lower(), 0)
+    has_ioc = 0 if (item.get("ioc_match") or _item_indicators(item)) else 1
+    return (sev, has_ioc)
+
+
 def _indicators_cell(item):
     """Render the Key Findings 'Indicators / IOC Match' column for one item:
     the atomic indicators it yielded plus any IOC-catalog match badge."""
@@ -1314,7 +1327,7 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     priority_items = []
     for e in sorted(
         (e for e in all_items if _is_finding(e)),
-        key=lambda e: -_SEVERITY_RANK.get(str(e.get("severity", "low")).lower(), 0),
+        key=_finding_sort_key,
     ):
         # Collapse exact-duplicate rows (same type + value + severity).
         dk = (e.get("evidence_type"), e.get("value"), e.get("severity"))
