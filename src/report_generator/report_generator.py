@@ -1325,6 +1325,9 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     summary    = case_context.get("raw_incident_summary", "No summary available.")
     hypotheses = case_context.get("hypotheses", [])
 
+    # Evidence↔narrative reconciliation (issue 1.1), attached post-aggregation.
+    reconciliation = case_context.get("evidence_reconciliation") or {}
+
     # tool -> source evidence file (recorded by the orchestrator). Lets findings
     # be attributed to the artifact they came from.
     tool_sources = case_context.get("evidence_sources", {})
@@ -1405,9 +1408,21 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
         f"| Field | Value |\n|-------|-------|\n"
         f"| **Case Type** | {case_type.replace('_', ' ').title()} |\n"
         f"| **Classifier Confidence** | {confidence:.0%} |\n"
+    )
+    # Surface the evidence-reconciled confidence (issue 1.1) when available.
+    if "reconciled_confidence" in reconciliation:
+        rc = reconciliation["reconciled_confidence"]
+        diverged = reconciliation.get("narrative_evidence_divergence")
+        flag = " ⚠ narrative <-> evidence divergence" if diverged else ""
+        classification += f"| **Evidence-Reconciled Confidence** | {rc:.0%}{flag} |\n"
+    classification += (
         f"| **Case ID** | {case_id} |\n"
         f"| **Generated** | {generated} |"
     )
+    # Reconciliation detail (notes) as a short follow-on, when present.
+    recon_notes = reconciliation.get("notes") or []
+    if recon_notes:
+        classification += "\n\n" + "\n".join(f"> {note}" for note in recon_notes)
 
     # MITRE ATT&CK
     techniques = MITRE_BY_CASE.get(case_type, MITRE_BY_CASE["unknown"])
