@@ -4,12 +4,15 @@ import json
 import os
 import pytest
 import tempfile
+from pathlib import Path
 from src.aggregator.evidence_aggregator import (
     deduplicate_items,
     sort_evidence_items,
     build_indices,
     aggregate_evidence,
-    load_raw_outputs
+    load_raw_outputs,
+    enrich_evidence_items,
+    build_correlations,
 )
 from autoforensiq import run_bulk_aggregation
 
@@ -56,6 +59,47 @@ def test_sort_rule_match_outranks_heuristic_within_tier():
     assert sorted_items[1]["artifact_id"] == "heuristic"
 
 
+def test_catalog_matches_wannacry_network_iocs():
+    """The IOC catalog must match the WannaCry killswitch / .onion C2 / BTC
+    ransom wallets so they get an ioc_match (→ become Key Findings) and are
+    escalated. Regression for 3.3-I (network IOCs were absent from the catalog).
+    """
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        {"artifact_id": "dom_1", "evidence_type": "suspicious_domain",
+         "value": "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+         "severity": "medium", "source_tool": "volatility3"},
+        {"artifact_id": "onion_1", "evidence_type": "suspicious_domain",
+         "value": "gx7ekbenv2riucmf.onion", "severity": "high",
+         "source_tool": "volatility3"},
+        # case-sensitive base58 address — catalog matches case-insensitively
+        {"artifact_id": "btc_1", "evidence_type": "suspicious_crypto",
+         "value": "12t9YDPgwueZ9NyMgw519p7AA8isjr6SMw", "severity": "high",
+         "source_tool": "volatility3"},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    # killswitch: gains a match and is escalated medium -> high
+    assert by_id["dom_1"]["ioc_match"] == ["wannacry_killswitch"]
+    assert by_id["dom_1"]["severity"] == "high"
+    # any .onion matches the general Tor-hidden-service rule (high floor)
+    assert by_id["onion_1"]["ioc_match"] == ["tor_hidden_service"]
+    assert by_id["onion_1"]["severity"] == "high"
+    # BTC ransom wallet matches the curated named-intel rule and escalates
+    assert by_id["btc_1"]["ioc_match"] == ["wannacry_ransom_wallet"]
+    assert by_id["btc_1"]["severity"] == "critical"
+
+    # The .onion rule is general, not a WannaCry enumeration: an arbitrary
+    # (non-WannaCry) hidden service must match too.
+    novel = [{"artifact_id": "onion_2", "evidence_type": "suspicious_domain",
+              "value": "abcdef0123456789deadbeef.onion", "severity": "medium",
+              "source_tool": "volatility3"}]
+    rescore_items(novel, cat, {})
+    assert novel[0]["ioc_match"] == ["tor_hidden_service"]
+    assert novel[0]["severity"] == "high"
+
+
 def test_build_indices():
     """Test that indices group items correctly."""
     items = [
@@ -75,10 +119,11 @@ def test_aggregate_evidence_with_empty_tools():
     """Test aggregation with no raw outputs."""
     with tempfile.TemporaryDirectory() as tmpdir:
         case_context = {"case_id": "test_case_123"}
+        output_path = str(Path(tmpdir) / "unified.json")
         result = aggregate_evidence(
             case_context=case_context,
             raw_outputs_dir=tmpdir,
-            output_path=os.path.join(tmpdir, "unified.json")
+            output_path=output_path
         )
         
         assert result["case_id"] == "test_case_123"
@@ -91,8 +136,8 @@ def test_aggregate_evidence_preserves_provenance():
     """Test that tool provenance is maintained in output."""
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create sample raw outputs
-        raw_dir = os.path.join(tmpdir, "raw")
-        os.makedirs(raw_dir)
+        raw_dir = Path(tmpdir) / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
         
         vol_output = {
             "tool": "volatility3",
@@ -113,16 +158,16 @@ def test_aggregate_evidence_preserves_provenance():
             ]
         }
         
-        with open(os.path.join(raw_dir, "volatility_output.json"), "w") as f:
+        with (raw_dir / "volatility_output.json").open("w") as f:
             json.dump(vol_output, f)
-        with open(os.path.join(raw_dir, "tshark_output.json"), "w") as f:
+        with (raw_dir / "tshark_output.json").open("w") as f:
             json.dump(tshark_output, f)
         
         case_context = {"case_id": "test_case_456"}
         result = aggregate_evidence(
             case_context=case_context,
-            raw_outputs_dir=raw_dir,
-            output_path=os.path.join(tmpdir, "unified.json")
+            raw_outputs_dir=str(raw_dir),
+            output_path=str(Path(tmpdir) / "unified.json")
         )
         
         assert result["total_items"] == 2
@@ -139,8 +184,8 @@ def test_aggregate_evidence_preserves_provenance():
 def test_aggregate_evidence_builds_correlations_and_exfiltration():
     """Test that cross-tool correlations and the exfiltration rule are emitted."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        raw_dir = os.path.join(tmpdir, "raw")
-        os.makedirs(raw_dir)
+        raw_dir = Path(tmpdir) / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
 
         vol_output = {
             "tool": "volatility3",
@@ -152,6 +197,20 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
                     "value": "powershell.exe (PID:4321 PPID:100)",
                     "severity": "high",
                     "confidence": 0.9,
+                    "timestamp": "2026-05-08T12:00:00Z",
+                    "linked_artifacts": [],
+                },
+                {
+                    # Independent corroboration for PID 4321. The same_pid
+                    # correlation must rest on genuinely separate observations
+                    # (process + cmdline), NOT on the process_tree summary, which
+                    # is now excluded from correlation-signal extraction.
+                    "artifact_id": "cmdline_4321",
+                    "source_tool": "volatility3",
+                    "evidence_type": "commandline",
+                    "value": "powershell.exe -enc <...> (PID:4321)",
+                    "severity": "high",
+                    "confidence": 0.88,
                     "timestamp": "2026-05-08T12:00:00Z",
                     "linked_artifacts": [],
                 },
@@ -208,11 +267,11 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
             ],
         }
 
-        with open(os.path.join(raw_dir, "volatility_output.json"), "w") as f:
+        with (raw_dir / "volatility_output.json").open("w") as f:
             json.dump(vol_output, f)
-        with open(os.path.join(raw_dir, "tshark_output.json"), "w") as f:
+        with (raw_dir / "tshark_output.json").open("w") as f:
             json.dump(tshark_output, f)
-        with open(os.path.join(raw_dir, "tsk_output.json"), "w") as f:
+        with (raw_dir / "tsk_output.json").open("w") as f:
             json.dump(tsk_output, f)
 
         case_context = {
@@ -221,13 +280,17 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
         }
         result = aggregate_evidence(
             case_context=case_context,
-            raw_outputs_dir=raw_dir,
-            output_path=os.path.join(tmpdir, "unified.json")
+            raw_outputs_dir=str(raw_dir),
+            output_path=str(Path(tmpdir) / "unified.json")
         )
 
-        assert result["total_items"] == 5
+        assert result["total_items"] == 6
         assert result["evidence_by_machine"]["WIN-ACCT-033"]
-        assert any(f["correlation_type"] == "same_pid" for f in result["findings"])
+        same_pid = [f for f in result["findings"] if f["correlation_type"] == "same_pid"]
+        assert same_pid
+        # The process_tree aggregate must never anchor a same_pid correlation —
+        # it summarises every PID in a subtree, so anchoring on it is wrong.
+        assert all(f.get("item") != "proc_tree_4321" for f in same_pid)
         assert any(f["correlation_type"] == "exfiltration" for f in result["exfiltration_findings"])
         assert any(item.get("correlations") for item in result["evidence_items"])
         exfil = next(f for f in result["exfiltration_findings"] if f["correlation_type"] == "exfiltration")
@@ -239,12 +302,12 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
 def test_run_bulk_aggregation_writes_summary():
     """Test that the CLI bulk helper aggregates multiple machine bundles."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        machine_a_raw = os.path.join(tmpdir, "machine_a", "raw")
-        machine_b_raw = os.path.join(tmpdir, "machine_b", "raw")
-        output_root = os.path.join(tmpdir, "bulk_output")
-        summary_path = os.path.join(tmpdir, "bulk_summary.json")
-        os.makedirs(machine_a_raw)
-        os.makedirs(machine_b_raw)
+        machine_a_raw = Path(tmpdir) / "machine_a" / "raw"
+        machine_b_raw = Path(tmpdir) / "machine_b" / "raw"
+        output_root = Path(tmpdir) / "bulk_output"
+        summary_path = Path(tmpdir) / "bulk_summary.json"
+        machine_a_raw.mkdir(parents=True, exist_ok=True)
+        machine_b_raw.mkdir(parents=True, exist_ok=True)
 
         shared_item = {
             "artifact_id": "proc_shared",
@@ -257,36 +320,36 @@ def test_run_bulk_aggregation_writes_summary():
             "linked_artifacts": [],
         }
 
-        with open(os.path.join(machine_a_raw, "volatility_output.json"), "w") as f:
+        with (machine_a_raw / "volatility_output.json").open("w") as f:
             json.dump({"tool": "volatility3", "items": [shared_item]}, f)
 
-        with open(os.path.join(machine_b_raw, "volatility_output.json"), "w") as f:
+        with (machine_b_raw / "volatility_output.json").open("w") as f:
             json.dump({"tool": "volatility3", "items": [shared_item]}, f)
 
-        manifest = {
-            "output_root": output_root,
-            "summary_path": summary_path,
-            "machines": [
-                {
-                    "machine_name": "machine_a",
-                    "raw_outputs_dir": machine_a_raw,
-                    "case_context": {"case_id": "case-a", "affected_systems": ["machine-a"]},
-                },
-                {
-                    "machine_name": "machine_b",
-                    "raw_outputs_dir": machine_b_raw,
-                    "case_context": {"case_id": "case-b", "affected_systems": ["machine-b"]},
-                },
-            ],
-        }
+            manifest = {
+                "output_root": str(output_root),
+                "summary_path": str(summary_path),
+                "machines": [
+                    {
+                        "machine_name": "machine_a",
+                        "raw_outputs_dir": str(machine_a_raw),
+                        "case_context": {"case_id": "case-a", "affected_systems": ["machine-a"]},
+                    },
+                    {
+                        "machine_name": "machine_b",
+                        "raw_outputs_dir": str(machine_b_raw),
+                        "case_context": {"case_id": "case-b", "affected_systems": ["machine-b"]},
+                    },
+                ],
+            }
 
-        manifest_path = os.path.join(tmpdir, "bulk_manifest.json")
-        with open(manifest_path, "w") as f:
+        manifest_path = Path(tmpdir) / "bulk_manifest.json"
+        with manifest_path.open("w") as f:
             json.dump(manifest, f)
 
-        result = run_bulk_aggregation(manifest_path)
+        result = run_bulk_aggregation(str(manifest_path))
 
-        assert os.path.exists(summary_path)
+        assert summary_path.exists()
         assert result["bulk_summary"]["total_items"] == 2
         assert len(result["bulk_summary"]["machines"]) == 2
         assert result["bulk_summary"]["machines"][0]["findings"] >= 0
@@ -295,8 +358,8 @@ def test_run_bulk_aggregation_writes_summary():
     def test_aggregate_evidence_builds_correlations_and_exfiltration():
         """Test that correlations and exfiltration findings are generated."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            raw_dir = os.path.join(tmpdir, "raw")
-            os.makedirs(raw_dir)
+            raw_dir = Path(tmpdir) / "raw"
+            raw_dir.mkdir(parents=True, exist_ok=True)
 
             vol_output = {
                 "tool": "volatility3",
@@ -319,16 +382,16 @@ def test_run_bulk_aggregation_writes_summary():
                 ]
             }
 
-            with open(os.path.join(raw_dir, "volatility_output.json"), "w") as f:
+            with (raw_dir / "volatility_output.json").open("w") as f:
                 json.dump(vol_output, f)
-            with open(os.path.join(raw_dir, "tshark_output.json"), "w") as f:
+            with (raw_dir / "tshark_output.json").open("w") as f:
                 json.dump(tshark_output, f)
 
             case_context = {"case_id": "case_exf", "affected_systems": ["host-1"]}
             result = aggregate_evidence(
                 case_context=case_context,
-                raw_outputs_dir=raw_dir,
-                output_path=os.path.join(tmpdir, "unified.json")
+                raw_outputs_dir=str(raw_dir),
+                output_path=str(Path(tmpdir) / "unified.json")
             )
 
             # Should have at least one finding and possibly exfiltration finding
@@ -340,22 +403,56 @@ def test_run_bulk_aggregation_writes_summary():
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create two machine raw dirs
             machines = {
-                "hostA": {"raw_outputs_dir": os.path.join(tmpdir, "hostA_raw"), "case_context": {"case_id": "hostA"}},
-                "hostB": {"raw_outputs_dir": os.path.join(tmpdir, "hostB_raw"), "case_context": {"case_id": "hostB"}}
+                "hostA": {"raw_outputs_dir": str(Path(tmpdir) / "hostA_raw"), "case_context": {"case_id": "hostA"}},
+                "hostB": {"raw_outputs_dir": str(Path(tmpdir) / "hostB_raw"), "case_context": {"case_id": "hostB"}}
             }
-            os.makedirs(machines["hostA"]["raw_outputs_dir"])
-            os.makedirs(machines["hostB"]["raw_outputs_dir"])
+            Path(machines["hostA"]["raw_outputs_dir"]).mkdir(parents=True)
+            Path(machines["hostB"]["raw_outputs_dir"]).mkdir(parents=True)
 
             # Add a small tshark output for hostA
             tshark_output = {"tool": "tshark", "items": []}
-            with open(os.path.join(machines["hostA"]["raw_outputs_dir"], "tshark_output.json"), "w") as f:
+            with (Path(machines["hostA"]["raw_outputs_dir"]) / "tshark_output.json").open("w") as f:
                 json.dump(tshark_output, f)
 
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
             from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
 
-            summary = aggregate_bulk_evidence(machines, output_root=os.path.join(tmpdir, "bulk_out"))
+            summary = aggregate_bulk_evidence(machines, output_root=str(Path(tmpdir) / "bulk_out"))
             assert summary["machines"]
+
+
+def test_process_tree_does_not_contaminate_correlations():
+    """The process_tree aggregate names every PID in a subtree. It must not
+    join (nor anchor) PID correlation groups, and correlations must not be
+    duplicated on the anchor item (regression for the double-listing bug where
+    the anchor id appeared twice in a finding's `artifacts`)."""
+    items = [
+        {"artifact_id": "process_tree_1636", "evidence_type": "process_tree",
+         "source_tool": "volatility3", "severity": "medium",
+         "value": "explorer.exe (1636) -> tasksche.exe (1940) -> @WanaDecryptor@ (740)"},
+        {"artifact_id": "proc_1940_tasksche_exe", "evidence_type": "process",
+         "source_tool": "volatility3", "severity": "high",
+         "value": "tasksche.exe (PID:1940)"},
+        {"artifact_id": "cmdline_1940", "evidence_type": "commandline",
+         "source_tool": "volatility3", "severity": "medium",
+         "value": "C:/Intel/tasksche.exe (PID:1940)"},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "X"})
+    annotated, findings = build_correlations(enriched, signals)
+
+    # the tree participates in no correlation
+    tree = next(i for i in annotated if i["artifact_id"] == "process_tree_1636")
+    assert tree.get("correlations") == []
+
+    same_pid = [f for f in findings if f["correlation_type"] == "same_pid"]
+    assert same_pid, "PID 1940 should still correlate via process + cmdline"
+    # never anchored on the tree
+    assert all(f.get("item") != "process_tree_1636" for f in same_pid)
+
+    # no duplicate correlation entries on any item
+    for item in annotated:
+        entries = [json.dumps(c, sort_keys=True) for c in item.get("correlations", [])]
+        assert len(entries) == len(set(entries)), f"duplicate on {item['artifact_id']}"
 
 
 if __name__ == "__main__":

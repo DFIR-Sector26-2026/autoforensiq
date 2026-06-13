@@ -23,6 +23,14 @@
       },
       "minItems": 1
     },
+    "artifact_types_claimed": {
+      "type": "array",
+      "description": "Artifact types the incident narrative claimed (before intersection with the evidence actually provided). Present only when the run knows which evidence files were supplied; lets the report flag narrative-over-claim.",
+      "items": {
+        "type": "string",
+        "enum": ["memory_dump", "disk_image", "pcap", "registry_hive", "log_files", "email_archive", "browser_history"]
+      }
+    },
     "hypotheses": {
       "type": "array",
       "description": "Specific forensic hypotheses to investigate, ranked by likelihood",

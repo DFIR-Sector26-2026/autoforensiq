@@ -1,6 +1,8 @@
 import os
 import json
 import shutil
+import tempfile
+from pathlib import Path
 
 from src.wrappers.base_wrapper import BaseWrapper
 from src.utils.audit_log import log_action
@@ -33,12 +35,14 @@ class MemProcFSWrapper(BaseWrapper):
 
         # synthetic command string, purely for the chain-of-custody log
         audit_cmd = ["memprocfs-api", "-device", image_path]
+        input_files = [image_path]
 
         try:
             vmm = memprocfs.Vmm(["-device", image_path])
 
         except Exception as exc:
 
+            # log the initial failure
             log_action(
                 tool_name=self.tool_name,
                 command=audit_cmd,
@@ -48,15 +52,40 @@ class MemProcFSWrapper(BaseWrapper):
                 error=str(exc)[:500],
             )
 
-            print(f"[MemProcFS] API could not parse image: {exc}")
+            print(f"[MemProcFS] API initial parse failed: {exc}")
 
-            return [self._failure_item()]
+            # A raw dump often fails to initialise when paged-out memory can't
+            # be reconstructed. MemProcFS can use a pagefile for this, but the
+            # option is `-pagefile0 <path>` and needs a real file — a bare
+            # `-pagefile` is rejected, so only retry when we actually have one.
+            pagefile = self._find_pagefile(image_path)
+
+            if not pagefile:
+                print("[MemProcFS] no pagefile available; skipping API retry")
+                return self._run_binary(image_path)
+
+            audit_cmd = [
+                "memprocfs-api", "-device", image_path,
+                "-pagefile0", pagefile,
+            ]
+            input_files = [image_path, pagefile]
+
+            try:
+                print(f"[MemProcFS] retrying API with -pagefile0 {pagefile}")
+                vmm = memprocfs.Vmm(
+                    ["-device", image_path, "-pagefile0", pagefile]
+                )
+            except Exception as exc2:
+                print(f"[MemProcFS] API retry failed: {exc2}")
+
+                # fall back to binary path if available
+                return self._run_binary(image_path)
 
         # success → record custody entry (hashes the input image)
         log_action(
             tool_name=self.tool_name,
             command=audit_cmd,
-            input_files=[image_path],
+            input_files=input_files,
             output_files=[],
             status="success",
         )
@@ -92,7 +121,26 @@ class MemProcFSWrapper(BaseWrapper):
 
         return items
 
-    # binary path (fallback: requires FUSE + the memprocfs binary) 
+    def _find_pagefile(self, image_path):
+        """Locate a pagefile to aid reconstruction of paged-out memory: an
+        explicit MEMPROCFS_PAGEFILE env var, else a `pagefile.sys` sitting
+        beside the image. Returns the path, or None when none is available — in
+        which case retrying the API with `-pagefile0` would be pointless."""
+
+        env_pagefile = os.environ.get("MEMPROCFS_PAGEFILE")
+        if env_pagefile and Path(env_pagefile).is_file():
+            return env_pagefile
+
+        try:
+            sibling = Path(image_path).resolve().parent / "pagefile.sys"
+            if sibling.is_file():
+                return str(sibling)
+        except Exception:
+            pass
+
+        return None
+
+    # binary path (fallback: requires FUSE + the memprocfs binary)
     def _run_binary(self, image_path):
 
         # MEMPROCFS_PATH wins; otherwise look up `memprocfs` on PATH.
@@ -110,19 +158,17 @@ class MemProcFSWrapper(BaseWrapper):
                     artifact_id="memprocfs_unavailable",
                     evidence_type="memory_analysis_status",
                     value=(
-                        "MemProcFS is unavailable: the python package is "
-                        "not installed and no binary was found. Install the "
-                        "pip package, or set MEMPROCFS_PATH / add 'memprocfs' "
-                        "to PATH."
+                        "MemProcFS binary fallback is unavailable: no binary "
+                        "was found. Set MEMPROCFS_PATH or add 'memprocfs' to "
+                        "PATH."
                     ),
                     severity="low",
                     confidence=0.60,
                 )
             ]
 
-        mount_dir = "/tmp/memprocfs_mount"
-
-        os.makedirs(mount_dir, exist_ok=True)
+        # Create a temporary mount directory in a portable location
+        mount_dir = tempfile.mkdtemp(prefix="memprocfs_mount_")
 
         command = [
             binary,
@@ -142,6 +188,11 @@ class MemProcFSWrapper(BaseWrapper):
 
             print("[MemProcFS] mount failed")
             print(stderr)
+            # attempt cleanup
+            try:
+                shutil.rmtree(mount_dir)
+            except Exception:
+                pass
 
             return [self._failure_item()]
 
@@ -149,21 +200,35 @@ class MemProcFSWrapper(BaseWrapper):
 
         items = []
 
-        process_path = f"{mount_dir}/forensic/processes"
 
-        if os.path.exists(process_path):
+        try:
+            process_path = Path(mount_dir) / "forensic" / "processes"
 
-            for name in os.listdir(process_path):
-
-                items.append(
-                    self.make_evidence_item(
-                        artifact_id=f"memprocfs_proc_{name}",
-                        evidence_type="memprocfs_process",
-                        value=f"Process artifact found: {name}",
-                        severity="medium",
-                        confidence=0.80,
+            if process_path.exists():
+                for name in os.listdir(process_path):
+                    items.append(
+                        self.make_evidence_item(
+                            artifact_id=f"memprocfs_proc_{name}",
+                            evidence_type="memprocfs_process",
+                            value=f"Process artifact found: {name}",
+                            severity="medium",
+                            confidence=0.80,
+                        )
                     )
-                )
+        finally:
+            # try to unmount if mounted, then remove the temporary dir
+            try:
+                # fusermount on Linux, umount as fallback
+                self.run_command(["fusermount", "-u", mount_dir], timeout=10)
+            except Exception:
+                try:
+                    self.run_command(["umount", mount_dir], timeout=10)
+                except Exception:
+                    pass
+            try:
+                shutil.rmtree(mount_dir)
+            except Exception:
+                pass
 
         if not items:
             items.append(self._no_artifacts_item())

@@ -312,13 +312,48 @@ def _parse_llm_json(raw: str) -> dict:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def classify(report_text: str, config_override: dict = None) -> dict:
+# Canonical artifact_type ordering (matches the case_context schema enum). Used
+# to render a deterministic, narrowed artifact_types list (issue 1.2).
+_ARTIFACT_TYPE_ORDER = [
+    "memory_dump", "disk_image", "pcap", "registry_hive",
+    "log_files", "email_archive", "browser_history",
+]
+
+
+def _narrow_artifact_types(result: dict, provided_artifact_types) -> None:
+    """Issue 1.2 — replace the over-broad narrative artifact_types dump with the
+    evidence types actually provided to this run, preserving the narrative claim
+    under `artifact_types_claimed` for the divergence report.
+
+    `provided_artifact_types` is the set/list of artifact types (schema enum
+    values) backed by real evidence files. When it's empty/None the run doesn't
+    know what was supplied (e.g. standalone classify, GUI without files), so the
+    narrative list is left untouched for backward compatibility.
+    """
+    if not provided_artifact_types:
+        return
+
+    present = {t for t in provided_artifact_types if t in _ARTIFACT_TYPE_ORDER}
+    if not present:
+        return
+
+    result["artifact_types_claimed"] = list(result.get("artifact_types", []))
+    result["artifact_types"] = [t for t in _ARTIFACT_TYPE_ORDER if t in present]
+
+
+def classify(report_text: str, config_override: dict = None,
+             provided_artifact_types=None) -> dict:
     """
     Classify an incident report and return a validated case_context dict.
 
     Args:
         report_text:     Plain-text content of the incident report.
         config_override: Optional dict to override config.yaml settings.
+        provided_artifact_types: Optional iterable of artifact types (schema enum
+                         values) backed by evidence files actually supplied. When
+                         given, artifact_types is narrowed to these and the
+                         narrative claim is preserved as artifact_types_claimed
+                         (issue 1.2).
 
     Returns:
         Validated case_context dict.
@@ -361,6 +396,10 @@ def classify(report_text: str, config_override: dict = None) -> dict:
     if "generated_at" not in result or not result["generated_at"]:
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
 
+    # Issue 1.2 — constrain the narrative artifact_types to what was actually
+    # supplied, so P2 doesn't select tools for evidence that was never provided.
+    _narrow_artifact_types(result, provided_artifact_types)
+
     # Validate against schema — raises jsonschema.ValidationError on failure
     validate_case_context(result)
     print(f"[CLASSIFIER] Schema validation passed ✔")
@@ -372,7 +411,8 @@ def classify(report_text: str, config_override: dict = None) -> dict:
 
 
 def classify_file(report_path: str, output_path: str = None,
-                  config_override: dict = None) -> dict:
+                  config_override: dict = None,
+                  provided_artifact_types=None) -> dict:
     """
     Classify an incident report from a file path and optionally write output.
 
@@ -391,7 +431,8 @@ def classify_file(report_path: str, output_path: str = None,
     print(f"[CLASSIFIER] Reading incident report: {report_path}")
     report_text = report_path.read_text(encoding="utf-8")
 
-    result = classify(report_text, config_override)
+    result = classify(report_text, config_override,
+                      provided_artifact_types=provided_artifact_types)
 
     # Determine output path
     if output_path is None:

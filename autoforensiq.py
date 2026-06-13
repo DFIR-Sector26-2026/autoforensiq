@@ -51,7 +51,8 @@ def _clear_stale_outputs():
 # STAGE 1 — CLASSIFIER
 # ─────────────────────────────────────────────────────────────
 
-def run_classifier(report_path: str, config_override: dict = None):
+def run_classifier(report_path: str, config_override: dict = None,
+                   provided_artifact_types=None):
 
     _stage(1, "Intent Classifier")
 
@@ -66,7 +67,9 @@ def run_classifier(report_path: str, config_override: dict = None):
 
     output_path = ROOT_DIR / cfg["paths"]["case_context_output"]
 
-    return classify_file(report_path, str(output_path), config_override=config_override)
+    return classify_file(report_path, str(output_path),
+                         config_override=config_override,
+                         provided_artifact_types=provided_artifact_types)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -511,6 +514,24 @@ def _map_evidence_files(paths: list):
 # PRE-FLIGHT CHECK
 # ─────────────────────────────────────────────────────────────
 
+# Maps the evidence keys produced by _map_evidence_files() → the artifact_type
+# enum values used by the classifier / case_context schema. Most keys already
+# match; only the email/browser shorthands differ. Used to narrow the
+# narrative artifact_types to what was actually provided (issue 1.2).
+_EVIDENCE_KEY_TO_ARTIFACT_TYPE = {
+    "email":   "email_archive",
+    "browser": "browser_history",
+}
+
+
+def _provided_artifact_types(evidence_files: dict) -> list:
+    """Translate the mapped evidence-file keys into artifact_type enum values."""
+    return sorted({
+        _EVIDENCE_KEY_TO_ARTIFACT_TYPE.get(key, key)
+        for key in evidence_files
+    })
+
+
 # Maps each forensic tool name → the evidence key it requires
 _TOOL_EVIDENCE_MAP = {
     "volatility3": "memory_dump",
@@ -652,8 +673,18 @@ def main(args=None):
                 llm_override[model_key] = args.model
         config_override = {"llm": llm_override}
 
+    # Map the supplied evidence files up-front so the classifier can narrow its
+    # narrative artifact_types to what was actually provided (issue 1.2) before
+    # P2 selects tools from them.
+    evidence_files = _map_evidence_files(args.evidence)
+    provided_artifact_types = _provided_artifact_types(evidence_files)
+
     # STAGE 1
-    case_context = run_classifier(args.report, config_override=config_override)
+    case_context = run_classifier(
+        args.report,
+        config_override=config_override,
+        provided_artifact_types=provided_artifact_types,
+    )
 
     if args.skip_tools:
         print("\n[SKIP] --skip-tools enabled")
@@ -672,9 +703,7 @@ def main(args=None):
             t["order"] = i
         print(f"  [FILTER] Restricted to tools: {', '.join(args.tools)}")
 
-    # STAGE 3
-    evidence_files = _map_evidence_files(args.evidence)
-
+    # STAGE 3 (evidence_files already mapped above for the 1.2 narrowing)
     if evidence_files:
         priority_list = [f"#{i + 1} {k}" for i, k in enumerate(evidence_files)]
         print(f"  [PRIORITY] {' -> '.join(priority_list)}")
@@ -696,6 +725,27 @@ def main(args=None):
     # STAGE 4
     unified_evidence = run_aggregator(case_context)
 
+    # Issue 1.1 — reconcile the narrative classification against the evidence
+    # actually recovered. Leaves classifier_confidence untouched; attaches a
+    # reconciled_confidence + divergence flag for the report and audit trail.
+    try:
+        from src.classifier.evidence_reconciler import reconcile_evidence
+        reconciliation = reconcile_evidence(case_context, unified_evidence)
+        case_context["evidence_reconciliation"] = reconciliation
+        case_context["reconciled_confidence"] = reconciliation["reconciled_confidence"]
+        case_context["narrative_evidence_divergence"] = reconciliation["narrative_evidence_divergence"]
+        with open(ROOT_DIR / "output" / "evidence_reconciliation.json", "w") as f:
+            json.dump(reconciliation, f, indent=2)
+        if reconciliation["narrative_evidence_divergence"]:
+            print(f"  [RECONCILE] ⚠ narrative <-> evidence divergence — "
+                  f"confidence {reconciliation['classifier_confidence']} → "
+                  f"{reconciliation['reconciled_confidence']}")
+        else:
+            print(f"  [RECONCILE] evidence supports '{reconciliation['narrative_case_type']}' "
+                  f"(support {reconciliation['evidence_support_score']})")
+    except Exception as exc:
+        print(f"  [RECONCILE] skipped ({exc})")
+
     # STAGE 5/6
     shap_explanations = run_ml_pipeline()
 
@@ -714,7 +764,9 @@ def main(args=None):
     print("  PIPELINE COMPLETE")
     print("=" * 60)
     print(f"  case_type  : {case_context['case_type']}")
-    print(f"  confidence : {case_context['classifier_confidence']}")
+    print(f"  confidence : {case_context['classifier_confidence']}"
+          + (f" (reconciled {case_context['reconciled_confidence']})"
+             if "reconciled_confidence" in case_context else ""))
     print(f"  artifacts  : {', '.join(case_context['artifact_types'])}")
     print("  output/    : final_report.md")
     print("=" * 60 + "\n")

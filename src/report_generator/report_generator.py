@@ -694,6 +694,11 @@ _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _HASH_RE = re.compile(r"\b[0-9a-fA-F]{32,64}\b")
 _DOMAIN_RE = re.compile(r"→\s*([a-z0-9][a-z0-9.\-]*\.[a-z]{2,})", re.IGNORECASE)
 _URL_RE = re.compile(r"→\s*(\S+/\S*)")
+# suspicious_domain / suspicious_crypto items carry the bare indicator as their
+# value (no "→" arrow), so they need their own anchored patterns. The domain
+# pattern also matches .onion hidden services (e.g. <16-56 base32>.onion).
+_SUSP_DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9.\-]*\.[a-z]{2,})\b", re.IGNORECASE)
+_CRYPTO_RE = re.compile(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b")
 _FNAME_EXTS = (".exe", ".dll", ".bat", ".ps1", ".vbs", ".cmd", ".scr")
 # Aggregate items re-list many process names (the whole tree, a parent->child
 # pair); tokenizing them would stamp the aggregate's severity/ioc_match onto
@@ -723,6 +728,8 @@ _FINDING_TYPE_LABEL = {
     "http_request":       "HTTP Request",
     "file_artifact":      "File Artifact",
     "registry_key":       "Registry Key",
+    "suspicious_domain":  "Suspicious Domain",
+    "suspicious_crypto":  "Crypto Wallet",
     "ioc":                "IOC Match",
 }
 
@@ -764,6 +771,22 @@ def _item_indicators(item):
         m = _URL_RE.search(val)
         if m:
             out.append(("URL", m.group(1)))
+    elif etype == "suspicious_domain":
+        # String-sweep C2 indicator: a bare domain or a .onion hidden service.
+        m = _SUSP_DOMAIN_RE.search(val)
+        if m:
+            dom = m.group(1).rstrip(".")
+            label = "Onion Address" if dom.lower().endswith(".onion") else "Domain"
+            out.append((label, dom))
+    elif etype == "suspicious_crypto":
+        # String-sweep crypto indicator (e.g. a ransom BTC wallet). The value is
+        # the bare address, so fall back to it when the regex (legacy BTC only)
+        # doesn't match — otherwise a bech32/ETH wallet P3 may add later would be
+        # silently dropped, the same failure mode the .onion fix removed.
+        m = _CRYPTO_RE.search(val)
+        indicator = m.group(0) if m else val.strip()[:80]
+        if indicator:
+            out.append(("Crypto Wallet", indicator))
 
     for ip in _IP_RE.findall(val):
         if not _is_internal_ip(ip):
@@ -794,10 +817,23 @@ def _item_indicators(item):
             if name:
                 out.append(("Suspicious File", name[:60]))
 
-    if val.startswith(("HKEY", "HKLM", "HKCU")):
+    if val.startswith(("HKEY", "HKLM", "HKCU", "HKCR", "HKU", "\\Registry")):
         out.append(("Registry Key", val[:60]))
 
     return out
+
+
+def _finding_sort_key(item):
+    """Key Findings ordering: severity first, then — within a tier — items
+    carrying a concrete IOC (a catalog ioc_match, or an extractable atomic
+    indicator: domain/onion/wallet/IP/hash/file/registry) ahead of
+    indicator-less ones. Without the tie-break, under KEY_FINDINGS_CAP the
+    high-severity .onion C2 / ransom wallets lose their slots to the many
+    indicator-less ransom-note language files (`*.wnry`) that become
+    finding-eligible only via their XAI note (issue 3.3-I)."""
+    sev = -_SEVERITY_RANK.get(str(item.get("severity", "low")).lower(), 0)
+    has_ioc = 0 if (item.get("ioc_match") or _item_indicators(item)) else 1
+    return (sev, has_ioc)
 
 
 def _indicators_cell(item):
@@ -1210,10 +1246,34 @@ def _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence):
         )
 
 
-def _build_evidence_coverage(tools_ran):
+# Evidence types that are status/diagnostic markers, not real analysis output.
+# A tool whose only items are of these types ran but produced nothing usable
+# (e.g. MemProcFS emits a single `memory_analysis_status` item when it cannot
+# parse the image), so it must not be credited as having "Analysed" the dump.
+_STATUS_EVIDENCE_TYPES = {"memory_analysis_status"}
+
+
+def _build_evidence_coverage(tools_ran, evidence_items=None):
     # Map each covered evidence type to the tool(s) that actually analysed it,
     # so a type backed by more than one tool (e.g. memory_dump via volatility3
     # and memprocfs) is attributed accurately rather than to a single winner.
+    #
+    # A tool is only credited as "Analysed" when it produced at least one
+    # substantive evidence item. If it emitted only a status/failure marker
+    # (e.g. MemProcFS "unavailable" / "mount failure"), it's reported as
+    # "ran but produced no artifacts" instead of being listed as a successful
+    # analyser — otherwise the report contradicts itself (claims MemProcFS
+    # analysed the dump while the evidence shows it was unavailable).
+    produced = {}  # tool -> produced at least one non-status item
+    for e in (evidence_items or []):
+        if not isinstance(e, dict):
+            continue
+        tool = e.get("source_tool")
+        if not tool:
+            continue
+        substantive = e.get("evidence_type") not in _STATUS_EVIDENCE_TYPES
+        produced[tool] = produced.get(tool, False) or substantive
+
     covered = {}
     for t in tools_ran:
         ev = _TOOL_TO_EVIDENCE.get(t)
@@ -1225,10 +1285,23 @@ def _build_evidence_coverage(tools_ran):
     ]
     for ev in _ALL_EVIDENCE_TYPES:
         ev_label = ev.replace("_", " ").title()
-        if ev in covered:
-            tool_str = ", ".join(sorted(set(covered[ev])))
+        tools_for_ev = sorted(set(covered.get(ev, [])))
+        # Default True keeps backward-compatible behaviour when evidence_items
+        # isn't supplied (every covered tool counts as an analyser).
+        analysed  = [t for t in tools_for_ev if produced.get(t, True)]
+        attempted = [t for t in tools_for_ev if not produced.get(t, True)]
+        if analysed:
+            tool_str = ", ".join(analysed)
+            note = (
+                "-" if not attempted
+                else f"{', '.join(attempted)} ran but produced no analysable artifacts."
+            )
+            rows.append(f"| {ev_label} | Analysed | {tool_str} | {note} |")
+        elif attempted:
+            tool_str = ", ".join(attempted)
             rows.append(
-                f"| {ev_label} | Analysed | {tool_str} | - |"
+                f"| {ev_label} | Not analysed | {tool_str} | "
+                "Tool ran but could not parse the evidence; no artifacts extracted. |"
             )
         else:
             note = _ACQUIRE_NOTES.get(ev, "Collect evidence to enable analysis.")
@@ -1251,6 +1324,9 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     case_id    = case_context.get("case_id", "N/A")
     summary    = case_context.get("raw_incident_summary", "No summary available.")
     hypotheses = case_context.get("hypotheses", [])
+
+    # Evidence↔narrative reconciliation (issue 1.1), attached post-aggregation.
+    reconciliation = case_context.get("evidence_reconciliation") or {}
 
     # tool -> source evidence file (recorded by the orchestrator). Lets findings
     # be attributed to the artifact they came from.
@@ -1291,7 +1367,7 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     priority_items = []
     for e in sorted(
         (e for e in all_items if _is_finding(e)),
-        key=lambda e: -_SEVERITY_RANK.get(str(e.get("severity", "low")).lower(), 0),
+        key=_finding_sort_key,
     ):
         # Collapse exact-duplicate rows (same type + value + severity).
         dk = (e.get("evidence_type"), e.get("value"), e.get("severity"))
@@ -1332,9 +1408,21 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
         f"| Field | Value |\n|-------|-------|\n"
         f"| **Case Type** | {case_type.replace('_', ' ').title()} |\n"
         f"| **Classifier Confidence** | {confidence:.0%} |\n"
+    )
+    # Surface the evidence-reconciled confidence (issue 1.1) when available.
+    if "reconciled_confidence" in reconciliation:
+        rc = reconciliation["reconciled_confidence"]
+        diverged = reconciliation.get("narrative_evidence_divergence")
+        flag = " ⚠ narrative <-> evidence divergence" if diverged else ""
+        classification += f"| **Evidence-Reconciled Confidence** | {rc:.0%}{flag} |\n"
+    classification += (
         f"| **Case ID** | {case_id} |\n"
         f"| **Generated** | {generated} |"
     )
+    # Reconciliation detail (notes) as a short follow-on, when present.
+    recon_notes = reconciliation.get("notes") or []
+    if recon_notes:
+        classification += "\n\n" + "\n".join(f"> {note}" for note in recon_notes)
 
     # MITRE ATT&CK
     techniques = MITRE_BY_CASE.get(case_type, MITRE_BY_CASE["unknown"])
@@ -1442,7 +1530,7 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     recs_section = f"## Recommendations\n\n{rec_lines}"
 
     # Evidence coverage
-    coverage_section = "## Evidence Coverage\n\n" + _build_evidence_coverage(tools_ran)
+    coverage_section = "## Evidence Coverage\n\n" + _build_evidence_coverage(tools_ran, all_items)
 
     # Audit trail
     audit_section = (

@@ -38,7 +38,8 @@ _IOC_CATALOG = load_ioc_catalog()
 
 def load_json(path: str) -> dict[str, Any]:
     """Load a JSON file."""
-    with open(path, "r", encoding="utf-8") as f:
+    p = Path(path)
+    with p.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -49,10 +50,10 @@ _UNIFIED_EVIDENCE_SCHEMA = load_json(str(_SCHEMAS_DIR / "unified_evidence.json")
 
 def write_json(path: str, data: dict[str, Any]) -> None:
     """Write a JSON file, creating parent directory if needed."""
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    p = Path(path)
+    if p.parent:
+        p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
         f.write("\n")
 
@@ -68,11 +69,15 @@ def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
         print(f"  [WARN] Raw outputs directory not found: {raw_dir}")
         return all_outputs
 
-    for filename in sorted(os.listdir(raw_dir)):
+    raw_path = Path(raw_dir)
+    if not raw_path.exists():
+        return all_outputs
+
+    for filename in sorted([p.name for p in raw_path.iterdir() if p.is_file()]):
         if not filename.endswith("_output.json"):
             continue
 
-        filepath = os.path.join(raw_dir, filename)
+        filepath = raw_path / filename
         try:
             data = load_json(filepath)
             tool_name = data.get("tool", filename.replace("_output.json", ""))
@@ -299,9 +304,18 @@ def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
     timestamp_value = item.get("timestamp", "")
     timestamp_dt = _parse_timestamp(timestamp_value)
 
-    pids = _extract_pids(combined)
-    ips = _extract_ips(combined)
-    paths = _extract_paths(combined)
+    # The process_tree aggregate summarises an entire subtree, so its value
+    # names every PID/path it contains. Extracting correlation signals from it
+    # would make it spuriously join — and, being high-confidence, anchor —
+    # every PID group, duplicating correlations the per-PID process/cmdline
+    # items already carry. Treat it as a non-participant: keep the item but give
+    # it no correlation signals.
+    if evidence_type == "process_tree":
+        pids, ips, paths = [], [], []
+    else:
+        pids = _extract_pids(combined)
+        ips = _extract_ips(combined)
+        paths = _extract_paths(combined)
     destination_ip, destination_port = _extract_destination(combined)
 
     file_keys = []
@@ -396,7 +410,12 @@ def _make_finding(
         "correlation_type": correlation_type,
         "finding": finding,
         "what_confirmed_it": what_confirmed_it,
-        "artifacts": [anchor.get("artifact_id", "")] + [artifact for artifact in related_artifacts if artifact],
+        # Deduped: the anchor is selected from related_items, so its id is also
+        # in related_artifacts; without dedup it would appear twice and each
+        # consumer (annotate_item_correlations) would record the finding twice.
+        "artifacts": list(dict.fromkeys(
+            [anchor.get("artifact_id", "")] + [artifact for artifact in related_artifacts if artifact]
+        )),
         "source_tools": sorted(set([anchor.get("source_tool", "")] + related_tools)),
     }
     if extra:
@@ -545,7 +564,7 @@ def annotate_item_correlations(items: list[dict], findings: list[dict[str, Any]]
             "reason": finding.get("what_confirmed_it", [""])[0],
             "finding": finding.get("finding", ""),
         }
-        for artifact_id in finding.get("artifacts", []):
+        for artifact_id in dict.fromkeys(finding.get("artifacts", [])):
             if artifact_id:
                 by_artifact[artifact_id].append(correlation_entry)
 
@@ -614,14 +633,13 @@ def aggregate_bulk_evidence(
         "output_root": output_root,
     }
 
-    os.makedirs(output_root, exist_ok=True)
+    Path(output_root).mkdir(parents=True, exist_ok=True)
 
     for machine_name, machine_spec in machine_runs.items():
         machine_case_context = machine_spec.get("case_context") or {"case_id": machine_name}
         machine_raw_dir = machine_spec.get("raw_outputs_dir")
-        machine_output_path = machine_spec.get(
-            "output_path",
-            os.path.join(output_root, f"{machine_name}_unified_evidence.json"),
+        machine_output_path = machine_spec.get("output_path") or str(
+            Path(output_root) / f"{machine_name}_unified_evidence.json"
         )
         if not machine_raw_dir:
             continue

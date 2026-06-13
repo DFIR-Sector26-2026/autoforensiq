@@ -3,6 +3,7 @@ import json
 import shutil
 import tempfile
 import csv
+from pathlib import Path
 from src.wrappers.base_wrapper import BaseWrapper
 
 
@@ -33,10 +34,7 @@ class PlasoWrapper(BaseWrapper):
             print(f"  [ERROR] Source path not found: {source_path}")
             return []
 
-        plaso_dump = os.path.join(
-            tempfile.gettempdir(),
-            "autoforensiq_plaso.dump"
-        )
+        plaso_dump = Path(tempfile.gettempdir()) / "autoforensiq_plaso.dump"
 
         # STEP 1 — log2timeline
         print("  [PLASO] Running log2timeline (this may take a few minutes)...")
@@ -47,11 +45,11 @@ class PlasoWrapper(BaseWrapper):
                 "--status_view",
                 "none",
                 "--storage_file",
-                plaso_dump,
+                str(plaso_dump),
                 source_path
             ],
             input_files=[source_path],
-            output_files=[plaso_dump],
+            output_files=[str(plaso_dump)],
             timeout=600
         )
 
@@ -60,15 +58,12 @@ class PlasoWrapper(BaseWrapper):
             print(stderr[:500])
             return []
 
-        if not os.path.exists(plaso_dump):
+        if not plaso_dump.exists():
             print("  [ERROR] Plaso dump file not created")
             return []
 
         # STEP 2 — psort export
-        csv_output = os.path.join(
-            tempfile.gettempdir(),
-            "autoforensiq_timeline.csv"
-        )
+        csv_output = Path(tempfile.gettempdir()) / "autoforensiq_timeline.csv"
 
         print("  [PLASO] Running psort (exporting timeline to CSV)...")
 
@@ -78,11 +73,11 @@ class PlasoWrapper(BaseWrapper):
                 "-o",
                 "l2tcsv",
                 "-w",
-                csv_output,
-                plaso_dump
+                str(csv_output),
+                str(plaso_dump)
             ],
-            input_files=[plaso_dump],
-            output_files=[csv_output],
+                input_files=[str(plaso_dump)],
+                output_files=[str(csv_output)],
             timeout=300
         )
 
@@ -91,7 +86,7 @@ class PlasoWrapper(BaseWrapper):
             print(stderr[:500])
             return []
 
-        if not os.path.exists(csv_output):
+        if not csv_output.exists():
             print("  [ERROR] CSV output not created")
             return []
 
@@ -100,7 +95,10 @@ class PlasoWrapper(BaseWrapper):
         # cleanup
         for f in [plaso_dump, csv_output]:
             try:
-                os.remove(f)
+                if isinstance(f, Path):
+                    f.unlink()
+                else:
+                    os.remove(f)
             except Exception:
                 pass
 
@@ -112,12 +110,8 @@ class PlasoWrapper(BaseWrapper):
         items = []
 
         try:
-            with open(
-                csv_path,
-                "r",
-                encoding="utf-8",
-                errors="replace"
-            ) as f:
+            p = Path(csv_path)
+            with p.open("r", encoding="utf-8", errors="replace") as f:
 
                 reader = csv.DictReader(f)
 

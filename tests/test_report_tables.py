@@ -10,6 +10,7 @@ from src.report_generator.report_generator import (
     _build_ioc_report,
     _build_process_tree,
     _extract_iocs,
+    _finding_sort_key,
     _indicators_cell,
     _item_indicators,
     _md_cell,
@@ -199,6 +200,59 @@ def test_item_indicators_extracts_extensionless_flagged_name():
            "value": "Process injection detected", "severity": "critical",
            "artifact_id": "ioc_inj"}
     assert not any(t == "Suspicious File" for t, _ in _item_indicators(inj))
+
+
+def test_item_indicators_surfaces_string_sweep_iocs():
+    # String-sweep C2 / crypto / registry IOCs carry the bare indicator as their
+    # value (no "→" arrow) and must still reach the report's indicators table.
+    dom = {"evidence_type": "suspicious_domain", "source_tool": "volatility3",
+           "value": "iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+           "severity": "high", "artifact_id": "dom_1"}
+    assert ("Domain", "iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com") in \
+        _item_indicators(dom)
+
+    onion = {"evidence_type": "suspicious_domain", "source_tool": "volatility3",
+             "value": "gx7ekbenv2riucmf.onion", "severity": "high",
+             "artifact_id": "ioc_onion"}
+    assert ("Onion Address", "gx7ekbenv2riucmf.onion") in _item_indicators(onion)
+
+    btc = {"evidence_type": "suspicious_crypto", "source_tool": "volatility3",
+           "value": "13AM4VW2dhxYgXeQepoHkHSQuy6NgaEb94", "severity": "high",
+           "artifact_id": "btc_1"}
+    assert ("Crypto Wallet", "13AM4VW2dhxYgXeQepoHkHSQuy6NgaEb94") in \
+        _item_indicators(btc)
+
+    # A non-legacy-BTC wallet (e.g. bech32 / ETH) the regex can't match must
+    # still surface via the bare-value fallback, not be silently dropped.
+    bech32 = {"evidence_type": "suspicious_crypto", "source_tool": "volatility3",
+              "value": "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+              "severity": "high", "artifact_id": "btc_2"}
+    assert ("Crypto Wallet", "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq") in \
+        _item_indicators(bech32)
+
+    reg = {"evidence_type": "registry_key", "source_tool": "volatility3",
+           "value": "\\Registry\\Machine\\SOFTWARE\\WanaCrypt0r",
+           "severity": "medium", "artifact_id": "reg_1"}
+    assert ("Registry Key", "\\Registry\\Machine\\SOFTWARE\\WanaCrypt0r") in \
+        _item_indicators(reg)
+
+
+def test_finding_sort_key_ranks_ioc_bearing_above_indicatorless():
+    # Within the same severity tier, an item carrying a concrete IOC (a .onion
+    # C2 here) must sort ahead of an indicator-less item (a ransom-note language
+    # file with no extractable indicator and no catalog match), so it isn't cut
+    # by KEY_FINDINGS_CAP (issue 3.3-I).
+    onion = {"evidence_type": "suspicious_domain", "value": "gx7ekbenv2riucmf.onion",
+             "severity": "high", "artifact_id": "onion_1"}
+    wnry = {"evidence_type": "file_artifact",
+            "value": "\\Intel\\ivecuqmanpnirkt615\\msg\\m_russian.wnry",
+            "severity": "high", "artifact_id": "file_wnry"}
+    assert not _item_indicators(wnry) and not wnry.get("ioc_match")  # truly indicator-less
+    assert _finding_sort_key(onion) < _finding_sort_key(wnry)
+    # Severity still dominates the tie-break: a critical indicator-less item
+    # outranks a high IOC-bearing one.
+    crit_blank = {**wnry, "severity": "critical", "artifact_id": "file_crit"}
+    assert _finding_sort_key(crit_blank) < _finding_sort_key(onion)
 
 
 def test_item_indicators_extracts_atoms_per_item():
