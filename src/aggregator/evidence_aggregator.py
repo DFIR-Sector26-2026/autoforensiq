@@ -552,6 +552,95 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
     return findings
 
 
+def _resolve_linked_target(target: str, by_id: dict[str, dict]) -> list[dict]:
+    """Resolve a wrapper-emitted link target id to the real evidence item(s).
+
+    Handles the prefix mismatch: wrappers link to `proc_<pid>` while the actual
+    process item id is `proc_<pid>_<name>`. Exact id wins; otherwise any id
+    under the `<target>_` boundary matches (so `proc_59` never grabs
+    `proc_596_...`).
+    """
+    exact = by_id.get(target)
+    if exact is not None:
+        return [exact]
+    prefix = target + "_"
+    return [item for aid, item in by_id.items() if aid.startswith(prefix)]
+
+
+def _build_linked_artifact_findings(
+    items: list[dict],
+    existing_findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Promote wrapper-emitted `linked_artifacts` into correlation findings.
+
+    Wrappers declare authoritative cross-references the signal-based grouping
+    can't reconstruct from free text — e.g. a `process_relation` value names the
+    parent/child process *names*, not their PIDs, so `same_pid` never ties it to
+    the concrete `process` items; a malfind `injected_code` item links to its
+    host process. This reads those declared links, resolves each target to a
+    real item (incl. the `proc_<pid>` -> `proc_<pid>_<name>` prefix), and emits a
+    `linked_artifact` finding per link group — skipping any whose artifact set is
+    already fully covered by an existing signal finding, so already-correlated
+    pairs (e.g. injected_code/process sharing a PID) aren't duplicated.
+    """
+    by_id: dict[str, dict] = {}
+    for item in items:
+        aid = item.get("artifact_id", "")
+        if aid and aid not in by_id:
+            by_id[aid] = item
+
+    covered_sets = [frozenset(f.get("artifacts", [])) for f in existing_findings]
+
+    findings: list[dict[str, Any]] = []
+    emitted_groups: set[frozenset] = set()
+
+    for source in items:
+        links = source.get("linked_artifacts") or []
+        if not links:
+            continue
+        source_id = source.get("artifact_id", "")
+        resolved: list[dict] = []
+        seen_ids: set[str] = set()
+        for target in links:
+            if not target:
+                continue
+            for tgt in _resolve_linked_target(str(target), by_id):
+                tid = tgt.get("artifact_id", "")
+                if tid and tid != source_id and tid not in seen_ids:
+                    seen_ids.add(tid)
+                    resolved.append(tgt)
+        if not resolved:
+            continue
+
+        group = frozenset([source_id, *seen_ids])
+        if group in emitted_groups:
+            continue
+        # Skip links a signal finding already fully covers (avoid duplicate noise).
+        if any(group <= covered for covered in covered_sets):
+            continue
+        emitted_groups.add(group)
+
+        related_items = [source, *resolved]
+        anchor = _select_anchor(related_items)
+        linked_ids = sorted(group)
+        findings.append(_make_finding(
+            anchor=anchor,
+            related_items=related_items,
+            correlation_type="linked_artifact",
+            finding=(
+                f"Tool-declared link across {len(linked_ids)} artifacts: "
+                + ", ".join(linked_ids)
+            ),
+            what_confirmed_it=[
+                f"{source.get('source_tool', 'A wrapper')} explicitly linked "
+                "these artifacts during extraction"
+            ],
+            confidence=_correlation_confidence(related_items),
+        ))
+
+    return findings
+
+
 def annotate_item_correlations(items: list[dict], findings: list[dict[str, Any]]) -> list[dict]:
     by_artifact = defaultdict(list)
     for finding in findings:
@@ -589,6 +678,9 @@ def build_correlations(items: list[dict], signals: dict[str, dict[str, Any]]) ->
     findings.extend(_group_items_by_signal(items, signals, "file_keys"))
     findings.extend(_group_items_by_signal(items, signals, "timestamp_bucket"))
     findings.extend(_build_exfiltration_findings(items, signals))
+    # Merge wrapper-declared explicit links (issue 4.6), after the signal-based
+    # findings so already-covered link sets can be skipped.
+    findings.extend(_build_linked_artifact_findings(items, findings))
 
     findings = sorted(
         findings,

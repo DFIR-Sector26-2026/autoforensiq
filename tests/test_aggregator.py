@@ -548,5 +548,71 @@ def test_process_tree_does_not_contaminate_correlations():
         assert len(entries) == len(set(entries)), f"duplicate on {item['artifact_id']}"
 
 
+def test_wrapper_linked_artifacts_become_correlations():
+    """Issue 4.6: a process_relation's value names process NAMES, not PIDs, so
+    same_pid can't tie it to the concrete process items — only the wrapper's
+    explicit linked_artifacts can. Those links must be propagated as a
+    `linked_artifact` finding, resolving the proc_<pid> -> proc_<pid>_<name>
+    prefix, so the lineage IOC is connected to its parent/child processes.
+    """
+    items = [
+        {"artifact_id": "proc_1636_explorer_exe", "evidence_type": "process",
+         "source_tool": "volatility3", "severity": "low",
+         "value": "explorer.exe (PID:1636 PPID:1600)", "linked_artifacts": []},
+        {"artifact_id": "proc_1940_tasksche_exe", "evidence_type": "process",
+         "source_tool": "volatility3", "severity": "high",
+         "value": "tasksche.exe (PID:1940 PPID:1636)", "linked_artifacts": []},
+        {"artifact_id": "relation_1636_1940", "evidence_type": "process_relation",
+         "source_tool": "volatility3", "severity": "critical",
+         "value": "Suspicious parent-child relationship: explorer.exe -> tasksche.exe",
+         "linked_artifacts": ["proc_1636", "proc_1940"]},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "X"})
+    annotated, findings = build_correlations(enriched, signals)
+
+    linked = [f for f in findings if f["correlation_type"] == "linked_artifact"]
+    assert len(linked) == 1
+    assert set(linked[0]["artifacts"]) == {
+        "relation_1636_1940", "proc_1636_explorer_exe", "proc_1940_tasksche_exe",
+    }
+    # both the parent and child process items now carry the correlation
+    by_id = {i["artifact_id"]: i for i in annotated}
+    for pid_item in ("proc_1636_explorer_exe", "proc_1940_tasksche_exe", "relation_1636_1940"):
+        types = [c["correlation_type"] for c in by_id[pid_item]["correlations"]]
+        assert "linked_artifact" in types
+
+
+def test_linked_artifact_skipped_when_signal_finding_covers_it():
+    """A link already fully covered by a signal finding (e.g. injected_code and
+    its process share an extractable PID -> same_pid) must NOT be duplicated as a
+    separate linked_artifact finding.
+    """
+    items = [
+        {"artifact_id": "malfind_596", "evidence_type": "injected_code",
+         "source_tool": "volatility3", "severity": "high",
+         "value": "Injected memory regions detected in csrss.exe (PID:596).",
+         "linked_artifacts": ["proc_596"]},
+        {"artifact_id": "proc_596_csrss_exe", "evidence_type": "process",
+         "source_tool": "volatility3", "severity": "low",
+         "value": "csrss.exe (PID:596 PPID:500)", "linked_artifacts": []},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "X"})
+    _, findings = build_correlations(enriched, signals)
+    types = {f["correlation_type"] for f in findings}
+    assert "same_pid" in types
+    assert "linked_artifact" not in types
+
+
+def test_linked_target_prefix_does_not_overmatch():
+    """proc_59 must not resolve to proc_596_* (boundary-aware prefix)."""
+    from src.aggregator.evidence_aggregator import _resolve_linked_target
+    by_id = {
+        "proc_596_csrss_exe": {"artifact_id": "proc_596_csrss_exe"},
+        "proc_59_foo_exe": {"artifact_id": "proc_59_foo_exe"},
+    }
+    assert [i["artifact_id"] for i in _resolve_linked_target("proc_59", by_id)] == ["proc_59_foo_exe"]
+    assert [i["artifact_id"] for i in _resolve_linked_target("proc_596", by_id)] == ["proc_596_csrss_exe"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
