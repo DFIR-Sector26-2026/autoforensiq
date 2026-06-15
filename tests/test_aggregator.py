@@ -148,6 +148,31 @@ def test_bad_host_reputation_is_host_aware_not_substring():
     assert by_id["dom_look"]["severity"] == "low"
 
 
+def test_process_tree_is_not_double_scored():
+    """Issue 4.4: a process_tree is a structural roll-up whose text embeds the
+    same processes emitted (and IOC-scored) as `process` / `process_relation`
+    items. The rescorer must NOT re-score it, or the malware double-counts as a
+    second critical finding with a bogus ioc_match.
+    """
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    tree_value = "explorer.exe (1636)\n  tasksche.exe (1940)\n    @WanaDecryptor@ (740)"
+    items = [
+        {"artifact_id": "proc_1940_tasksche_exe", "evidence_type": "process",
+         "severity": "low", "value": "tasksche.exe (PID:1940 PPID:1636)"},
+        {"artifact_id": "process_tree_1636", "evidence_type": "process_tree",
+         "severity": "medium", "value": tree_value},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    # The process itself is scored once.
+    assert by_id["proc_1940_tasksche_exe"]["severity"] == "critical"
+    assert by_id["proc_1940_tasksche_exe"]["ioc_match"] == ["wannacry_dropper"]
+    # The tree stays a structural-medium summary — not escalated, no ioc_match.
+    assert by_id["process_tree_1636"]["severity"] == "medium"
+    assert by_id["process_tree_1636"].get("ioc_match", []) == []
+
+
 def test_case_specific_known_bad_hosts_are_matched():
     """Issue 4.2: per-case known-bad domains/IPs (case_context.known_bad_hosts)
     fold into the reputation match on top of the static catalog.

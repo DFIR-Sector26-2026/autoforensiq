@@ -28,6 +28,15 @@ _DEFAULT_CATALOG_PATH = ROOT_DIR / "src" / "data" / "ioc_patterns.json"
 # Shared severity ranking (mirrors evidence_aggregator.SEVERITY_ORDER).
 SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 
+# Structural-summary evidence types: derived roll-ups whose value embeds items
+# that are ALSO emitted (and scored) individually. `process_tree` embeds the
+# whole process list as text — the same processes are emitted as `process` items
+# and suspicious lineages as `process_relation` items. Re-scoring the tree's text
+# against the catalog would match those embedded names again and double-count the
+# malware as a second critical finding (issue 4.4), so these types are excluded
+# from IOC matching and keep the structural severity the wrapper assigned.
+_STRUCTURAL_SUMMARY_TYPES = {"process_tree"}
+
 # Numeric tokens 2–5 digits long, used to extract candidate ports from a value.
 _PORT_TOKEN_RE = re.compile(r"\b(\d{2,5})\b")
 
@@ -175,6 +184,11 @@ def rescore_item(item: dict, indicators: list[dict]) -> tuple[dict, list[str]]:
     item['ioc_match'].
     """
     if not isinstance(item, dict):
+        return item, []
+
+    # Structural roll-ups (process_tree) embed indicators already scored on their
+    # own items; don't re-score them or the malware double-counts (issue 4.4).
+    if item.get("evidence_type") in _STRUCTURAL_SUMMARY_TYPES:
         return item, []
 
     value = str(item.get("value", ""))
