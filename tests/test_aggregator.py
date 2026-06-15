@@ -100,6 +100,74 @@ def test_catalog_matches_wannacry_network_iocs():
     assert novel[0]["severity"] == "high"
 
 
+def test_bad_host_reputation_catalog_matches_network_values():
+    """Issue 4.2: the bad_hosts reputation list must boost+tag the low/medium
+    network items pointing at known-bad infrastructure (domain AND IP), which
+    the heuristics miss. Seeded from the bundled macOS infostealer C2.
+    """
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        # readable low-entropy C2 domain — DNS heuristic leaves it 'low' (3.2)
+        {"artifact_id": "dns_rc", "evidence_type": "dns_query", "severity": "low",
+         "value": "DNS query from 10.5.11.101 → rapid-craft567.com (label entropy: 3.52)"},
+        # C2 IP beacon — was 'medium' with no ioc_match
+        {"artifact_id": "http_contact", "evidence_type": "http_request", "severity": "medium",
+         "value": "HTTP 10.5.11.101 → 165.245.215.18/contact"},
+        # subdomain of the bad domain must also match
+        {"artifact_id": "dns_sub", "evidence_type": "dns_query", "severity": "low",
+         "value": "DNS query from 10.5.11.101 → cdn.rapid-craft567.com (e)"},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    assert by_id["dns_rc"]["severity"] == "high"
+    assert by_id["dns_rc"]["ioc_match"] == ["bad_host:rapid-craft567.com"]
+    assert by_id["http_contact"]["severity"] == "high"
+    assert by_id["http_contact"]["ioc_match"] == ["bad_host:165.245.215.18"]
+    assert by_id["dns_sub"]["ioc_match"] == ["bad_host:rapid-craft567.com"]
+
+
+def test_bad_host_reputation_is_host_aware_not_substring():
+    """A bad IP/domain must match a whole host token, never a substring — so a
+    benign host that merely contains the bad string is left alone.
+    """
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        # 1165.245.215.180 contains the bad 165.245.215.18 as a substring
+        {"artifact_id": "ip_substr", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCP 10.0.0.1 → 1165.245.215.180:443 (10 bytes, 1 packets)"},
+        # lookalike domain, not the bad domain and not a subdomain of it
+        {"artifact_id": "dom_look", "evidence_type": "dns_query", "severity": "low",
+         "value": "DNS query from 10.0.0.1 → notrapid-craft567.com.evil.test (e)"},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    assert by_id["ip_substr"]["severity"] == "low"
+    assert by_id["ip_substr"].get("ioc_match", []) == []
+    assert by_id["dom_look"]["severity"] == "low"
+
+
+def test_case_specific_known_bad_hosts_are_matched():
+    """Issue 4.2: per-case known-bad domains/IPs (case_context.known_bad_hosts)
+    fold into the reputation match on top of the static catalog.
+    """
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    ctx = {"case_id": "c1", "known_bad_hosts": ["evil-c2.example", "203.0.113.9"]}
+    items = [
+        {"artifact_id": "dns_case", "evidence_type": "dns_query", "severity": "low",
+         "value": "DNS query from 10.0.0.5 → evil-c2.example (e)"},
+        {"artifact_id": "conn_case", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCP 10.0.0.5 → 203.0.113.9:8080 (5 bytes, 1 packets)"},
+    ]
+    rescore_items(items, cat, ctx)
+    by_id = {i["artifact_id"]: i for i in items}
+    assert by_id["dns_case"]["severity"] == "high"
+    assert by_id["dns_case"]["ioc_match"] == ["bad_host:evil-c2.example"]
+    assert by_id["conn_case"]["ioc_match"] == ["bad_host:203.0.113.9"]
+
+
 def test_build_indices():
     """Test that indices group items correctly."""
     items = [
