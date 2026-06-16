@@ -56,6 +56,99 @@ def test_volatility_command_candidates_falls_back_without_venv(monkeypatch, tmp_
 
 
 # ─────────────────────────────────────────────────────────────
+# TSK / fls partitioned-disk regression (issue D2 — mmls offsets)
+# ─────────────────────────────────────────────────────────────
+
+# Real mmls output from the Windows Server 2022 E01 (DOS partition table,
+# NTFS at sector 2048 & 206848, plus an unknown-type slot).
+MMLS_WINSERVER = """DOS Partition Table
+Offset Sector: 0
+Units are in 512-byte sectors
+
+      Slot      Start        End          Length       Description
+000:  Meta      0000000000   0000000000   0000000001   Primary Table (#0)
+001:  -------   0000000000   0000002047   0000002048   Unallocated
+002:  000:000   0000002048   0000206847   0000204800   NTFS / exFAT (0x07)
+003:  000:001   0000206848   0103583743   0103376896   NTFS / exFAT (0x07)
+004:  000:002   0103583744   0104853503   0001269760   Unknown Type (0x27)
+005:  -------   0104853504   0104857599   0000004096   Unallocated
+"""
+
+# A single suspicious file in fls mactime-body format (pipe-delimited).
+FLS_BODY = "0|/Windows/Temp/evil.exe|0|0|0|0|512|0|0|0|0\n"
+
+
+def test_tsk_enumerate_fs_offsets_parses_partitions(monkeypatch):
+    # D2: mmls must yield the filesystem sector offsets (2048, 206848, ...),
+    # skipping the Meta row and unallocated gaps, so fls can run with -o.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    w = TSKWrapper()
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: (MMLS_WINSERVER, "", 0))
+
+    offsets = w._enumerate_fs_offsets("/case/winserver.E01")
+    assert offsets == [2048, 206848, 103583744]
+
+
+def test_tsk_enumerate_fs_offsets_bare_filesystem(monkeypatch):
+    # A bare filesystem has no partition table — mmls exits non-zero, and the
+    # enumerator returns [] so the caller falls back to an offset-less fls.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    w = TSKWrapper()
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: ("", "Cannot determine", 1))
+
+    assert w._enumerate_fs_offsets("/case/ubuntu.E01") == []
+
+
+def test_tsk_run_fls_partitioned_uses_offset(monkeypatch):
+    # On a partitioned image, fls must be invoked WITH `-o <offset>`; a partition
+    # that errors (the corrupt/foreign slot) is skipped, not fatal.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    w = TSKWrapper()
+    calls = []
+
+    def fake(command, *a, **k):
+        calls.append(command)
+        if command[0] == "mmls":
+            return (MMLS_WINSERVER, "", 0)
+        # fls: first offset succeeds, the rest error out.
+        off = command[command.index("-o") + 1] if "-o" in command else None
+        if off == "2048":
+            return (FLS_BODY, "", 0)
+        return ("", "Error reading image file", 1)
+
+    monkeypatch.setattr(w, "run_command", fake)
+    output, items = w._run_fls("/case/winserver.E01")
+
+    fls_calls = [c for c in calls if c and c[0] == "fls"]
+    assert all("-o" in c for c in fls_calls)           # every fls used an offset
+    assert ["fls", "-o", "2048", "-r", "-m", "/", "/case/winserver.E01"] in calls
+    assert len(items) == 1                              # only the readable slot
+    assert "evil.exe" in items[0]["value"]
+
+
+def test_tsk_run_fls_bare_filesystem_no_offset(monkeypatch):
+    # On a bare filesystem (no partition table) fls runs WITHOUT `-o`, preserving
+    # the prior working behavior for images like the Ubuntu casper E01.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    w = TSKWrapper()
+    calls = []
+
+    def fake(command, *a, **k):
+        calls.append(command)
+        if command[0] == "mmls":
+            return ("", "Cannot determine", 1)       # no partition table
+        return (FLS_BODY, "", 0)
+
+    monkeypatch.setattr(w, "run_command", fake)
+    output, items = w._run_fls("/case/ubuntu.E01")
+
+    fls_calls = [c for c in calls if c and c[0] == "fls"]
+    assert len(fls_calls) == 1
+    assert "-o" not in fls_calls[0]                     # offset-less fallback
+    assert len(items) == 1
+
+
+# ─────────────────────────────────────────────────────────────
 # Volatility parser regression tests (issues 3.1 / 3.3)
 # ─────────────────────────────────────────────────────────────
 
