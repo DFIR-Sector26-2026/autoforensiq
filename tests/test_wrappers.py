@@ -7,6 +7,55 @@ from src.wrappers.volatility_wrapper import VolatilityWrapper
 
 
 # ─────────────────────────────────────────────────────────────
+# Volatility invocation regression (issue D1 — venv-aware command)
+# ─────────────────────────────────────────────────────────────
+
+def test_volatility_command_candidates_prefers_venv_shim(monkeypatch, tmp_path):
+    # D1: the pipeline runs as `venv/bin/python autoforensiq.py`, so the venv is
+    # not on PATH. The wrapper must try the venv's own `vol` shim (resolved from
+    # the running interpreter's directory) FIRST, not a bare `vol` that won't
+    # resolve. We fake an interpreter whose sibling `vol` exists.
+    import sys as _sys
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python"
+    fake_python.write_text("")
+    fake_vol = fake_bin / "vol"
+    fake_vol.write_text("")
+
+    monkeypatch.setattr(_sys, "executable", str(fake_python))
+    # Run from a dir with no ./venv so only the absolute shim is contributed.
+    monkeypatch.chdir(tmp_path)
+
+    candidates = VolatilityWrapper._volatility_command_candidates()
+
+    # The venv shim (absolute) is first and points at the interpreter's sibling.
+    assert candidates[0] == [str(fake_vol)]
+    # Bare-PATH fallbacks remain available but come after the venv shim.
+    assert ["vol"] in candidates
+    assert candidates.index([str(fake_vol)]) < candidates.index(["vol"])
+
+
+def test_volatility_command_candidates_falls_back_without_venv(monkeypatch, tmp_path):
+    # With no venv shim next to the interpreter and no ./venv, only the global
+    # fallbacks remain — but the list is never empty (the wrapper still tries).
+    import sys as _sys
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python"
+    fake_python.write_text("")  # no sibling `vol`
+
+    monkeypatch.setattr(_sys, "executable", str(fake_python))
+    monkeypatch.chdir(tmp_path)
+
+    candidates = VolatilityWrapper._volatility_command_candidates()
+    assert ["vol"] in candidates
+    assert ["python3", "-m", "volatility3"] in candidates
+    # No spurious venv shim was added.
+    assert all(c not in ([str(fake_bin / "vol")],) for c in candidates)
+
+
+# ─────────────────────────────────────────────────────────────
 # Volatility parser regression tests (issues 3.1 / 3.3)
 # ─────────────────────────────────────────────────────────────
 

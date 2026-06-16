@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import uuid
 import hashlib
@@ -97,6 +98,35 @@ class VolatilityWrapper(BaseWrapper):
 
         super().__init__("volatility3")
 
+    @staticmethod
+    def _volatility_command_candidates() -> list:
+        """Ordered ways to invoke Volatility3, most-specific first.
+
+        The pipeline is launched as `venv/bin/python autoforensiq.py ...`, so the
+        venv is NOT on PATH; a bare `vol` / `python3 -m volatility3` then fails and
+        the wrapper silently returns 0 items while pre-flight (which probes
+        `./venv/bin/vol`) reports OK (issue D1). We therefore try the venv's own
+        `vol` console script first — resolved from the running interpreter's
+        directory so it works regardless of CWD — then the CWD-relative path
+        pre-flight verifies, before falling back to whatever is on PATH.
+        """
+        candidates = []
+
+        venv_vol = os.path.join(os.path.dirname(sys.executable), "vol")
+        if os.path.exists(venv_vol):
+            candidates.append([venv_vol])
+
+        # CWD-relative shim — the exact path the pre-flight check probes.
+        cwd_vol = os.path.join("venv", "bin", "vol")
+        if os.path.exists(cwd_vol):
+            candidates.append([os.path.join(".", "venv", "bin", "vol")])
+
+        # Fallbacks for installs where Volatility is globally available.
+        candidates.append(["vol"])
+        candidates.append(["python3", "-m", "volatility3"])
+
+        return candidates
+
     def run(self, image_path: str) -> list:
 
         if not Path(image_path).exists():
@@ -105,10 +135,7 @@ class VolatilityWrapper(BaseWrapper):
 
         all_items = []
 
-        volatility_commands = [
-            ["vol"],
-            ["python3", "-m", "volatility3"]
-        ]
+        volatility_commands = self._volatility_command_candidates()
 
         working_command = None
 
@@ -1537,8 +1564,6 @@ class VolatilityWrapper(BaseWrapper):
 
 
 if __name__ == "__main__":
-
-    import sys
 
     if len(sys.argv) < 2:
 
