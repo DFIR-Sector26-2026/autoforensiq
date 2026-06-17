@@ -40,6 +40,11 @@ SUPPORTED_WRAPPER_NAMES = {
     "regripper",
     "plaso",
     "memprocfs",
+    # email + browser wrappers exist in orchestrator.WRAPPER_MAP but were absent
+    # here and from the ontology, so the DTSA could never select them — an
+    # email_archive / browser_history case silently ran no tool (issue D4).
+    "email",
+    "browser",
 }
 
 # How to detect whether each tool's underlying binary is actually installed.

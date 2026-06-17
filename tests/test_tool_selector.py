@@ -68,3 +68,37 @@ def test_tool_matches_artifacts_unit():
     tshark = next(t for t in _ONTOLOGY["tools"] if t["name"] == "tshark")
     assert tool_matches_artifacts(tshark, {"pcap", "memory_dump"}) is True
     assert tool_matches_artifacts(tshark, {"memory_dump"}) is False
+
+
+# ─────────────────────────────────────────────────────────────
+# email / browser tools were missing from the ontology (issue D4)
+# ─────────────────────────────────────────────────────────────
+
+def test_ontology_validates_and_includes_email_and_browser():
+    # The wrappers exist in orchestrator.WRAPPER_MAP; the ontology + the
+    # SUPPORTED_WRAPPER_NAMES allowlist must agree, or validate_ontology raises.
+    from src.agents.tool_selector import validate_ontology
+    validate_ontology(_ONTOLOGY)  # must not raise
+    names = {t["name"] for t in _ONTOLOGY["tools"]}
+    assert {"email", "browser"} <= names
+
+
+def test_email_tool_matches_email_archive_unit():
+    email = next(t for t in _ONTOLOGY["tools"] if t["name"] == "email")
+    assert tool_matches_artifacts(email, {"email_archive"}) is True
+    assert tool_matches_artifacts(email, {"pcap"}) is False
+
+
+def test_email_archive_case_selects_email_tool():
+    # D4 end-to-end at the selector: an email_archive case must select email
+    # (previously selected nothing because email was absent from the ontology).
+    ctx = _classify(["email_archive"])
+    assert ctx["artifact_types"] == ["email_archive"]
+    selected = {t["name"] for t in select_tools(ctx, _ONTOLOGY)}
+    assert selected == {"email"}
+
+
+def test_browser_history_case_selects_browser_tool():
+    ctx = _classify(["browser_history"])
+    selected = {t["name"] for t in select_tools(ctx, _ONTOLOGY)}
+    assert selected == {"browser"}

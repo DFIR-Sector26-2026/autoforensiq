@@ -731,3 +731,27 @@ def test_extract_strings_anchored_anywhere_wins():
     conf = {i["value"]: i["confidence"] for i in VolatilityWrapper()._extract_strings(corpus)
             if i["evidence_type"] == "suspicious_domain"}
     assert conf.get("dual-host.io") == 0.45
+
+
+# ─────────────────────────────────────────────────────────────
+# Evidence routing for .dmg / .csv (issue D4 — previously dropped)
+# ─────────────────────────────────────────────────────────────
+
+def test_map_evidence_files_routes_dmg_to_disk_image():
+    import autoforensiq
+    mapping = autoforensiq._map_evidence_files(["/case/macbook.dmg"])
+    assert mapping.get("disk_image") == ["/case/macbook.dmg"]
+
+
+def test_map_evidence_files_routes_email_csv_when_named_like_mail():
+    import autoforensiq
+    mapping = autoforensiq._map_evidence_files(["/case/emails.csv", "/case/spam_corpus.csv"])
+    assert mapping.get("email") == ["/case/emails.csv", "/case/spam_corpus.csv"]
+
+
+def test_map_evidence_files_does_not_route_generic_csv_to_email():
+    # A bare data.csv (e.g. a process export) must NOT be keyword-scanned as a
+    # phishing archive — it falls through unrouted rather than mis-classified.
+    import autoforensiq
+    mapping = autoforensiq._map_evidence_files(["/case/process_dump.csv"])
+    assert "email" not in mapping
