@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import shutil
 import tempfile
@@ -8,7 +9,20 @@ from src.wrappers.base_wrapper import BaseWrapper
 
 
 def _resolve_cmd(preferred: str, fallback: str) -> str:
-    return preferred if shutil.which(preferred) else fallback
+    """Resolve a plaso console script (log2timeline.py / psort.py).
+
+    Under the documented `venv/bin/python autoforensiq.py` invocation, venv/bin
+    is NOT on PATH, so shutil.which() misses a plaso installed via
+    `venv/bin/pip install plaso` (its scripts land in venv/bin). This is the same
+    root cause as the volatility D1 fix, so check the interpreter's own bin dir
+    first, then PATH, then fall back to the bare name (which fails loudly if the
+    binary genuinely isn't installed)."""
+    venv_bin = os.path.dirname(sys.executable)
+    for name in (preferred, fallback):
+        candidate = os.path.join(venv_bin, name)
+        if os.path.exists(candidate):
+            return candidate
+    return shutil.which(preferred) or shutil.which(fallback) or fallback
 
 
 LOG2TIMELINE = _resolve_cmd("log2timeline.py", "log2timeline")
@@ -154,7 +168,6 @@ class PlasoWrapper(BaseWrapper):
 
 
 if __name__ == "__main__":
-    import sys
 
     if len(sys.argv) < 2:
         print("Usage: python -m src.wrappers.plaso_wrapper <evidence_dir_or_image>")

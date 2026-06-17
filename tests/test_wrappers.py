@@ -755,3 +755,36 @@ def test_map_evidence_files_does_not_route_generic_csv_to_email():
     import autoforensiq
     mapping = autoforensiq._map_evidence_files(["/case/process_dump.csv"])
     assert "email" not in mapping
+
+
+# ─────────────────────────────────────────────────────────────
+# Plaso binary resolution (issue D5 — venv-aware, mirrors D1)
+# ─────────────────────────────────────────────────────────────
+
+def test_plaso_resolve_cmd_prefers_venv_bin(monkeypatch, tmp_path):
+    # D5: plaso installed via venv/bin/pip lands its log2timeline.py in venv/bin,
+    # which is NOT on PATH under `venv/bin/python autoforensiq.py`. The resolver
+    # must find it via the interpreter's own bin dir, not just shutil.which.
+    from src.wrappers import plaso_wrapper
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "python3").write_text("")
+    shim = fake_bin / "log2timeline.py"
+    shim.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(plaso_wrapper.sys, "executable", str(fake_bin / "python3"))
+    monkeypatch.setattr(plaso_wrapper.shutil, "which", lambda n: None)
+    assert plaso_wrapper._resolve_cmd("log2timeline.py", "log2timeline") == str(shim)
+
+
+def test_plaso_resolve_cmd_falls_back_to_path_then_bare(monkeypatch, tmp_path):
+    from src.wrappers import plaso_wrapper
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    monkeypatch.setattr(plaso_wrapper.sys, "executable", str(fake_bin / "python3"))
+    # Not in venv/bin and not on PATH -> bare fallback name (fails loudly later).
+    monkeypatch.setattr(plaso_wrapper.shutil, "which", lambda n: None)
+    assert plaso_wrapper._resolve_cmd("log2timeline.py", "log2timeline") == "log2timeline"
+    # On PATH -> use the PATH hit.
+    monkeypatch.setattr(plaso_wrapper.shutil, "which",
+                        lambda n: "/usr/bin/log2timeline.py" if n == "log2timeline.py" else None)
+    assert plaso_wrapper._resolve_cmd("log2timeline.py", "log2timeline") == "/usr/bin/log2timeline.py"
