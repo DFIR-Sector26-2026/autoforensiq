@@ -124,6 +124,53 @@ def deduplicate_items(all_items: list[dict]) -> tuple[list[dict], int]:
     return deduplicated, removed_count
 
 
+# A process's OWN pid in a value like "svchost.exe (PID:880 PPID:1944)" or
+# "svchost.exe (PID 880, PPID 1944)" — the negative lookbehind skips the P of
+# PPID so the parent pid is never mistaken for the process pid.
+_OWN_PID_RE = re.compile(r"(?<!P)PID[\s:]+(\d+)", re.IGNORECASE)
+
+
+def _own_process_pid(item: dict) -> str | None:
+    """The process's own PID, from the value (PID, not PPID) or, failing that,
+    a MemProcFS `memprocfs_proc_<pid>` artifact_id."""
+    match = _OWN_PID_RE.search(str(item.get("value", "")))
+    if match:
+        return match.group(1)
+    aid = re.search(r"memprocfs_proc_(\d+)", str(item.get("artifact_id", "")))
+    return aid.group(1) if aid else None
+
+
+def reconcile_memprocfs_processes(items: list[dict]) -> tuple[list[dict], int]:
+    """Drop MemProcFS process items that duplicate a Volatility one by PID (D6).
+
+    MemProcFS emits an unanalysed flat process inventory at medium severity; when
+    Volatility has already produced a richer, properly-scored `process` list for
+    the same PIDs, those copies are pure noise (one medium item per benign
+    process). Suppress a `memprocfs_process` only when Volatility covered its PID
+    — PIDs unique to MemProcFS are kept, and if Volatility produced no process
+    list at all, MemProcFS is left intact as the fallback.
+    """
+    vol_pids = {
+        _own_process_pid(i)
+        for i in items
+        if i.get("evidence_type") == "process"
+        and str(i.get("source_tool", "")).lower() == "volatility3"
+    }
+    vol_pids.discard(None)
+    if not vol_pids:
+        return items, 0
+
+    kept, removed = [], 0
+    for item in items:
+        if item.get("evidence_type") == "memprocfs_process":
+            pid = _own_process_pid(item)
+            if pid is not None and pid in vol_pids:
+                removed += 1
+                continue
+        kept.append(item)
+    return kept, removed
+
+
 def sort_evidence_items(items: list[dict]) -> list[dict]:
     """
     Sort evidence items by:
@@ -814,6 +861,13 @@ def aggregate_evidence(
     # Step 3: Deduplicate
     unique_items, removed_count = deduplicate_items(all_items)
     print(f"  [DEDUP] Removed {removed_count} duplicates → {len(unique_items)} unique")
+
+    # Step 3a: Cross-tool process reconciliation (issue D6) — drop MemProcFS
+    # process items that merely duplicate Volatility's richer process list.
+    unique_items, memprocfs_dropped = reconcile_memprocfs_processes(unique_items)
+    if memprocfs_dropped:
+        print(f"  [RECONCILE] Dropped {memprocfs_dropped} MemProcFS process "
+              f"item(s) duplicating Volatility → {len(unique_items)} items")
 
     # Step 3b: IOC re-scoring (boost severity on known indicators).
     # Must run BEFORE sort, which keys on severity.

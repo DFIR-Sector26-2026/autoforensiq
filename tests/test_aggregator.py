@@ -11,6 +11,7 @@ from src.aggregator.evidence_aggregator import (
     aggregate_evidence,
     enrich_evidence_items,
     build_correlations,
+    reconcile_memprocfs_processes,
 )
 from autoforensiq import run_bulk_aggregation
 
@@ -548,3 +549,57 @@ def test_linked_target_prefix_does_not_overmatch():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ─────────────────────────────────────────────────────────────
+# MemProcFS process de-duplication against Volatility (issue D6)
+# ─────────────────────────────────────────────────────────────
+
+def _vol(pid, ppid, name="svchost.exe"):
+    return {"evidence_type": "process", "source_tool": "volatility3",
+            "value": f"{name} (PID:{pid} PPID:{ppid})", "artifact_id": f"proc_{pid}"}
+
+
+def _mpfs(pid, ppid, name="svchost.exe"):
+    return {"evidence_type": "memprocfs_process", "source_tool": "memprocfs",
+            "value": f"{name} (PID {pid}, PPID {ppid})",
+            "artifact_id": f"memprocfs_proc_{pid}"}
+
+
+def test_reconcile_drops_memprocfs_duplicate_by_pid():
+    # When Volatility already lists a PID, the MemProcFS copy is noise — drop it.
+    items = [_vol(880, 1944), _vol(1944, 600), _mpfs(880, 1944)]
+    kept, removed = reconcile_memprocfs_processes(items)
+    assert removed == 1
+    assert not any(i["evidence_type"] == "memprocfs_process" for i in kept)
+    # Volatility's own items are untouched.
+    assert sum(1 for i in kept if i["evidence_type"] == "process") == 2
+
+
+def test_reconcile_keeps_memprocfs_pid_unique_to_it():
+    # A PID only MemProcFS saw (e.g. a hidden/terminated proc Volatility missed)
+    # must be preserved — reconciliation only removes true duplicates.
+    items = [_vol(880, 1944), _mpfs(880, 1944), _mpfs(4242, 880, "secret.exe")]
+    kept, removed = reconcile_memprocfs_processes(items)
+    assert removed == 1
+    survivors = {i["artifact_id"] for i in kept}
+    assert "memprocfs_proc_4242" in survivors
+    assert "memprocfs_proc_880" not in survivors
+
+
+def test_reconcile_keeps_all_memprocfs_when_volatility_absent():
+    # If Volatility produced no process list, MemProcFS is the only process
+    # source and must be kept intact as the fallback.
+    items = [_mpfs(880, 1944), _mpfs(4242, 880)]
+    kept, removed = reconcile_memprocfs_processes(items)
+    assert removed == 0
+    assert len(kept) == 2
+
+
+def test_reconcile_does_not_confuse_ppid_with_pid():
+    # The MemProcFS proc whose PPID equals a Volatility PID, but whose own PID is
+    # unique, must NOT be dropped (parent pid is not the process pid).
+    items = [_vol(1944, 600), _mpfs(7777, 1944)]  # mpfs PID 7777, PPID 1944
+    kept, removed = reconcile_memprocfs_processes(items)
+    assert removed == 0
+    assert any(i["artifact_id"] == "memprocfs_proc_7777" for i in kept)
