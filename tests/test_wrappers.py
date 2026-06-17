@@ -619,3 +619,115 @@ def test_map_evidence_files_separates_types():
     assert mapping["memory_dump"] == ["/c/mem.raw"]
     assert mapping["pcap"] == ["/c/cap.pcap"]
     assert mapping["disk_image"] == ["/c/disk.e01"]
+
+
+# ─────────────────────────────────────────────────────────────
+# suspicious_domain extraction regression (issue D3 — allowlist + downgrade)
+# ─────────────────────────────────────────────────────────────
+
+def test_extract_strings_drops_benign_infrastructure_domains():
+    # D3: a memory dump is saturated with OS/browser/CDN/CA hostnames; emitting
+    # each as a suspicious_domain floods the evidence set (~22k on win10ctf) and
+    # is what made P5 SHAP unscalable. Benign infra must be dropped at source.
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    corpus = "\n".join([
+        "www.microsoft.com", "ocsp.digicert.com", "fonts.gstatic.com",
+        "ubuntu.com", "settings-win.data.microsoft.com",
+    ])
+    items = VolatilityWrapper()._extract_strings(corpus)
+    domains = [i for i in items if i["evidence_type"] == "suspicious_domain"]
+    assert domains == [], f"benign infra leaked: {[d['value'] for d in domains]}"
+
+
+def test_extract_strings_downgrades_generic_domains_to_low():
+    # D3: a bare domain from a string sweep is an indicator, not a finding — it
+    # is low severity until the reputation layer (4.2) elevates it. (Was medium.)
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    items = VolatilityWrapper()._extract_strings("beacon to evil-c2-panel.xyz now")
+    doms = [i for i in items if i["evidence_type"] == "suspicious_domain"]
+    assert len(doms) == 1
+    assert doms[0]["value"] == "evil-c2-panel.xyz"
+    assert doms[0]["severity"] == "low"
+
+
+def test_extract_strings_keeps_onion_high():
+    # D3 must not weaken genuine indicators: .onion hidden services stay high.
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    items = VolatilityWrapper()._extract_strings(
+        "ransom abcdef1234567890abcd.onion site"
+    )
+    onion = [i for i in items if i["value"].endswith(".onion")]
+    assert len(onion) == 1
+    assert onion[0]["severity"] == "high"
+    assert onion[0]["evidence_type"] == "suspicious_domain"
+
+
+def test_is_benign_domain_is_host_aware():
+    # A lookalike subdomain ("microsoft.com.evil.ru") must NOT be whitelisted.
+    from src.wrappers.volatility_wrapper import _is_benign_domain
+    assert _is_benign_domain("www.microsoft.com") is True
+    assert _is_benign_domain("microsoft.com") is True
+    assert _is_benign_domain("microsoft.com.evil.ru") is False
+    assert _is_benign_domain("evil-c2-panel.xyz") is False
+
+
+def test_extract_strings_registry_key_stops_at_pipe():
+    # A pipe is not legal in a registry key path; when the string sweep hits one
+    # it has run past the real key into adjacent memory ("...\Services|BatteryLife").
+    # The captured key must stop at the pipe (clean key, and no stray `|` to
+    # corrupt the markdown report table by shifting columns right).
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    corpus = (
+        "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services|BatteryLife\n"
+        "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\bthserv\n"
+    )
+    keys = [i["value"] for i in VolatilityWrapper()._extract_strings(corpus)
+            if i["evidence_type"] == "registry_key"]
+    assert "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services" in keys
+    assert "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\bthserv" in keys
+    assert all("|" not in k for k in keys), f"pipe leaked into a key: {keys}"
+
+
+# ─────────────────────────────────────────────────────────────
+# Domain confidence-tier regression (issue D3 — URL context, non-destructive)
+# ─────────────────────────────────────────────────────────────
+
+def test_extract_strings_anchored_domains_get_higher_confidence():
+    # A domain inside URL/network grammar (scheme, Host:, www., :port, path) is a
+    # likely real endpoint and ranks above a bare token — but BOTH are kept.
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    corpus = "\n".join([
+        "GET http://callback-host.xyz/gate.php",   # scheme + path
+        "Host: beacon.example.to",                 # header anchor
+        "www.tracked.io here",                     # www. prefix
+        "endpoint api.svc.net:8443 ready",         # :port
+        "loose prose mentions across.com somewhere",  # bare
+    ])
+    conf = {i["value"]: i["confidence"] for i in VolatilityWrapper()._extract_strings(corpus)
+            if i["evidence_type"] == "suspicious_domain"}
+    assert conf.get("callback-host.xyz") == 0.45
+    assert conf.get("beacon.example.to") == 0.45
+    assert conf.get("www.tracked.io") == 0.45
+    assert conf.get("api.svc.net") == 0.45
+    assert conf.get("across.com") == 0.20          # bare token demoted, NOT dropped
+
+
+def test_extract_strings_bare_domain_is_kept_not_dropped():
+    # Non-destructive: a bare domain still appears in the evidence set (so the
+    # reputation layer can elevate it), just at the lower confidence tier.
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    items = VolatilityWrapper()._extract_strings("config c2 = lonely-bare-c2.ru ;")
+    sd = [i for i in items if i["evidence_type"] == "suspicious_domain"]
+    assert [i["value"] for i in sd] == ["lonely-bare-c2.ru"]
+    assert sd[0]["confidence"] == 0.20
+    assert sd[0]["severity"] == "low"
+
+
+def test_extract_strings_anchored_anywhere_wins():
+    # If a domain appears bare once and anchored once, it takes the anchored tier
+    # so a real C2 whose first textual hit is bare is not mis-demoted.
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    corpus = "seen bare dual-host.io first, later GET https://dual-host.io/x"
+    conf = {i["value"]: i["confidence"] for i in VolatilityWrapper()._extract_strings(corpus)
+            if i["evidence_type"] == "suspicious_domain"}
+    assert conf.get("dual-host.io") == 0.45

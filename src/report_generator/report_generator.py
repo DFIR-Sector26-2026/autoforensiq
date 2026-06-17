@@ -858,17 +858,37 @@ def _indicators_cell(item):
     return _md_cell(cell or "-")
 
 
-def _extract_iocs(evidence_items):
+def _extract_iocs(evidence_items, severity_lookup=None):
     """Deduped IOC rollup: every atomic indicator across all items, annotated
     with the highest severity it was seen at, the contexts it appeared in, and
     any IOC-catalog matches. Sorted critical-first. Retained as a reusable
-    indicator export; the report itself now inlines indicators per finding."""
+    indicator export; the report itself now inlines indicators per finding.
+
+    `severity_lookup` (artifact_id -> anomaly/P5 severity) lets an indicator
+    inherit the EFFECTIVE severity the pipeline ultimately assigned, not the
+    wrapper's first guess: a string-swept domain is emitted `low` but may be
+    elevated to High/Critical by anomaly detection or reputation, and the report
+    should rank and surface it on that verdict. `confidence` (max across the
+    contributing items) carries the wrapper's URL-context tier so the folded
+    low-severity list can be sampled anchored-first."""
     records = {}
+    severity_lookup = severity_lookup or {}
+
+    def _effective_sev(item):
+        sev = str(item.get("severity", "low")).lower()
+        elevated = severity_lookup.get(item.get("artifact_id"))
+        if elevated and _SEVERITY_RANK.get(elevated, 0) > _SEVERITY_RANK.get(sev, 0):
+            return elevated
+        return sev
 
     def _add(ioc_type, indicator, item, context):
         if not indicator:
             return
-        sev = str(item.get("severity", "low")).lower()
+        sev = _effective_sev(item)
+        try:
+            conf = float(item.get("confidence", 0) or 0)
+        except (TypeError, ValueError):
+            conf = 0.0
         key = (ioc_type, indicator)
         rec = records.get(key)
         if rec is None:
@@ -876,6 +896,7 @@ def _extract_iocs(evidence_items):
                 "type": ioc_type,
                 "indicator": indicator,
                 "severity": sev,
+                "confidence": conf,
                 "tool": item.get("source_tool", "-"),
                 "contexts": set(),
                 "matches": set(),
@@ -886,6 +907,8 @@ def _extract_iocs(evidence_items):
         # An indicator inherits the highest severity of any item it appeared in.
         if _SEVERITY_RANK.get(sev, 0) > _SEVERITY_RANK.get(rec["severity"], 0):
             rec["severity"] = sev
+        if conf > rec["confidence"]:
+            rec["confidence"] = conf
         if context:
             rec["contexts"].add(context)
         for m in (item.get("ioc_match") or []):
@@ -947,16 +970,37 @@ def _ioc_xai_note(rec, anomaly_lookup, limit=100):
     return "-"
 
 
-def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None):
+# An indicator earns a full row in the main IOC table when the pipeline actually
+# prioritised it — effective severity medium-or-higher, or a fired IOC-catalog /
+# reputation match. Everything below that (the low-severity string-sweep mass,
+# e.g. ~16k bare domains on a Windows memory image) is folded into a collapsed
+# sample so it can't drown the document — but it is never dropped: counts, a
+# confidence-tiered sample, and a pointer to the full evidence JSON are kept.
+_IOC_SURFACE_RANK = _SEVERITY_RANK["medium"]  # medium-or-higher earns a main-table row
+# A domain whose wrapper confidence reached the URL-context (anchored) tier.
+_ANCHORED_CONF = 0.45
+_FOLDED_SAMPLE_CAP = 50
+
+
+def _ioc_is_surfaced(rec):
+    return (_SEVERITY_RANK.get(rec["severity"], 0) >= _IOC_SURFACE_RANK
+            or bool(rec["matches"]))
+
+
+def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None,
+                      severity_lookup=None):
     """Standalone, human-readable Indicators-of-Compromise document.
 
-    The final report only carries a brief IOC overview; this is the full list,
-    one row per deduped indicator, with the provenance (source file) and the XAI
-    explanation that the inline Key Findings column can't fit per-indicator.
+    The main table lists indicators the pipeline prioritised (effective severity
+    medium+ or an IOC/reputation match) with provenance and the XAI explanation.
+    The low-severity string-sweep remainder is folded into a collapsed,
+    confidence-tiered sample so it never drowns the report; nothing is discarded
+    — the full set stays in unified_evidence.json. `severity_lookup` supplies the
+    effective (post-anomaly) severity so elevated domains surface here.
     """
     tool_sources = tool_sources or {}
     anomaly_lookup = anomaly_lookup or {}
-    iocs = _extract_iocs(all_items)
+    iocs = _extract_iocs(all_items, severity_lookup)
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     header = (
@@ -966,43 +1010,104 @@ def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None):
     if not iocs:
         return header + "_No indicators of compromise extracted from evidence._\n"
 
+    surfaced = [r for r in iocs if _ioc_is_surfaced(r)]
+    folded = [r for r in iocs if not _ioc_is_surfaced(r)]
+
     by_type, by_sev = {}, {}
-    for r in iocs:
+    for r in surfaced:
         by_type[r["type"]] = by_type.get(r["type"], 0) + 1
         by_sev[r["severity"]] = by_sev.get(r["severity"], 0) + 1
-    type_breakdown = ", ".join(f"{n} {t}" for t, n in sorted(by_type.items()))
+    type_breakdown = ", ".join(f"{n} {t}" for t, n in sorted(by_type.items())) or "none"
     sev_breakdown = ", ".join(
         f"{by_sev[s]} {s}" for s in ("critical", "high", "medium", "low")
         if by_sev.get(s)
-    )
+    ) or "none"
     summary = (
-        f"**{len(iocs)}** unique indicator(s) — {type_breakdown}.\n\n"
+        f"**{len(surfaced)}** prioritised indicator(s) — {type_breakdown}.\n\n"
         f"By severity: {sev_breakdown}.\n\n"
     )
-
-    rows = [
-        "| Indicator | Type | Severity | IOC Match | Context(s) | Source (tool · file) | Why (XAI) |",
-        "|-----------|------|----------|-----------|------------|----------------------|-----------|",
-    ]
-    for r in iocs:
-        matches = ", ".join(sorted(r["matches"])) if r["matches"] else "-"
-        contexts = ", ".join(sorted(r["contexts"])) if r["contexts"] else "-"
-        srcs = []
-        for tool in sorted(r.get("tools") or ([r["tool"]] if r.get("tool") else [])):
-            src_file = tool_sources.get(tool, "-")
-            srcs.append(tool if src_file in ("-", "", None) else f"{tool} · {src_file}")
-        src_cell = "; ".join(srcs) if srcs else "-"
-        xai = _ioc_xai_note(r, anomaly_lookup)
-        rows.append(
-            f"| `{_md_cell(r['indicator'])}` "
-            f"| {_md_cell(r['type'])} "
-            f"| {_md_cell(r['severity'].upper())} "
-            f"| {_md_cell(matches)} "
-            f"| {_md_cell(contexts)} "
-            f"| {_md_cell(src_cell)} "
-            f"| {_md_cell(xai)} |"
+    if folded:
+        summary += (
+            f"_{len(folded)} additional low-severity indicator(s) folded below "
+            f"(not elevated by anomaly detection or reputation)._\n\n"
         )
-    return header + summary + "\n".join(rows) + "\n"
+
+    parts = [header, summary]
+
+    if surfaced:
+        rows = [
+            "| Indicator | Type | Severity | IOC Match | Context(s) | Source (tool · file) | Why (XAI) |",
+            "|-----------|------|----------|-----------|------------|----------------------|-----------|",
+        ]
+        for r in surfaced:
+            matches = ", ".join(sorted(r["matches"])) if r["matches"] else "-"
+            contexts = ", ".join(sorted(r["contexts"])) if r["contexts"] else "-"
+            srcs = []
+            for tool in sorted(r.get("tools") or ([r["tool"]] if r.get("tool") else [])):
+                src_file = tool_sources.get(tool, "-")
+                srcs.append(tool if src_file in ("-", "", None) else f"{tool} · {src_file}")
+            src_cell = "; ".join(srcs) if srcs else "-"
+            xai = _ioc_xai_note(r, anomaly_lookup)
+            rows.append(
+                f"| `{_md_cell(r['indicator'])}` "
+                f"| {_md_cell(r['type'])} "
+                f"| {_md_cell(r['severity'].upper())} "
+                f"| {_md_cell(matches)} "
+                f"| {_md_cell(contexts)} "
+                f"| {_md_cell(src_cell)} "
+                f"| {_md_cell(xai)} |"
+            )
+        parts.append("\n".join(rows) + "\n")
+    else:
+        parts.append("_No prioritised indicators; see the folded list below._\n")
+
+    if folded:
+        parts.append(_render_folded_iocs(folded))
+
+    return "".join(parts)
+
+
+def _render_folded_iocs(folded):
+    """Collapsed <details> block summarising the low-severity indicator mass:
+    per-type counts, a domain anchored/bare tier split, and a capped sample
+    ordered by confidence (anchored first). Non-destructive — the full set is in
+    unified_evidence.json."""
+    by_type = {}
+    for r in folded:
+        by_type[r["type"]] = by_type.get(r["type"], 0) + 1
+    type_breakdown = ", ".join(f"{n} {t}" for t, n in sorted(by_type.items()))
+
+    domains = [r for r in folded if r["type"] in ("Domain", "Onion Address")]
+    tier_note = ""
+    if domains:
+        anchored = sum(1 for r in domains if r.get("confidence", 0) >= _ANCHORED_CONF)
+        tier_note = (
+            f" Of {len(domains)} domain(s): {anchored} anchored (URL/Host context), "
+            f"{len(domains) - anchored} bare."
+        )
+
+    sample = sorted(
+        folded,
+        key=lambda r: (-r.get("confidence", 0.0), r["type"], r["indicator"]),
+    )[:_FOLDED_SAMPLE_CAP]
+    sample_rows = ["| Indicator | Type | Confidence tier |", "|---|---|---|"]
+    for r in sample:
+        tier = "anchored" if r.get("confidence", 0) >= _ANCHORED_CONF else "bare"
+        sample_rows.append(
+            f"| `{_md_cell(r['indicator'])}` | {_md_cell(r['type'])} | {tier} |"
+        )
+
+    return (
+        "\n<details>\n"
+        f"<summary><b>{len(folded)}</b> low-severity / un-elevated indicator(s) "
+        "folded — not flagged by anomaly detection or reputation. "
+        "Expand for a sample.</summary>\n\n"
+        f"By type: {type_breakdown}.{tier_note}\n\n"
+        f"Showing top {len(sample)} by confidence (anchored first):\n\n"
+        + "\n".join(sample_rows)
+        + "\n\n_Full set in `output/unified_evidence.json`._\n"
+        "</details>\n"
+    )
 
 
 # Process evidence types we accept into the tree. Deliberately excludes
@@ -1607,7 +1712,16 @@ def generate_report(
         tool_sources = case_context.get("evidence_sources", {})
         xai = _xai_lookup(shap_explanations, only_anomalies=True)
         anomaly_lookup = {aid: d.get("summary", "-") for aid, d in xai.items()}
-        ioc_text = _build_ioc_report(all_items, tool_sources, anomaly_lookup)
+        # Effective severity the pipeline assigned per artifact (P5 anomaly /
+        # reputation), so a string-swept domain emitted `low` but elevated to
+        # High/Critical surfaces in the main IOC table instead of being folded.
+        severity_lookup = {}
+        for aid, exp in _iter_explanations(shap_explanations):
+            sev = str(exp.get("severity", "")).lower()
+            if sev in _SEVERITY_RANK:
+                severity_lookup[aid] = sev
+        ioc_text = _build_ioc_report(all_items, tool_sources, anomaly_lookup,
+                                     severity_lookup)
         ioc_path = Path(output_path).parent / "ioc_report.md"
         with open(ioc_path, "w", encoding="utf-8") as f:
             f.write(ioc_text)
