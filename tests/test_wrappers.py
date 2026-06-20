@@ -536,6 +536,35 @@ def test_extract_strings_drops_short_cctld_fragments():
         assert keep in domains, keep
 
 
+def test_extract_strings_drops_dos_exe_and_digit_fragments():
+    # Regression for 3.3-J residuals: DOS/console `.com` executables swept from a
+    # memory image (COMMAND.COM, MORE.COM, TREE.COM…) and digit/repeat ccTLD junk
+    # ("f0hht.ht", "htaht.ht", "dn5t.aw") are string fragments, not endpoints.
+    # They drop when bare but survive when anchored in URL grammar, and real
+    # domains that merely look short stay.
+    wrapper = VolatilityWrapper()
+    corpus = "\n".join([
+        "command.com", "format.com", "more.com", "tree.com", "edit.com",  # DOS exes
+        "f0hht.ht", "ltchht8ht.ht", "dn5t.aw", "qv0uz.sx",                 # digit junk
+        "htaht.ht", "hteht.ht",                                           # repeat-suffix junk
+        "evilcorp.com",                                                  # real .com (non-DOS) -> kept
+        "taxonomy.ht",                                                   # SLD no digit/repeat -> kept
+        "audit.it",                                                      # word ending in ccTLD (one occurrence) -> kept
+        "lonely-bare-c2.ru",                                             # hyphenated digit C2 -> kept
+        "http://more.com/payload",                                       # anchored -> kept
+    ])
+    domains = {
+        it["value"] for it in wrapper._extract_strings(corpus)
+        if it["evidence_type"] == "suspicious_domain"
+    }
+    for frag in ("command.com", "format.com", "tree.com", "edit.com",
+                 "f0hht.ht", "ltchht8ht.ht", "dn5t.aw", "qv0uz.sx",
+                 "htaht.ht", "hteht.ht"):
+        assert frag not in domains, frag
+    for keep in ("evilcorp.com", "taxonomy.ht", "audit.it", "lonely-bare-c2.ru", "more.com"):
+        assert keep in domains, keep  # more.com kept because anchored once
+
+
 def test_extract_strings_denoises_prefetch_and_email():
     # Prefetch filenames (.pf) and gibberish .nc must not leak as domains, and
     # the email regex must reject filename/binary noise while keeping real ones.

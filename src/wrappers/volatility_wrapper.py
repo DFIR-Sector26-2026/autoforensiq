@@ -145,6 +145,52 @@ def _is_benign_domain(host: str) -> bool:
     return False
 
 
+# DOS / Windows console executables whose 8.3 names end in `.com` (issue 3.3-J).
+# In a memory string sweep these basenames (COMMAND.COM, FORMAT.COM, MORE.COM…)
+# are swept as if they were `*.com` domains. They are single-label filenames, so
+# we only suppress them when they appear bare (no sub-domain, no URL/network
+# context); a real "more.com" inside URL grammar is still kept by the anchor tier.
+_DOS_COM_EXECUTABLES = frozenset({
+    "append", "assign", "attrib", "chcp", "chkdsk", "choice", "command",
+    "comp", "country", "ctty", "debug", "deltree", "diskcomp", "diskcopy",
+    "display", "doskey", "edit", "edlin", "exe2bin", "expand", "fastopen",
+    "fc", "fdisk", "find", "format", "graftabl", "graphics", "keyb", "label",
+    "loadfix", "loadhigh", "mem", "mode", "more", "mscdex", "ntdetect",
+    "nlsfunc", "power", "print", "replace", "restore", "scandisk", "setver",
+    "share", "smartdrv", "sort", "subst", "sys", "tree", "undelete",
+    "unformat", "win", "xcopy",
+})
+
+
+def _is_string_fragment_domain(labels: list, tld: str) -> bool:
+    """True when a *bare* (non-anchored) domain token is string-sweep noise rather
+    than a real endpoint (issue 3.3-J). Caller has already confirmed it is not
+    anchored in URL/network grammar. Three fragment classes are caught:
+
+      * DOS/console `.com` executables (COMMAND.COM, MORE.COM, TREE.COM …) — a
+        single-label `.com` whose SLD is a known DOS binary name.
+      * 2-letter ccTLD tokens whose SLD carries a digit and has no hyphen
+        ("f0hht.ht", "dn5t.aw", "qv0uz.sx") — gibberish, not a real host. The
+        no-hyphen guard preserves legitimate digit-bearing C2 like
+        "lonely-bare-c2.ru".
+      * 2-letter ccTLD tokens whose SLD repeats the TLD string >= 2x ("htaht.ht",
+        "hteht.ht") — a repeated-suffix sweep, not a registration. Requiring two
+        occurrences keeps real words that merely end in the ccTLD ("audit.it").
+    """
+    sld = labels[-2]
+
+    if len(labels) == 2 and tld == "com" and sld in _DOS_COM_EXECUTABLES:
+        return True
+
+    if len(labels) == 2 and len(tld) == 2:
+        if "-" not in sld and any(ch.isdigit() for ch in sld):
+            return True
+        if sld.endswith(tld) and sld.count(tld) >= 2:
+            return True
+
+    return False
+
+
 # URL / network-context anchors (issue D3, confidence tier). A domain recovered
 # from a flat string sweep is far more likely to be a real network endpoint when
 # it sits inside URL grammar — a scheme, an HTTP header, a www. prefix, or a
@@ -1675,11 +1721,16 @@ class VolatilityWrapper(BaseWrapper):
             # cert/TLD tables ("gob.ve", "asn.au", "pro.ae") — are string-fragment
             # noise, not real endpoints. Real short domains have a longer TLD
             # (ft.com) or an SLD >= 4 (google.de); anything in URL/network grammar
-            # (anchored) is kept regardless. (Residual, not yet caught: DOS .com
-            # executables "more.com"/"tree.com" and long digit/repeat fragments
-            # "f0hht.ht" — see issue 3.3-J notes.)
+            # (anchored) is kept regardless.
             if (not anchored and len(labels) == 2
                     and len(tld) == 2 and len(labels[-2]) < 4):
+                continue
+
+            # Reject the remaining bare string-fragment classes (issue 3.3-J):
+            # DOS `.com` executables ("more.com", "tree.com") and digit/repeat
+            # ccTLD junk ("f0hht.ht", "htaht.ht", "dn5t.aw"). Anchored hits are
+            # kept; see _is_string_fragment_domain for the exact rules.
+            if not anchored and _is_string_fragment_domain(labels, tld):
                 continue
 
             conf = ANCHORED_CONF if anchored else BARE_CONF
