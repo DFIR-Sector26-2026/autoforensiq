@@ -66,6 +66,42 @@ def test_compute_shap_identical_vectors_get_identical_explanations():
             assert json.dumps(out[j], sort_keys=True) == first
 
 
+def test_compute_shap_evaluates_once_per_unique_vector_not_per_item(monkeypatch):
+    # The core D3 guarantee: explainer cost is bounded by the number of DISTINCT
+    # feature vectors, NOT the item count. A flood of near-identical rows (the
+    # ~22k over-extracted domains that took ~1.5h) must reach PermutationExplainer
+    # only as many times as there are unique vectors. The correctness tests above
+    # would still pass if the dedup were removed (per-item loop) — this one locks
+    # in the performance contract by counting the rows the explainer actually sees.
+    if not xe._SHAP_AVAILABLE:
+        pytest.skip("shap not installed")
+    nfeat = len(FEATURE_NAMES)
+    rng = np.random.default_rng(7)
+    templates = (rng.random((6, nfeat)) > 0.6).astype(float)
+    idx = rng.integers(0, len(templates), size=5000)
+    X_evidence = templates[idx]
+    X_baseline = (rng.random((100, nfeat)) > 0.7).astype(float)
+    n_unique = len(np.unique(X_evidence, axis=0))
+
+    seen = {}
+    real_cls = xe.shap.PermutationExplainer
+
+    class _SpyExplainer:
+        def __init__(self, *args, **kwargs):
+            self._inner = real_cls(*args, **kwargs)
+
+        def __call__(self, rows, *args, **kwargs):
+            seen["rows"] = len(rows)
+            return self._inner(rows, *args, **kwargs)
+
+    monkeypatch.setattr(xe.shap, "PermutationExplainer", _SpyExplainer)
+
+    out = xe.compute_shap_explanations(_StubDetector(), X_baseline, X_evidence)
+    assert len(out) == 5000                       # every item still gets an explanation
+    assert seen["rows"] == n_unique               # but the explainer saw only unique rows
+    assert seen["rows"] <= len(templates) < 5000  # bounded by vectors, not item count
+
+
 def test_compute_shap_background_is_capped():
     # A baseline far larger than the cap must be subsampled deterministically so
     # per-eval cost stays bounded; the call must still succeed and explain rows.
