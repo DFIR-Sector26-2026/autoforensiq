@@ -872,10 +872,14 @@ class VolatilityWrapper(BaseWrapper):
 
             process_name = parts[1]
 
-            cmdline = line
-
             if len(parts) > 2:
                 cmdline = line.split(process_name, 1)[1].strip()
+            else:
+                # Exactly PID + process name, zero arguments (issue 3.4-r): the
+                # command line is just the executable. Store the process name, not
+                # the raw "PID<tab>Process" row (the PID is already in artifact_id),
+                # so the value matches the args-bearing case.
+                cmdline = process_name
 
             severity = (
                 "high"

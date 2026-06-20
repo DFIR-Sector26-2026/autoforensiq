@@ -245,6 +245,15 @@ _NON_DOMAIN_TLDS = {
     "json", "js", "doc", "docx", "xls", "pdf", "zip", "rar",
     "wnry", "wncry", "wcry",
 }
+# Evidence types that all describe the *same process's identity* from a single
+# volatility process enumeration (issue 4.7). A PID having a process row AND its
+# command line AND its tree position is the same fact three ways, not corroboration
+# — every process trivially produces these, so a same_pid group confined to them
+# (System PID 4, svchosts, lsass) is near-zero signal. A same_pid finding earns
+# its keep only when the PID *also* appears in evidence that adds information
+# (injected_code, a network connection, a touched file) or across >= 2 tools.
+_PROCESS_IDENTITY_TYPES = {"process", "commandline", "process_tree"}
+
 EXFIL_BYTES_THRESHOLD = 1_000_000
 EXFIL_TIME_WINDOW_SECONDS = 24 * 60 * 60
 
@@ -551,6 +560,18 @@ def _group_items_by_signal(
             tools = {i.get("source_tool", "") for i in related_items}
             types = {i.get("evidence_type", "") for i in related_items}
             if len(tools) < 2 and len(types) < 2:
+                continue
+        # Suppress near-zero-signal same_pid groups (issue 4.7): a PID seen only
+        # through the process-identity types (process row + command line + tree
+        # position, all from one enumeration) is the same fact restated, not a
+        # cross-artifact link. Keep it only when the PID also surfaces in
+        # information-adding evidence (injected_code / network / file) or across
+        # >= 2 tools — that's what distinguishes an injected/beaconing PID from
+        # System PID 4 and the svchost crowd.
+        if key_name == "pids":
+            tools = {i.get("source_tool", "") for i in related_items}
+            types = {i.get("evidence_type", "") for i in related_items}
+            if len(tools) < 2 and not (types - _PROCESS_IDENTITY_TYPES):
                 continue
         anchor = _select_anchor(related_items)
         if key_name == "pids":

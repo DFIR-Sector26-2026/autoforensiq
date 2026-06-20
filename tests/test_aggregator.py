@@ -145,6 +145,60 @@ def test_wnry_component_files_tagged_high_not_critical():
     assert "wannacry_payload" not in enc[0]["ioc_match"]
 
 
+def test_c2_port_not_matched_from_byte_or_packet_count():
+    """Issue 4.1-r: a candidate C2 port must come from real port grammar (a
+    host:port colon or a `port`/`dport` keyword), not any bare 2–5 digit token.
+    A byte count that happens to equal a catalog port ('4444 bytes') or a PID
+    must NOT escalate the item to critical."""
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        # real C2 port after the colon -> critical
+        {"artifact_id": "n1", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCP 10.10.14.22 -> 165.245.215.18:4444 (442 bytes, 5 packets)"},
+        # byte count equal to a catalog port, no port grammar -> must stay low
+        # (value kept free of exfil keywords so only the port path is exercised)
+        {"artifact_id": "n2", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCP session transferred 4444 bytes in 9999 frames"},
+        # the 'port' keyword form still matches
+        {"artifact_id": "n3", "evidence_type": "suspicious_port", "severity": "low",
+         "value": "Traffic on suspicious port 4444: 10.10.14.22 -> 165.245.215.18"},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    assert by_id["n1"]["severity"] == "critical"
+    assert "c2_port" in by_id["n1"]["ioc_match"]
+    assert by_id["n2"]["severity"] == "low"
+    assert "c2_port" not in by_id["n2"].get("ioc_match", [])
+    assert by_id["n3"]["severity"] == "critical"
+    assert "c2_port" in by_id["n3"]["ioc_match"]
+
+
+def test_same_pid_requires_information_adding_evidence():
+    """Issue 4.7: a same_pid group confined to the process-identity types
+    (process row + command line + tree position, one tool) is the same fact
+    restated, not corroboration — it fires for every System/svchost PID. It must
+    be suppressed unless the PID also appears in information-adding evidence
+    (injected_code / network / file) or across >= 2 tools."""
+    items = [
+        # PID 4 (System): only process + cmdline from one tool -> SUPPRESSED
+        {"artifact_id": "proc_4", "evidence_type": "process", "source_tool": "volatility3",
+         "severity": "low", "value": "System (PID:4)"},
+        {"artifact_id": "cmdline_4", "evidence_type": "commandline", "source_tool": "volatility3",
+         "severity": "low", "value": "System (PID:4)"},
+        # PID 596 (csrss): process + injected_code -> KEPT (injection adds info)
+        {"artifact_id": "proc_596", "evidence_type": "process", "source_tool": "volatility3",
+         "severity": "medium", "value": "csrss.exe (PID:596)"},
+        {"artifact_id": "malfind_596", "evidence_type": "injected_code", "source_tool": "volatility3",
+         "severity": "high", "value": "Injected memory regions detected in csrss.exe (PID:596)"},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "X"})
+    annotated, findings = build_correlations(enriched, signals)
+    same_pid = {f["signal"] for f in findings if f["correlation_type"] == "same_pid"}
+    assert "596" in same_pid, "injected PID must survive (process + injected_code)"
+    assert "4" not in same_pid, "System PID 4 (process+cmdline only) must be suppressed"
+
+
 def test_bad_host_reputation_catalog_matches_network_values():
     """Issue 4.2: the bad_hosts reputation list must boost+tag the low/medium
     network items pointing at known-bad infrastructure (domain AND IP), which
@@ -371,7 +425,9 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
                     "artifact_id": "net_4321_4444",
                     "source_tool": "tshark",
                     "evidence_type": "network_connection",
-                    "value": "TCP 10.0.0.5 → 185.220.101.47:4444 (1500000 bytes, 12 packets)",
+                    # PID in the value, matching the real netstat wrapper output, so
+                    # the same_pid group spans an information-adding type (4.7).
+                    "value": "TCP 10.0.0.5 → 185.220.101.47:4444 (1500000 bytes, 12 packets) (PID:4321)",
                     "severity": "high",
                     "confidence": 0.8,
                     "timestamp": "2026-05-08T12:05:00Z",
@@ -508,6 +564,12 @@ def test_process_tree_does_not_contaminate_correlations():
         {"artifact_id": "cmdline_1940", "evidence_type": "commandline",
          "source_tool": "volatility3", "severity": "medium",
          "value": "C:/Intel/tasksche.exe (PID:1940)"},
+        # An information-adding item (a network beacon from the same PID, from a
+        # different tool) so PID 1940 legitimately forms a same_pid group under
+        # the 4.7 rule — otherwise process+cmdline alone is suppressed as noise.
+        {"artifact_id": "net_1940", "evidence_type": "network_connection",
+         "source_tool": "tshark", "severity": "high",
+         "value": "TCP beacon to 165.245.215.18:4444 (PID:1940)"},
     ]
     enriched, signals = enrich_evidence_items(items, {"case_id": "X"})
     annotated, findings = build_correlations(enriched, signals)
@@ -517,7 +579,7 @@ def test_process_tree_does_not_contaminate_correlations():
     assert tree.get("correlations") == []
 
     same_pid = [f for f in findings if f["correlation_type"] == "same_pid"]
-    assert same_pid, "PID 1940 should still correlate via process + cmdline"
+    assert same_pid, "PID 1940 should correlate via process + cmdline + network"
     # never anchored on the tree
     assert all(f.get("item") != "process_tree_1636" for f in same_pid)
 

@@ -37,8 +37,17 @@ SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 # from IOC matching and keep the structural severity the wrapper assigned.
 _STRUCTURAL_SUMMARY_TYPES = {"process_tree"}
 
-# Numeric tokens 2–5 digits long, used to extract candidate ports from a value.
-_PORT_TOKEN_RE = re.compile(r"\b(\d{2,5})\b")
+# Candidate ports, extracted only from genuine port grammar (issue 4.1-r). A bare
+# 2–5 digit token is NOT a port — a byte count ("442 bytes"), packet count, or PID
+# would otherwise read as a critical C2 port. We accept a number only when it sits
+# after a host/IP colon (`…215.18:4444`) or an explicit port keyword
+# (`port 4444`, `dport=4444`, `dst port 4444`). The colon is anchored to a
+# preceding address character so a literal ":4444" still works but a bare number
+# never matches.
+_PORT_TOKEN_RE = re.compile(
+    r"(?:(?<=[\w.]):|\b(?:dst\s+)?d?port\b[\s:=]{0,3})(\d{2,5})\b",
+    re.IGNORECASE,
+)
 
 # A dotted-quad IPv4 token (matched whole, so a bad "1.2.3.4" never substring-
 # hits inside "11.2.3.40"). Octet-range validation is loose on purpose — the

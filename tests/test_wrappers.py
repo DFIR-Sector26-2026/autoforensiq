@@ -91,6 +91,22 @@ def test_parse_fls_skips_directory_nodes():
     assert not any(v.rstrip().endswith("/Windows/Temp") for v in values)
 
 
+def test_parse_cmdline_zero_args_stores_process_name():
+    # Issue 3.4-r: a process with exactly PID + name and zero arguments must store
+    # just the process name as `value`, not the raw "PID<tab>Process" row. The
+    # args-bearing rows are unchanged.
+    wrapper = VolatilityWrapper()
+    lines = [
+        "PID\tProcess\tArgs",
+        "1940\ttasksche.exe",                              # zero args
+        "1024\tsvchost.exe\tC:\\Windows\\svchost.exe -k netsvcs",  # with args
+    ]
+    by_id = {i["artifact_id"]: i for i in wrapper._parse_cmdline(lines)}
+    assert by_id["cmdline_1940"]["value"] == "tasksche.exe"
+    assert "1940" not in by_id["cmdline_1940"]["value"]
+    assert by_id["cmdline_1024"]["value"] == "C:\\Windows\\svchost.exe -k netsvcs"
+
+
 def test_tsk_enumerate_fs_offsets_parses_partitions(monkeypatch):
     # D2: mmls must yield the filesystem sector offsets (2048, 206848, ...),
     # skipping the Meta row and unallocated gaps, so fls can run with -o.
