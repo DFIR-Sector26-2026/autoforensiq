@@ -99,6 +99,52 @@ def test_catalog_matches_wannacry_network_iocs():
     assert novel[0]["severity"] == "high"
 
 
+def test_affected_system_ip_does_not_escalate_benign_traffic():
+    """Issue B2: affected_systems holds the *victim* host, which appears in
+    nearly every artifact. It must NOT be treated as a severity-raising IOC, or
+    benign victim traffic (a plain DNS lookup, an internal SMB probe) is wrongly
+    escalated. Victim-host correlation is the aggregator's `same_ip` job."""
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    ctx = {"affected_systems": ["10.10.14.22"]}
+    items = [
+        {"artifact_id": "dns_b", "evidence_type": "dns_query", "source_tool": "tshark",
+         "value": "DNS query from 10.10.14.22 -> invoice-secure-download.xyz", "severity": "low"},
+        {"artifact_id": "smb_b", "evidence_type": "network_connection", "source_tool": "tshark",
+         "value": "TCP 10.10.14.22 -> 10.10.14.45:445 (303 bytes)", "severity": "low"},
+    ]
+    rescore_items(items, cat, ctx)
+    for it in items:
+        assert it["severity"] == "low", it
+        assert not any("case_ip" in m for m in it.get("ioc_match", []))
+
+
+def test_wnry_component_files_tagged_high_not_critical():
+    """Issue B4: WannaCry's .wnry component/resource files are strong
+    corroborating evidence — they gain a `wannacry_payload` match and are floored
+    at high, but NOT critical (that's the dropper/decryptor). '.wnry' must not
+    collide with the '.wncry' encrypted-victim rule."""
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        {"artifact_id": "f1", "evidence_type": "file_artifact", "source_tool": "volatility3",
+         "value": "\\Intel\\xyz\\c.wnry", "severity": "medium"},
+        {"artifact_id": "f2", "evidence_type": "file_artifact", "source_tool": "tsk_fls",
+         "value": "Suspicious file: /Windows/Temp/u.wnry", "severity": "medium"},
+    ]
+    rescore_items(items, cat, {})
+    for it in items:
+        assert it["severity"] == "high", it
+        assert "wannacry_payload" in it["ioc_match"]
+    # an encrypted-victim file (.wncry) still hits the decryptor rule -> critical,
+    # and must NOT be mislabelled as the high payload rule.
+    enc = [{"artifact_id": "e", "evidence_type": "file_artifact", "source_tool": "volatility3",
+            "value": "photo.jpg.wncry", "severity": "medium"}]
+    rescore_items(enc, cat, {})
+    assert enc[0]["severity"] == "critical"
+    assert "wannacry_payload" not in enc[0]["ioc_match"]
+
+
 def test_bad_host_reputation_catalog_matches_network_values():
     """Issue 4.2: the bad_hosts reputation list must boost+tag the low/medium
     network items pointing at known-bad infrastructure (domain AND IP), which
@@ -479,6 +525,50 @@ def test_process_tree_does_not_contaminate_correlations():
     for item in annotated:
         entries = [json.dumps(c, sort_keys=True) for c in item.get("correlations", [])]
         assert len(entries) == len(set(entries)), f"duplicate on {item['artifact_id']}"
+
+
+def test_domain_correlation_links_pcap_dns_to_memory_string():
+    """Issue B1 / P4-DOMAIN: a memory-recovered `suspicious_domain` carries no
+    IP/path/PID, so before the domain signal it had zero correlation keys and
+    the killswitch was never tied to the pcap DNS query. The new `same_domain`
+    signal links them, normalising the `www.` prefix the memory copy carries."""
+    items = [
+        {"artifact_id": "dns_ks", "evidence_type": "dns_query", "source_tool": "tshark",
+         "severity": "high", "timestamp": "1781000001.0",
+         "value": "DNS query from 10.10.14.22 → evil-killswitch.com (label entropy: 3.9)"},
+        {"artifact_id": "dom_ks", "evidence_type": "suspicious_domain", "source_tool": "volatility3",
+         "severity": "high", "value": "www.evil-killswitch.com"},
+        # An http path with a dotted filename must NOT register the file as a domain.
+        {"artifact_id": "http_drop", "evidence_type": "http_request", "source_tool": "tshark",
+         "severity": "medium", "value": "HTTP 10.10.14.22 → drop-host.xyz/tasksche.exe"},
+        # A process item is not domain-bearing — its dotted name is not a domain.
+        {"artifact_id": "proc_t", "evidence_type": "process", "source_tool": "volatility3",
+         "severity": "high", "value": "tasksche.exe (PID:1940 PPID:1636)"},
+        # Two benign www/non-www copies of one host in the SAME memory image must
+        # NOT correlate — single tool, single type is near-zero signal (4.7).
+        {"artifact_id": "dom_b1", "evidence_type": "suspicious_domain", "source_tool": "volatility3",
+         "severity": "low", "value": "msdn.com"},
+        {"artifact_id": "dom_b2", "evidence_type": "suspicious_domain", "source_tool": "volatility3",
+         "severity": "low", "value": "www.msdn.com"},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "X"})
+    annotated, findings = build_correlations(enriched, signals)
+
+    same_domain = [f for f in findings if f["correlation_type"] == "same_domain"]
+    ks = [f for f in same_domain if "evil-killswitch.com" in f["finding"]]
+    assert len(ks) == 1, "killswitch must correlate across pcap dns and memory string"
+    assert set(ks[0]["artifacts"]) == {"dns_ks", "dom_ks"}
+    # the benign single-tool/single-type memory pair is suppressed
+    assert not any("msdn.com" in f["finding"] for f in same_domain)
+
+    # the http filename is not a domain, and the process is not domain-bearing
+    assert signals["http_drop"]["domains"] == ["drop-host.xyz"]
+    assert signals["proc_t"]["domains"] == []
+    # both endpoints now carry the correlation
+    by_id = {i["artifact_id"]: i for i in annotated}
+    for endpoint in ("dns_ks", "dom_ks"):
+        types = [c["correlation_type"] for c in by_id[endpoint]["correlations"]]
+        assert "same_domain" in types
 
 
 def test_wrapper_linked_artifacts_become_correlations():

@@ -75,6 +75,14 @@ class TSKWrapper(BaseWrapper):
                 continue
             try:
                 filepath = parts[1].strip() if len(parts) > 1 else line
+                # mactime body field 3 is the type/mode string ("r/rrwxrwxrwx"
+                # for files, "d/drwxrwxrwx" for directories). Skip directory
+                # nodes (issue B3): the dir itself matches SUSPICIOUS_DIRS by
+                # path substring, but it isn't a file artifact — the malware is
+                # the files *inside* it, which are flagged on their own rows.
+                mode = parts[3].strip() if len(parts) > 3 else ""
+                if mode.startswith("d/"):
+                    continue
                 is_deleted = line.startswith("r/r *") or "* " in parts[0]
                 lower_path = filepath.lower()
 

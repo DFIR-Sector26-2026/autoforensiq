@@ -1667,11 +1667,22 @@ class VolatilityWrapper(BaseWrapper):
             if _is_benign_domain(value):
                 continue
 
-            conf = (
-                ANCHORED_CONF
-                if _has_network_context(corpus, match.start(), match.end(), value)
-                else BARE_CONF
-            )
+            anchored = _has_network_context(corpus, match.start(), match.end(), value)
+
+            # Reject short bare ccTLD fragments (issue 3.3-J): a *bare* 2-label
+            # token on a 2-letter ccTLD whose SLD is < 4 chars ("ho.gn", "gc.ie",
+            # "exe.pt", "lp.sx") — and registry public-suffix labels swept from
+            # cert/TLD tables ("gob.ve", "asn.au", "pro.ae") — are string-fragment
+            # noise, not real endpoints. Real short domains have a longer TLD
+            # (ft.com) or an SLD >= 4 (google.de); anything in URL/network grammar
+            # (anchored) is kept regardless. (Residual, not yet caught: DOS .com
+            # executables "more.com"/"tree.com" and long digit/repeat fragments
+            # "f0hht.ht" — see issue 3.3-J notes.)
+            if (not anchored and len(labels) == 2
+                    and len(tld) == 2 and len(labels[-2]) < 4):
+                continue
+
+            conf = ANCHORED_CONF if anchored else BARE_CONF
             if value not in domain_conf:
                 domain_order.append(value)
             domain_conf[value] = max(domain_conf.get(value, 0.0), conf)

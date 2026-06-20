@@ -175,10 +175,17 @@ def _mock_classify(report_text: str) -> dict:
     # Extract affected systems (simple heuristic: look for hostnames/IPs)
     ip_pattern   = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', report_text)
     host_pattern = re.findall(r'\b[A-Z][A-Z0-9\-]{3,}\b', report_text)
-    # Filter common false positives
-    host_pattern = [h for h in host_pattern if h not in
-                    ("AND", "THE", "FOR", "HTTP", "HTTPS", "TCP", "UDP", "VPN", "DNS",
-                     "APT", "RDP", "CMD", "USB", "EDR", "SOC", "IDS", "IPS")]
+    # Require a hostname *shape* rather than an English word (issue B5): real
+    # machine names carry a digit or hyphen (WIN-VICTIM-22, DC01, WKSTN05) and
+    # fit the 15-char NetBIOS limit, whereas all-caps report headings (INCIDENT,
+    # REPORT, TIMELINE) and the dashed case id (SYN-2026-0615-RANSOM, 20 chars)
+    # do not — so the acronym stop-list no longer has to be exhaustive.
+    host_pattern = [
+        h for h in host_pattern
+        if len(h) <= 15
+        and (any(c.isdigit() for c in h) or "-" in h)
+        and h not in ("HTTP", "HTTPS", "WIN32", "WIN64")
+    ]
     affected_systems = list(dict.fromkeys(ip_pattern + host_pattern[:3]))[:5]
 
     # Summary sentence

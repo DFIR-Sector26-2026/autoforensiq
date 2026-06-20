@@ -78,6 +78,19 @@ Units are in 512-byte sectors
 FLS_BODY = "0|/Windows/Temp/evil.exe|0|0|0|0|512|0|0|0|0\n"
 
 
+def test_parse_fls_skips_directory_nodes():
+    # Issue B3: a directory whose path matches SUSPICIOUS_DIRS (mode "d/d...") is
+    # not a file artifact — only the files inside it are flagged on their own rows.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    body = "\n".join([
+        "0|/Windows/Temp|438|d/drwxrwxrwx|0|0|512|0|0|0|0",            # dir -> skipped
+        "0|/Windows/Temp/taskdl.exe|453|r/rrwxrwxrwx|0|0|42|0|0|0|0",  # file -> kept
+    ])
+    values = [i["value"] for i in TSKWrapper()._parse_fls_lines(body)]
+    assert any("taskdl.exe" in v for v in values)
+    assert not any(v.rstrip().endswith("/Windows/Temp") for v in values)
+
+
 def test_tsk_enumerate_fs_offsets_parses_partitions(monkeypatch):
     # D2: mmls must yield the filesystem sector offsets (2048, 206848, ...),
     # skipping the Meta row and unallocated gaps, so fls can run with -o.
@@ -497,6 +510,30 @@ def test_extract_strings_domain_tld_recall_and_denoise():
     assert "panel.c2.pl" in domains
     for noise in ("ntoskrnl.exe", "symbols.pdb", "l3codecx.ax", "main.py", "t.com"):
         assert noise not in domains
+
+
+def test_extract_strings_drops_short_cctld_fragments():
+    # Regression for 3.3-J: bare 2-label tokens on a 2-letter ccTLD with a < 4
+    # char SLD are string-fragment / public-suffix noise, not endpoints. They
+    # must drop when bare but survive when anchored in URL/network grammar, and
+    # genuine short domains (3-letter TLD, or SLD >= 4) must be kept.
+    wrapper = VolatilityWrapper()
+    corpus = "\n".join([
+        "ho.gn", "gc.ie", "ht.ht", "exe.pt", "lp.sx",   # fragments -> dropped
+        "gob.ve", "asn.au", "pro.ae",                    # public-suffix labels -> dropped
+        "ft.com",                                        # 3-letter TLD -> kept
+        "google.de",                                     # SLD >= 4 -> kept
+        "evil-c2.io",                                    # SLD >= 4 ccTLD -> kept
+        "http://ai.bj/login",                            # anchored fragment -> kept
+    ])
+    domains = {
+        it["value"] for it in wrapper._extract_strings(corpus)
+        if it["evidence_type"] == "suspicious_domain"
+    }
+    for frag in ("ho.gn", "gc.ie", "ht.ht", "exe.pt", "lp.sx", "gob.ve", "asn.au", "pro.ae"):
+        assert frag not in domains, frag
+    for keep in ("ft.com", "google.de", "evil-c2.io", "ai.bj"):
+        assert keep in domains, keep
 
 
 def test_extract_strings_denoises_prefetch_and_email():

@@ -14,6 +14,13 @@
       "category": "ransomware_marker"
     },
     {
+      "id": "wannacry_payload",
+      "_comment": "WannaCry unpacked component/resource files (c/s/t/u/b/r.wnry, m_*.wnry language packs). Strong corroborating evidence, but not the dropper/decryptor itself, so floored at high (not critical). '.wnry' is distinct from '.wncry'/'.wcry' (handled by wannacry_decryptor), so no overlap.",
+      "match": [".wnry"],
+      "severity": "high",
+      "category": "ransomware_marker"
+    },
+    {
       "id": "wannacry_killswitch",
       "_comment": "Canonical WannaCry killswitch/sinkhole domain. Recovered as a string IOC at medium; cataloguing it gives it an ioc_match so it becomes a Key Finding and is escalated.",
       "match": ["iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea"],

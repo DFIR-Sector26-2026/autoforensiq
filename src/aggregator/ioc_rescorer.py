@@ -71,23 +71,6 @@ def load_ioc_catalog(path: str | Path = _DEFAULT_CATALOG_PATH) -> dict[str, Any]
         return {}
 
 
-def build_case_iocs(case_context: dict) -> list[dict]:
-    """Turn case-specific data into IOC rules (affected_systems IPs, etc.)."""
-    if not isinstance(case_context, dict):
-        return []
-    rules: list[dict] = []
-    for ip in case_context.get("affected_systems", []) or []:
-        ip = str(ip).strip().lower()
-        if ip:
-            rules.append({
-                "id": f"case_ip_{ip}",
-                "match": [ip],
-                "severity": "high",
-                "category": "case_affected_system",
-            })
-    return rules
-
-
 def _build_reputation_rule(catalog: dict, case_context: dict) -> dict | None:
     """Build a single host/IP reputation rule (issue 4.2).
 
@@ -172,7 +155,12 @@ def _build_indicator_list(catalog: dict, case_context: dict) -> list[dict]:
             "category": "exfiltration",
         })
 
-    indicators.extend(build_case_iocs(case_context))
+    # NOTE (issue B2): the affected-system IPs from case_context are the *victim*
+    # hosts, not threat indicators — they appear in essentially every artifact, so
+    # treating them as a high-severity IOC wrongly escalated benign victim traffic
+    # (e.g. the invoice DNS lookup and the :445 lateral-probe both jumped to high).
+    # Victim-host correlation is already handled by the aggregator's `same_ip`
+    # signal, so case-IPs are intentionally NOT added to the IOC indicator list.
     return indicators
 
 

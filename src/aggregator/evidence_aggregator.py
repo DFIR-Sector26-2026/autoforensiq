@@ -225,6 +225,26 @@ BYTES_RE = re.compile(r"(\d[\d,]*)\s+bytes", re.IGNORECASE)
 DESTINATION_RE = re.compile(
     r"(?P<dst>(?:\d{1,3}\.){3}\d{1,3})(?::(?P<port>\d+))?\s*(?:\(|$)"
 )
+# A hostname / domain token: dot-separated labels ending in an alphabetic TLD
+# (≥2). Mirrors `ioc_rescorer._HOST_TOKEN_RE`; kept local to avoid coupling the
+# aggregator to the rescorer. The alpha-TLD requirement means an IPv4 literal is
+# never mis-extracted as a host (issue B1 / P4-DOMAIN).
+HOST_RE = re.compile(
+    r"\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\b", re.IGNORECASE
+)
+# Only these evidence types carry a hostname we want to correlate on. Gating by
+# type keeps file/process/registry values (which contain dotted filenames) out
+# of the domain signal; the file-extension guard below is a second line.
+_DOMAIN_BEARING_TYPES = {"dns_query", "http_request", "suspicious_domain"}
+# Final-label tokens that look like a host but are really a filename — the host
+# regex would otherwise grab "tasksche.exe" out of an http path like
+# "host.xyz/tasksche.exe".
+_NON_DOMAIN_TLDS = {
+    "exe", "dll", "sys", "bin", "dat", "tmp", "pf", "res", "pky",
+    "bmp", "png", "jpg", "jpeg", "gif", "ico", "txt", "log", "ini",
+    "json", "js", "doc", "docx", "xls", "pdf", "zip", "rar",
+    "wnry", "wncry", "wcry",
+}
 EXFIL_BYTES_THRESHOLD = 1_000_000
 EXFIL_TIME_WINDOW_SECONDS = 24 * 60 * 60
 
@@ -313,6 +333,31 @@ def _extract_paths(text: str) -> list[str]:
     return deduplicated
 
 
+def _normalize_host(host: str) -> str:
+    """Lowercase, strip a trailing dot and a leading `www.` so a bare host and
+    its `www.`-prefixed form collapse to one key (issue B1: the pcap saw the
+    killswitch as `iuqerf…com`, memory as `www.iuqerf…com`)."""
+    host = host.strip().strip(".").lower()
+    if host.startswith("www."):
+        host = host[len("www."):]
+    return host
+
+
+def _extract_domains(text: str) -> list[str]:
+    domains = []
+    seen = set()
+    for match in HOST_RE.findall(text):
+        normalized = _normalize_host(match)
+        if not normalized or "." not in normalized:
+            continue
+        if normalized.rsplit(".", 1)[-1] in _NON_DOMAIN_TLDS:
+            continue
+        if normalized not in seen:
+            seen.add(normalized)
+            domains.append(normalized)
+    return domains
+
+
 def _extract_bytes(text: str) -> int:
     match = BYTES_RE.search(text)
     if not match:
@@ -374,6 +419,13 @@ def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
             file_keys.append(file_name.lower())
     file_keys = sorted(set(file_keys))
 
+    # Domain correlation signal (issue B1): only for domain-bearing types, read
+    # from the clean value so artifact-id fragments don't leak in.
+    if evidence_type in _DOMAIN_BEARING_TYPES:
+        domains = _extract_domains(normalized_value)
+    else:
+        domains = []
+
     return {
         "artifact_id": artifact_id,
         "source_tool": source_tool,
@@ -388,6 +440,7 @@ def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
         "ips": ips,
         "paths": paths,
         "file_keys": file_keys,
+        "domains": domains,
         "bytes_transferred": _extract_bytes(combined),
         "destination_ip": destination_ip,
         "destination_port": destination_port,
@@ -470,7 +523,12 @@ def _make_finding(
     return output
 
 
-def _group_items_by_signal(items: list[dict], signals: dict[str, dict[str, Any]], key_name: str) -> list[dict[str, Any]]:
+def _group_items_by_signal(
+    items: list[dict],
+    signals: dict[str, dict[str, Any]],
+    key_name: str,
+    require_cross_source: bool = False,
+) -> list[dict[str, Any]]:
     grouped = defaultdict(list)
     for item in items:
         signal = signals.get(item.get("artifact_id", ""), {})
@@ -485,6 +543,15 @@ def _group_items_by_signal(items: list[dict], signals: dict[str, dict[str, Any]]
     for key, related_items in grouped.items():
         if len(related_items) < 2:
             continue
+        # The domain signal only earns its keep as a *cross-artifact* link; a
+        # group confined to one tool and one evidence type (e.g. www/non-www
+        # copies of the same benign host in a single memory image) is the
+        # near-zero-signal noise issue 4.7 flags, so skip it.
+        if require_cross_source:
+            tools = {i.get("source_tool", "") for i in related_items}
+            types = {i.get("evidence_type", "") for i in related_items}
+            if len(tools) < 2 and len(types) < 2:
+                continue
         anchor = _select_anchor(related_items)
         if key_name == "pids":
             finding = f"PID {key} observed across multiple artifacts"
@@ -495,6 +562,9 @@ def _group_items_by_signal(items: list[dict], signals: dict[str, dict[str, Any]]
         elif key_name == "file_keys":
             finding = f"File {key} observed across multiple artifacts"
             reasons = [f"Same file/path {key} appeared in multiple artifacts"]
+        elif key_name == "domains":
+            finding = f"Domain {key} observed across multiple artifacts"
+            reasons = [f"Same domain {key} appeared in multiple artifacts"]
         else:
             finding = f"Shared {key_name[:-1] if key_name.endswith('s') else key_name} bucket {key} observed across multiple artifacts"
             reasons = [f"Same timestamp bucket {key} appeared in multiple artifacts"]
@@ -506,6 +576,7 @@ def _group_items_by_signal(items: list[dict], signals: dict[str, dict[str, Any]]
                 "pids": "same_pid",
                 "ips": "same_ip",
                 "file_keys": "same_file",
+                "domains": "same_domain",
                 "timestamp_bucket": "same_timestamp",
             }.get(key_name, key_name),
             finding=finding,
@@ -723,6 +794,7 @@ def build_correlations(items: list[dict], signals: dict[str, dict[str, Any]]) ->
     findings.extend(_group_items_by_signal(items, signals, "pids"))
     findings.extend(_group_items_by_signal(items, signals, "ips"))
     findings.extend(_group_items_by_signal(items, signals, "file_keys"))
+    findings.extend(_group_items_by_signal(items, signals, "domains", require_cross_source=True))
     findings.extend(_group_items_by_signal(items, signals, "timestamp_bucket"))
     findings.extend(_build_exfiltration_findings(items, signals))
     # Merge wrapper-declared explicit links (issue 4.6), after the signal-based
