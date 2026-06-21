@@ -23,6 +23,15 @@ DNS_ALLOWLIST_SUFFIXES = (".local", ".arpa", ".lan", ".internal", ".home")
 DNS_SUSPICIOUS_MIN_LABEL_LEN = 12
 DNS_SUSPICIOUS_ENTROPY = 3.8
 
+# DNS query-type codes → record names (issue 4.3-r). Including the qry.type in
+# the artifact_id keeps an A (1) and an HTTPS/SVCB (65) lookup for the same
+# domain in the same frame-instant from collapsing onto one id.
+DNS_QTYPE_NAMES = {
+    "1": "A", "2": "NS", "5": "CNAME", "6": "SOA", "12": "PTR", "15": "MX",
+    "16": "TXT", "28": "AAAA", "33": "SRV", "43": "DS", "48": "DNSKEY",
+    "65": "HTTPS", "257": "CAA",
+}
+
 class TsharkWrapper(BaseWrapper):
     def __init__(self):
         super().__init__("tshark")
@@ -109,7 +118,8 @@ class TsharkWrapper(BaseWrapper):
             "-T", "fields",
             "-e", "frame.time_epoch",
             "-e", "ip.src",
-            "-e", "dns.qry.name"
+            "-e", "dns.qry.name",
+            "-e", "dns.qry.type"
         ], input_files=[pcap_path], timeout=60)
 
         items = []
@@ -123,6 +133,11 @@ class TsharkWrapper(BaseWrapper):
             timestamp, src, domain = parts[0], parts[1], parts[2].lower()
             if not domain:
                 continue
+            # qry.type disambiguates A vs AAAA vs HTTPS lookups for the same
+            # domain at the same instant (4.3-r). tshark joins multi-question
+            # packets with commas; take the first code for the id/label.
+            qtype = parts[3].split(",")[0].strip() if len(parts) > 3 else ""
+            qtype_name = DNS_QTYPE_NAMES.get(qtype, qtype or "?")
             # Score the most-significant label (not the whole string), and only
             # flag "high" when it's long AND high-entropy AND not known-good
             # infrastructure. The allowlist is a suppressor on the high path
@@ -139,10 +154,11 @@ class TsharkWrapper(BaseWrapper):
                     f"dns_"
                     f"{src.replace('.','_')}_"
                     f"{domain.replace('.','_')[:30]}_"
+                    f"{qtype_name}_"
                     f"{timestamp}"
                 ),
                 evidence_type="dns_query",
-                value=f"DNS query from {src} → {domain} (label entropy: {entropy:.2f})",
+                value=f"DNS {qtype_name} query from {src} → {domain} (label entropy: {entropy:.2f})",
                 severity=severity,
                 confidence=0.80,
                 timestamp=timestamp

@@ -64,6 +64,47 @@ def summarise_tree(node, depth=0, max_depth=5):
     return "\n".join(lines)
 
 
+def tree_to_dict(node, depth=0, max_depth=5):
+    """Structured process-tree for downstream consumers (issue 4.5): the same
+    lineage as summarise_tree but as nested dicts instead of indented text, so
+    the report/UI doesn't have to re-parse the text blob."""
+
+    if not node or depth > max_depth:
+        return None
+
+    return {
+        "pid": node.pid,
+        "ppid": node.ppid,
+        "name": node.name,
+        "suspicious": node.suspicious,
+        "children": [
+            child for child in (
+                tree_to_dict(c, depth + 1, max_depth) for c in node.children
+            ) if child is not None
+        ],
+    }
+
+
+def tree_lineage(node, max_depth=5):
+    """Concise one-line root→leaf lineage(s), e.g.
+    `explorer.exe(1636) → tasksche.exe(1940) → @WanaDecryptor@(740)` (issue 4.5).
+    One line per leaf path; a single linear chain collapses to one line."""
+
+    paths = []
+
+    def _walk(n, prefix, depth):
+        label = prefix + [f"{n.name}({n.pid})"]
+        if depth >= max_depth or not n.children:
+            paths.append(" → ".join(label))
+            return
+        for child in n.children:
+            _walk(child, label, depth + 1)
+
+    if node:
+        _walk(node, [], 0)
+
+    return "\n".join(paths)
+
 
 SUSPICIOUS_PARENTS = [
     "cmd.exe",
@@ -795,16 +836,19 @@ class VolatilityWrapper(BaseWrapper):
 
         for root in roots:
 
-            tree_items.append(
-                self.make_evidence_item(
-                    artifact_id=f"process_tree_{root.pid}",
-                    evidence_type="process_tree",
-                    value=summarise_tree(root),
-                    severity="medium",
-                    confidence=0.95,
-                    linked_artifacts=[]
-                )
+            tree_item = self.make_evidence_item(
+                artifact_id=f"process_tree_{root.pid}",
+                evidence_type="process_tree",
+                value=summarise_tree(root),
+                severity="medium",
+                confidence=0.95,
+                linked_artifacts=[]
             )
+            # 4.5: expose the tree as structured data and a one-line lineage so
+            # downstream consumers don't have to re-parse the indented `value`.
+            tree_item["process_tree_json"] = tree_to_dict(root)
+            tree_item["lineage"] = tree_lineage(root)
+            tree_items.append(tree_item)
 
         items.extend(tree_items)
         items.extend(relation_items)

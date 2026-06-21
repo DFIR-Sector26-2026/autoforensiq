@@ -3,7 +3,10 @@ import json
 import pytest
 from src.utils.audit_log import sha256_file, log_action
 from src.wrappers.base_wrapper import BaseWrapper
-from src.wrappers.volatility_wrapper import VolatilityWrapper
+from src.wrappers.volatility_wrapper import (
+    VolatilityWrapper, ProcessNode, tree_to_dict, tree_lineage,
+)
+from src.wrappers.tshark_wrapper import TsharkWrapper
 
 
 # ─────────────────────────────────────────────────────────────
@@ -936,3 +939,62 @@ def test_plaso_resolve_cmd_falls_back_to_path_then_bare(monkeypatch, tmp_path):
     monkeypatch.setattr(plaso_wrapper.shutil, "which",
                         lambda n: "/usr/bin/log2timeline.py" if n == "log2timeline.py" else None)
     assert plaso_wrapper._resolve_cmd("log2timeline.py", "log2timeline") == "/usr/bin/log2timeline.py"
+
+
+# ─────────────────────────────────────────────────────────────
+# Process-tree structured output (issue 4.5)
+# ─────────────────────────────────────────────────────────────
+
+def test_process_tree_structured_json_and_lineage():
+    # 4.5: the process_tree must be exposed as structured data + a concise
+    # one-line lineage, not only the indented text `value` blob.
+    root = ProcessNode(1636, 1608, "explorer.exe")
+    child = ProcessNode(1940, 1636, "tasksche.exe")
+    grand = ProcessNode(740, 1940, "@WanaDecryptor@")
+    child.suspicious = True
+    root.children = [child]
+    child.children = [grand]
+
+    d = tree_to_dict(root)
+    assert d["pid"] == 1636 and d["name"] == "explorer.exe" and d["ppid"] == 1608
+    assert d["children"][0]["name"] == "tasksche.exe"
+    assert d["children"][0]["suspicious"] is True
+    assert d["children"][0]["children"][0]["pid"] == 740
+
+    assert tree_lineage(root) == \
+        "explorer.exe(1636) → tasksche.exe(1940) → @WanaDecryptor@(740)"
+
+
+def test_process_tree_lineage_one_line_per_leaf():
+    # A branching tree yields one lineage line per leaf path.
+    root = ProcessNode(4, 0, "System")
+    a = ProcessNode(10, 4, "a.exe")
+    b = ProcessNode(11, 4, "b.exe")
+    root.children = [a, b]
+    lines = tree_lineage(root).splitlines()
+    assert lines == ["System(4) → a.exe(10)", "System(4) → b.exe(11)"]
+
+
+# ─────────────────────────────────────────────────────────────
+# DNS query-type disambiguation (issue 4.3-r)
+# ─────────────────────────────────────────────────────────────
+
+def test_dns_query_type_disambiguates_artifact_id(monkeypatch):
+    # 4.3-r: an A (1) and an HTTPS/SVCB (65) lookup for the same domain at the
+    # same frame-instant must produce DISTINCT artifact_ids (they used to
+    # collapse onto one id keyed only on src+domain+timestamp).
+    w = TsharkWrapper()
+    out = "\n".join([
+        "1781000005.000000000\t10.10.14.22\texample-c2.com\t1",
+        "1781000005.000000000\t10.10.14.22\texample-c2.com\t65",
+    ])
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: (out, "", 0))
+
+    items = w._get_dns_queries("x.pcap")
+    ids = [i["artifact_id"] for i in items]
+    assert len(items) == 2
+    assert len(set(ids)) == 2                       # no collapse
+    assert any("_A_" in i for i in ids)
+    assert any("_HTTPS_" in i for i in ids)
+    assert any("DNS A query" in i["value"] for i in items)
+    assert any("DNS HTTPS query" in i["value"] for i in items)
