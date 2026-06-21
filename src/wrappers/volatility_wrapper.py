@@ -1647,6 +1647,85 @@ class VolatilityWrapper(BaseWrapper):
 
             return digest == checksum and len(payload) == 21
 
+        # Native SegWit (bech32 / bech32m, BIP-173 / BIP-350) — the modern
+        # `bc1…` address family the base58check path above can't validate:
+        #   * witness v0  (P2WPKH/P2WSH) uses the bech32 checksum constant (1)
+        #   * witness v1+ (P2TR Taproot) uses the bech32m constant (0x2bc830a3)
+        _BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+        def _bech32_polymod(values):
+            gen = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
+            chk = 1
+            for v in values:
+                top = chk >> 25
+                chk = ((chk & 0x1ffffff) << 5) ^ v
+                for i in range(5):
+                    chk ^= gen[i] if ((top >> i) & 1) else 0
+            return chk
+
+        def _bech32_hrp_expand(hrp):
+            return [ord(c) >> 5 for c in hrp] + [0] + [ord(c) & 31 for c in hrp]
+
+        def _convertbits(data, frombits, tobits):
+            # 5-bit groups -> 8-bit bytes, no padding (witness-program decode).
+            acc = 0
+            bits = 0
+            ret = []
+            maxv = (1 << tobits) - 1
+            for value in data:
+                if value < 0 or (value >> frombits):
+                    return None
+                acc = (acc << frombits) | value
+                bits += frombits
+                while bits >= tobits:
+                    bits -= tobits
+                    ret.append((acc >> bits) & maxv)
+            if bits >= frombits or ((acc << (tobits - bits)) & maxv):
+                return None
+            return ret
+
+        def _is_valid_bech32_btc_address(value: str) -> bool:
+            # BIP-173 forbids mixed case; accept all-lower or all-upper.
+            if value != value.lower() and value != value.upper():
+                return False
+            v = value.lower()
+            if not (14 <= len(v) <= 90):
+                return False
+
+            pos = v.rfind("1")
+            if pos < 1 or pos + 7 > len(v):
+                return False
+
+            hrp, data_part = v[:pos], v[pos + 1:]
+            if hrp != "bc":                      # Bitcoin mainnet only
+                return False
+
+            data = []
+            for c in data_part:
+                d = _BECH32_CHARSET.find(c)
+                if d == -1:
+                    return False
+                data.append(d)
+
+            wit_ver = data[0]
+            checksum = _bech32_polymod(_bech32_hrp_expand(hrp) + data)
+            if wit_ver == 0:
+                if checksum != 1:                # bech32
+                    return False
+            elif 1 <= wit_ver <= 16:
+                if checksum != 0x2bc830a3:        # bech32m
+                    return False
+            else:
+                return False
+
+            program = _convertbits(data[1:-6], 5, 8)
+            if program is None or not (2 <= len(program) <= 40):
+                return False
+            # v0 programs are exactly 20 (P2WPKH) or 32 (P2WSH) bytes.
+            if wit_ver == 0 and len(program) not in (20, 32):
+                return False
+            return True
+
         for match in re.finditer(r"[a-z0-9]{16,56}\.onion", corpus, flags=re.IGNORECASE):
 
             _add_item(match.group(0).lower(), "suspicious_domain", "high", 0.95, "ioc")
@@ -1657,6 +1736,13 @@ class VolatilityWrapper(BaseWrapper):
 
             if _is_valid_btc_address(candidate):
                 _add_item(candidate, "suspicious_crypto", "high", 0.93, "btc")
+
+        for match in re.finditer(r"\bbc1[ac-hj-np-z02-9]{8,87}\b", corpus, flags=re.IGNORECASE):
+
+            candidate = match.group(0)
+
+            if _is_valid_bech32_btc_address(candidate):
+                _add_item(candidate.lower(), "suspicious_crypto", "high", 0.93, "btc")
 
         for match in re.finditer(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}", corpus):
 

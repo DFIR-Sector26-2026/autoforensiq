@@ -536,6 +536,35 @@ def test_extract_strings():
     assert "ignore_this_file.dll" not in values
 
 
+def test_extract_strings_validates_bech32_wallets():
+    # 3.3-G: native SegWit `bc1…` wallets (BIP-173 bech32 / BIP-350 bech32m)
+    # were a recall gap — base58check only matched legacy 1.../3... addresses.
+    # Valid v0 (P2WPKH/P2WSH) and v1 (Taproot) addresses must now be recovered,
+    # with checksum validation rejecting corrupted / wrong-network look-alikes.
+    wrapper = VolatilityWrapper()
+    corpus = " ".join([
+        "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",                                  # legacy P2PKH still works
+        "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",                          # P2WPKH v0 (bech32)
+        "BC1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KV8F3T4",                          # same, all-uppercase
+        "bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0",      # P2TR v1 (bech32m)
+        "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t5",                          # bad checksum → reject
+        "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx",                          # testnet hrp → reject
+    ])
+    crypto = {
+        i["value"] for i in wrapper._extract_strings(corpus)
+        if i["evidence_type"] == "suspicious_crypto"
+    }
+    assert "1a1zp1ep5qgefi2dmptftl5slmv7divfna" not in crypto  # legacy is case-sensitive...
+    assert "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa" in crypto       # ...kept verbatim
+    assert "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4" in crypto   # v0 recovered
+    assert "bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0" in crypto  # v1
+    # the all-uppercase copy is normalised to lowercase (dedup-friendly)
+    assert "BC1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KV8F3T4" not in crypto
+    # corrupted checksum and wrong-network addresses are rejected
+    assert "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t5" not in crypto
+    assert not any(v.startswith("tb1") for v in crypto)
+
+
 def test_extract_strings_domain_tld_recall_and_denoise():
     # Regression for 3.3-E: country-code / .gov / .edu C2 domains must be
     # recovered (the old tiny allowlist dropped them), while filename noise and
