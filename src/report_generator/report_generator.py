@@ -1068,10 +1068,14 @@ def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None,
 
 
 def _render_folded_iocs(folded):
-    """Collapsed <details> block summarising the low-severity indicator mass:
+    """Pure-markdown section summarising the low-severity indicator mass:
     per-type counts, a domain anchored/bare tier split, and a capped sample
     ordered by confidence (anchored first). Non-destructive — the full set is in
-    unified_evidence.json."""
+    unified_evidence.json.
+
+    Deliberately avoids the GitHub-only ``<details>``/``<summary>`` HTML: a
+    forensic report is read in many markdown viewers, and a strict/CommonMark
+    renderer prints the raw tags literally."""
     by_type = {}
     for r in folded:
         by_type[r["type"]] = by_type.get(r["type"], 0) + 1
@@ -1098,15 +1102,13 @@ def _render_folded_iocs(folded):
         )
 
     return (
-        "\n<details>\n"
-        f"<summary><b>{len(folded)}</b> low-severity / un-elevated indicator(s) "
-        "folded — not flagged by anomaly detection or reputation. "
-        "Expand for a sample.</summary>\n\n"
-        f"By type: {type_breakdown}.{tier_note}\n\n"
+        "\n---\n\n"
+        "#### Folded — low-severity / un-elevated indicators\n\n"
+        f"**{len(folded)}** indicator(s) not flagged by anomaly detection or "
+        f"reputation. By type: {type_breakdown}.{tier_note}\n\n"
         f"Showing top {len(sample)} by confidence (anchored first):\n\n"
         + "\n".join(sample_rows)
         + "\n\n_Full set in `output/unified_evidence.json`._\n"
-        "</details>\n"
     )
 
 

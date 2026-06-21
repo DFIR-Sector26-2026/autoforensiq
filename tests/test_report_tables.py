@@ -532,11 +532,11 @@ def test_ioc_report_surfaces_elevated_low_domain():
          "artifact_id": "dom_2"},
     ]
     md = _build_ioc_report(items, severity_lookup={"dom_1": "critical"})
-    main = md.split("<details>")[0]
+    main = md.split("#### Folded")[0]
     assert "`beaconads.com`" in main          # elevated -> surfaced
     assert "`across.com`" not in main         # un-elevated low -> folded out of table
     assert "`across.com`" in md               # ...but NOT dropped (folded sample)
-    assert "<details>" in md
+    assert "#### Folded" in md
 
 
 def test_ioc_report_folds_low_severity_mass_with_cap():
@@ -550,8 +550,8 @@ def test_ioc_report_folds_low_severity_mass_with_cap():
     ]
     md = _build_ioc_report(items)
     assert "120" in md                                   # full folded count reported
-    assert "<details>" in md
-    sample_row_count = md.split("<details>", 1)[1].count("\n| `")
+    assert "#### Folded" in md
+    sample_row_count = md.split("#### Folded", 1)[1].count("\n| `")
     assert sample_row_count <= 50                        # sample is capped
 
 
@@ -566,6 +566,6 @@ def test_ioc_report_folded_sample_orders_anchored_before_bare():
          "value": "anchored-host.io", "severity": "low", "confidence": 0.45,
          "artifact_id": "d2"},
     ]
-    fold = _build_ioc_report(items).split("<details>", 1)[1]
+    fold = _build_ioc_report(items).split("#### Folded", 1)[1]
     assert fold.index("anchored-host.io") < fold.index("bare-token.ru")
     assert "anchored" in fold and "bare" in fold
