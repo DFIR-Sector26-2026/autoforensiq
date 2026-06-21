@@ -41,6 +41,33 @@ SUSPICIOUS_RELATIONS = [
 ]
 
 
+def _dedupe_iocs(iocs):
+    """Collapse IOC items reporting the same indicator at the same severity into
+    a single item, unioning their `linked_artifacts` (IOC-redundancy).
+
+    The engine emits one item per (source item, matched indicator), so an
+    indicator seen in N source items (e.g. `tasksche.exe` ×5, `@WanaDecryptor@`
+    ×5) produced N near-identical items differing only by `linked_artifacts`.
+    Downstream consumers want one indicator carrying all its source links, so we
+    keep the first item per (value, severity) and merge the rest's links into it.
+    """
+    merged = {}
+    order = []
+    for ioc in iocs:
+        key = (ioc.get("value", ""), ioc.get("severity", ""))
+        if key not in merged:
+            canonical = dict(ioc)
+            canonical["linked_artifacts"] = list(ioc.get("linked_artifacts", []))
+            merged[key] = canonical
+            order.append(key)
+        else:
+            existing = merged[key]["linked_artifacts"]
+            for link in ioc.get("linked_artifacts", []):
+                if link not in existing:
+                    existing.append(link)
+    return [merged[key] for key in order]
+
+
 def extract_iocs(evidence_items):
 
     iocs = []
@@ -160,4 +187,4 @@ def extract_iocs(evidence_items):
                     "linked_artifacts": [artifact_id]
                 })
 
-    return iocs
+    return _dedupe_iocs(iocs)

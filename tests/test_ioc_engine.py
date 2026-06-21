@@ -54,3 +54,38 @@ def test_genuine_process_iocs_survive_without_the_tree():
     assert "ioc_proc_process_740_wanadecryptor" in ids
     # nothing derived from the skipped tree
     assert not any("process_tree_1636" in i for i in ids)
+
+
+def test_duplicate_indicator_across_items_is_deduped_with_merged_links():
+    # IOC-redundancy: the same indicator seen across N source items used to emit
+    # N near-identical ioc items differing only by linked_artifacts. They must
+    # collapse to ONE item per (value, severity), carrying all source links.
+    items = [
+        {"artifact_id": "file_a", "evidence_type": "file_artifact",
+         "value": "C:\\Users\\Public\\tasksche.exe"},
+        {"artifact_id": "file_b", "evidence_type": "file_artifact",
+         "value": "C:\\Windows\\tasksche.exe"},
+        {"artifact_id": "proc_1940", "evidence_type": "process",
+         "value": "tasksche.exe (PID 1940)"},
+    ]
+    iocs = extract_iocs(items)
+    tasksche = [i for i in iocs
+                if i["value"] == "Suspicious process detected: tasksche.exe"]
+    assert len(tasksche) == 1
+    # every source that saw the indicator is preserved as a link
+    assert set(tasksche[0]["linked_artifacts"]) == {"file_a", "file_b", "proc_1940"}
+
+
+def test_distinct_indicators_are_not_collapsed():
+    # Dedup keys on (value, severity), so genuinely different indicators (even at
+    # the same severity) must survive as separate items.
+    items = [
+        {"artifact_id": "proc_1", "evidence_type": "process",
+         "value": "tasksche.exe seen"},
+        {"artifact_id": "proc_2", "evidence_type": "process",
+         "value": "@WanaDecryptor@ seen"},
+    ]
+    iocs = extract_iocs(items)
+    values = {i["value"] for i in iocs}
+    assert "Suspicious process detected: tasksche.exe" in values
+    assert "Suspicious process detected: @WanaDecryptor@" in values

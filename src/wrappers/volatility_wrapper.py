@@ -1082,24 +1082,43 @@ class VolatilityWrapper(BaseWrapper):
 
                         grouped_regions[pid] = {
                             "name": name,
-                            "count": 0,
-                            "has_rwx": False,
+                            "has_exec": False,
+                            "has_wx": False,
                             "has_pe": False
                         }
 
-                    grouped_regions[pid]["count"] += 1
-
+                    # malfind only emits suspicious VADs, so any executable
+                    # private region is notable. Track a truly writable+
+                    # executable region (classic RWX shellcode home) separately
+                    # from an execute-only RX region, so the reason text below
+                    # doesn't claim "RWX" for a PAGE_EXECUTE_READ region (3.1-B).
                     if (
                         "rwx" in flags or
                         "rw-x" in flags or
                         "rx" in flags or
                         "page_execute" in flags or
                         "page_exec" in flags or
+                        "execute" in flags
+                    ):
+                        grouped_regions[pid]["has_exec"] = True
+
+                    if (
+                        "rwx" in flags or
+                        "rw-x" in flags or
+                        "page_execute_readwrite" in flags or
+                        "page_execute_writecopy" in flags or
                         ("execute" in flags and "write" in flags)
                     ):
-                        grouped_regions[pid]["has_rwx"] = True
+                        grouped_regions[pid]["has_wx"] = True
 
-                    if _has_pe_signature(stripped) or "mz" in flags or "pe" in flags:
+                    # `flags` is the space-joined protection columns; match "mz"/
+                    # "pe" as standalone tokens, not loose substrings (3.1-C).
+                    flag_tokens = set(flags.split())
+                    if (
+                        _has_pe_signature(stripped) or
+                        "mz" in flag_tokens or
+                        "pe" in flag_tokens
+                    ):
                         grouped_regions[pid]["has_pe"] = True
                 except Exception:
                     pass
@@ -1115,19 +1134,24 @@ class VolatilityWrapper(BaseWrapper):
         for pid, info in grouped_regions.items():
 
             name = info.get("name", "unknown")
-            has_rwx = info.get("has_rwx", False)
+            has_exec = info.get("has_exec", False)
+            has_wx = info.get("has_wx", False)
             has_pe = info.get("has_pe", False)
-            corroborated = has_rwx and has_pe
+            corroborated = has_exec and has_pe
 
-            if has_rwx and has_pe:
+            # Only call it "RWX" when the region is actually writable+executable;
+            # an execute-only region is RX, so labelling it RWX is inaccurate (3.1-B).
+            exec_label = "RWX region" if has_wx else "Executable (RX) region"
+
+            if has_exec and has_pe:
                 severity = "critical"
                 confidence = 0.92
-                reasons = ["RWX region and embedded PE/shellcode detected"]
-            elif has_rwx or has_pe:
+                reasons = [f"{exec_label} and embedded PE/shellcode detected"]
+            elif has_exec or has_pe:
                 severity = "high"
                 confidence = 0.86
                 reasons = [
-                    "RWX region detected" if has_rwx else "Embedded PE/shellcode detected"
+                    f"{exec_label} detected" if has_exec else "Embedded PE/shellcode detected"
                 ]
             else:
                 severity = "medium"
@@ -1342,7 +1366,15 @@ class VolatilityWrapper(BaseWrapper):
                         continue
 
                     # relevance gate to avoid flooding with low-signal paths.
-                    marker_hits = sum(1 for marker in suspicious_markers if marker in normalized)
+                    # ".js" as a substring also matches ".json", so count it
+                    # only when it's the real file extension (3.3-D).
+                    marker_hits = 0
+                    for marker in suspicious_markers:
+                        if marker == ".js":
+                            if ext == ".js":
+                                marker_hits += 1
+                        elif marker in normalized:
+                            marker_hits += 1
 
                     in_random_staging = _has_suspicious_staging_path(normalized)
                     # Ensure a random-named staging path still clears the

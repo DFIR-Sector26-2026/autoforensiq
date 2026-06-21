@@ -258,7 +258,7 @@ class AutoForensiqGUI(ctk.CTk):
                 ("Email",          "*.eml *.msg"),
                 ("All files",      "*.*"),
             ],
-            initialdir=str(ROOT_DIR / "data" / "test_cases"),
+            initialdir=str(ROOT_DIR.parent),
         )
         for p in paths:
             self._add_artifact_row(p)

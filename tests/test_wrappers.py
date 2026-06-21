@@ -277,6 +277,25 @@ PID	Process	Start VPN	End VPN	Tag	Protection	CommitCharge	PrivateMemory	File out
     assert "Corroborated by another IOC" in items[0]["value"]
 
 
+def test_parse_malfind_rx_region_not_labelled_rwx():
+    # 3.1-B: PAGE_EXECUTE_READ is an execute-only (RX) region — "page_execute"
+    # is a substring of it as well as of PAGE_EXECUTE_READWRITE, so the old
+    # has_rwx flag mislabelled an RX region as "RWX region detected". The reason
+    # text must now say RX; a real PAGE_EXECUTE_READWRITE still reads as RWX
+    # (test_parse_malfind covers the RWX+PE critical case).
+    wrapper = VolatilityWrapper()
+    rx = """
+PID	Process	Start VPN	End VPN	Tag	Protection	CommitCharge	PrivateMemory	File output	Notes
+1500	evil.exe	0x1000	0x2000	VadS	PAGE_EXECUTE_READ	4	1	Disabled	N/A
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+"""
+    items = wrapper._parse_malfind([l for l in rx.splitlines() if l.strip()])
+    assert len(items) == 1
+    assert items[0]["severity"] == "high"          # executable private region, not down-ranked
+    assert "Executable (RX) region detected" in items[0]["value"]
+    assert "RWX" not in items[0]["value"]
+
+
 def test_collect_corroborated_pids():
     # Only behavioral IOCs (suspicious cmdline / C2 connection) at high/critical
     # corroborate. A benign low-severity item and a name-based process listing
@@ -470,6 +489,24 @@ def test_parse_filescan_random_staging_dir_is_high():
     assert by_value[pdata]["severity"] == "high"
     assert by_value[temp]["severity"] == "medium"
     assert by_value[logs]["severity"] == "medium"  # named dir not promoted
+
+
+def test_parse_filescan_json_is_not_matched_as_js():
+    # 3.3-D: ".js" is a substring of ".json", so the relevance gate used to
+    # count a spurious marker hit for a plain .json file and emit it. A .json in
+    # a non-staging path must now be skipped, while a real .js dropper in a
+    # staging path still clears the gate.
+    wrapper = VolatilityWrapper()
+    mock_output = "\n".join([
+        "Volatility 3 Framework 2.28.0",
+        "Offset\tName",
+        "0x1000\t\\Device\\HarddiskVolume2\\Users\\bob\\Documents\\settings.json",
+        "0x2000\t\\Device\\HarddiskVolume2\\Windows\\Temp\\dropper.js",
+    ])
+    items = wrapper._parse("windows.filescan", mock_output)
+    values = [it["value"] for it in items]
+    assert not any("settings.json" in v for v in values)   # .json no longer mis-hit by ".js"
+    assert any("dropper.js" in v for v in values)           # real .js still flagged
 
 
 def test_extract_strings():
