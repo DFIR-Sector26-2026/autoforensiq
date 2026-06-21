@@ -40,6 +40,11 @@ SUPPORTED_WRAPPER_NAMES = {
     "regripper",
     "plaso",
     "memprocfs",
+    # email + browser wrappers exist in orchestrator.WRAPPER_MAP but were absent
+    # here and from the ontology, so the DTSA could never select them — an
+    # email_archive / browser_history case silently ran no tool (issue D4).
+    "email",
+    "browser",
 }
 
 # How to detect whether each tool's underlying binary is actually installed.
@@ -454,24 +459,13 @@ def parse_args() -> argparse.Namespace:
 
     if args.context and args.sample:
         parser.error("use only one of --context or --sample")
-        
-    # Debug - remove later
-    print(f"\n\n{args}\n\n")
 
     return args
 
 
 def main() -> None:
-    # Debug - remove later
-    # args = parse_args()
-    args = argparse.Namespace(
-    context=None,
-    sample="ransomware_all",
-    ontology="src/data/tool_ontology.json",
-    output="output/execution_plan.json",
-    stdout=True,
-    )
-    
+    args = parse_args()
+
     context = load_case_context(args)
     ontology = load_json(args.ontology)
     plan = generate_execution_plan(context, ontology)

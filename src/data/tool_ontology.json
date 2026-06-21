@@ -154,6 +154,48 @@
         "source": true
       },
       "wrapper_status": "implemented_requires_plaso"
+    },
+    {
+      "name": "email",
+      "domains": ["email"],
+      "input_types": ["email_archive"],
+      "output_types": ["phishing_email"],
+      "case_relevance": {
+        "ransomware": 0.35,
+        "apt_intrusion": 0.45,
+        "data_exfiltration": 0.6,
+        "insider_threat": 0.6,
+        "malware_infection": 0.5,
+        "phishing": 0.95,
+        "unknown": 0.5
+      },
+      "dependencies": [],
+      "default_order": 6,
+      "args_template": {
+        "email_file": true
+      },
+      "wrapper_status": "implemented"
+    },
+    {
+      "name": "browser",
+      "domains": ["browser"],
+      "input_types": ["browser_history"],
+      "output_types": ["suspicious_url"],
+      "case_relevance": {
+        "ransomware": 0.4,
+        "apt_intrusion": 0.5,
+        "data_exfiltration": 0.6,
+        "insider_threat": 0.6,
+        "malware_infection": 0.7,
+        "phishing": 0.8,
+        "unknown": 0.5
+      },
+      "dependencies": [],
+      "default_order": 7,
+      "args_template": {
+        "history_file": true
+      },
+      "wrapper_status": "implemented"
     }
   ]
 }

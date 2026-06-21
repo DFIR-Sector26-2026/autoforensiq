@@ -11,6 +11,19 @@ _REPORT_ALL = (
 _MOCK = {"llm": {"mock_mode": True}}
 
 
+def test_affected_systems_excludes_report_headers():
+    # Issue B5: all-caps report headings (INCIDENT, REPORT, TIMELINE) and the
+    # long dashed case id must not be mistaken for hostnames; a real machine name
+    # (carries a digit/hyphen, <= 15 NetBIOS chars) and IPs are kept.
+    report = ("INCIDENT REPORT SUMMARY TIMELINE - case SYN-2026-0615-RANSOM. "
+              "Host WIN-VICTIM-22 at 10.10.14.22 was encrypted.")
+    aff = classify(report, config_override=_MOCK)["affected_systems"]
+    assert "10.10.14.22" in aff
+    assert "WIN-VICTIM-22" in aff
+    for noise in ("INCIDENT", "REPORT", "SUMMARY", "TIMELINE", "SYN-2026-0615-RANSOM"):
+        assert noise not in aff
+
+
 def test_narrative_lists_all_types_without_provided():
     # Baseline: with no provided evidence, the narrative dump is left untouched
     # and no claimed field is added (backward compatible — standalone / GUI).

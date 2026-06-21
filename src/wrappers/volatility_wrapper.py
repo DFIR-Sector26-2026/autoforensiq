@@ -1,4 +1,6 @@
 import os
+import re
+import sys
 import json
 import uuid
 import hashlib
@@ -90,12 +92,172 @@ SUSPICIOUS_RELATIONSHIPS = {
     ("explorer.exe", "powershell.exe"),
 }
 
+# Benign infrastructure domains (issue D3). A raw memory dump is saturated with
+# OS / browser / CDN / certificate / telemetry hostnames; emitting each one as a
+# `suspicious_domain` floods the evidence set (a Windows dump produced ~22k of
+# them) and is the input that made P5 SHAP unscalable. Any extracted host that
+# equals one of these registrable bases — or is a sub-domain of it — is dropped
+# at the source. This is curated benign infrastructure, NOT a way to whitelist
+# real C2: the host-aware reputation layer (ioc_rescorer, issue 4.2) still runs
+# on whatever survives, so a curated bad host is never suppressed here.
+BENIGN_DOMAIN_SUFFIXES = {
+    # Microsoft / Windows OS + telemetry + update + cloud
+    "microsoft.com", "windows.com", "windowsupdate.com", "msftncsi.com",
+    "msftconnecttest.com", "microsoftonline.com", "live.com", "msn.com",
+    "office.com", "office365.com", "outlook.com", "bing.com", "skype.com",
+    "xboxlive.com", "azure.com", "azureedge.net", "msedge.net", "windows.net",
+    "msocdn.com", "s-microsoft.com", "microsoft.net",
+    # Mozilla / Firefox
+    "mozilla.org", "mozilla.com", "mozilla.net", "firefox.com",
+    # Google
+    "google.com", "googleapis.com", "gstatic.com", "googleusercontent.com",
+    "google-analytics.com", "doubleclick.net", "gvt1.com", "gvt2.com",
+    "youtube.com", "ytimg.com", "googlesyndication.com",
+    # Apple
+    "apple.com", "icloud.com", "mzstatic.com",
+    # CDNs
+    "akamai.net", "akamaiedge.net", "akamaihd.net", "edgekey.net",
+    "edgesuite.net", "llnwd.net", "cloudfront.net", "cloudflare.com",
+    "fastly.net", "fbcdn.net", "amazonaws.com",
+    # Certificate authorities / OCSP / CRL
+    "digicert.com", "verisign.com", "globalsign.com", "symantec.com",
+    "entrust.net", "godaddy.com", "sectigo.com", "letsencrypt.org",
+    "comodoca.com", "usertrust.com", "thawte.com", "geotrust.com",
+    # Linux distros (the bundled Ubuntu / casper images)
+    "ubuntu.com", "debian.org", "canonical.com", "archlinux.org",
+    "launchpad.net", "kernel.org",
+    # Standards / schema hosts that litter binaries
+    "w3.org", "oasis-open.org", "ietf.org", "iana.org",
+    # Common vendor hosts
+    "adobe.com", "intel.com", "nvidia.com", "amd.com", "dell.com",
+    "hp.com", "lenovo.com", "java.com", "oracle.com",
+}
+
+
+def _is_benign_domain(host: str) -> bool:
+    """True when `host` is benign infrastructure (issue D3): it equals one of
+    BENIGN_DOMAIN_SUFFIXES or is a sub-domain of one. Host-aware, so a lookalike
+    like "microsoft.com.evil.tld" is NOT treated as benign."""
+    host = host.lower().rstrip(".")
+    for base in BENIGN_DOMAIN_SUFFIXES:
+        if host == base or host.endswith("." + base):
+            return True
+    return False
+
+
+# DOS / Windows console executables whose 8.3 names end in `.com` (issue 3.3-J).
+# In a memory string sweep these basenames (COMMAND.COM, FORMAT.COM, MORE.COM…)
+# are swept as if they were `*.com` domains. They are single-label filenames, so
+# we only suppress them when they appear bare (no sub-domain, no URL/network
+# context); a real "more.com" inside URL grammar is still kept by the anchor tier.
+_DOS_COM_EXECUTABLES = frozenset({
+    "append", "assign", "attrib", "chcp", "chkdsk", "choice", "command",
+    "comp", "country", "ctty", "debug", "deltree", "diskcomp", "diskcopy",
+    "display", "doskey", "edit", "edlin", "exe2bin", "expand", "fastopen",
+    "fc", "fdisk", "find", "format", "graftabl", "graphics", "keyb", "label",
+    "loadfix", "loadhigh", "mem", "mode", "more", "mscdex", "ntdetect",
+    "nlsfunc", "power", "print", "replace", "restore", "scandisk", "setver",
+    "share", "smartdrv", "sort", "subst", "sys", "tree", "undelete",
+    "unformat", "win", "xcopy",
+})
+
+
+def _is_string_fragment_domain(labels: list, tld: str) -> bool:
+    """True when a *bare* (non-anchored) domain token is string-sweep noise rather
+    than a real endpoint (issue 3.3-J). Caller has already confirmed it is not
+    anchored in URL/network grammar. Three fragment classes are caught:
+
+      * DOS/console `.com` executables (COMMAND.COM, MORE.COM, TREE.COM …) — a
+        single-label `.com` whose SLD is a known DOS binary name.
+      * 2-letter ccTLD tokens whose SLD carries a digit and has no hyphen
+        ("f0hht.ht", "dn5t.aw", "qv0uz.sx") — gibberish, not a real host. The
+        no-hyphen guard preserves legitimate digit-bearing C2 like
+        "lonely-bare-c2.ru".
+      * 2-letter ccTLD tokens whose SLD repeats the TLD string >= 2x ("htaht.ht",
+        "hteht.ht") — a repeated-suffix sweep, not a registration. Requiring two
+        occurrences keeps real words that merely end in the ccTLD ("audit.it").
+    """
+    sld = labels[-2]
+
+    if len(labels) == 2 and tld == "com" and sld in _DOS_COM_EXECUTABLES:
+        return True
+
+    if len(labels) == 2 and len(tld) == 2:
+        if "-" not in sld and any(ch.isdigit() for ch in sld):
+            return True
+        if sld.endswith(tld) and sld.count(tld) >= 2:
+            return True
+
+    return False
+
+
+# URL / network-context anchors (issue D3, confidence tier). A domain recovered
+# from a flat string sweep is far more likely to be a real network endpoint when
+# it sits inside URL grammar — a scheme, an HTTP header, a www. prefix, or a
+# trailing path/port/query — than when it is a bare token adrift in prose or
+# binary. We use this only as a CONFIDENCE signal, never a gate: anchored domains
+# rank above bare ones, but bare domains stay in the evidence set, so a
+# bare-but-real C2 survives for the reputation layer to elevate. The anchor set
+# is fixed from URL grammar, not tuned to any one image, so it generalises.
+_URL_SCHEME_RE = re.compile(r"(?:https?|ftp|wss?)://$", re.IGNORECASE)
+_HEADER_ANCHORS = ("host:", "referer:", "referrer:", "location:", "origin:",
+                   "url=", "uri=")
+
+
+def _has_network_context(corpus: str, start: int, end: int, value: str) -> bool:
+    """True when the domain at corpus[start:end] sits inside URL/network grammar:
+    a www. prefix, a preceding scheme (`http://`) or protocol-relative `//`, an
+    HTTP header anchor (`Host:`, `Referer:`, …), or a trailing path/port/query."""
+    if value.startswith("www."):
+        return True
+    pre = corpus[max(0, start - 10):start]
+    if _URL_SCHEME_RE.search(pre) or pre.endswith("//"):
+        return True
+    pre_window = corpus[max(0, start - 16):start].lower()
+    if any(anchor in pre_window for anchor in _HEADER_ANCHORS):
+        return True
+    suffix = corpus[end:end + 2]
+    if suffix[:1] in ("/", "?"):
+        return True
+    if suffix[:1] == ":" and len(suffix) > 1 and suffix[1].isdigit():
+        return True
+    return False
+
 
 class VolatilityWrapper(BaseWrapper):
 
     def __init__(self):
 
         super().__init__("volatility3")
+
+    @staticmethod
+    def _volatility_command_candidates() -> list:
+        """Ordered ways to invoke Volatility3, most-specific first.
+
+        The pipeline is launched as `venv/bin/python autoforensiq.py ...`, so the
+        venv is NOT on PATH; a bare `vol` / `python3 -m volatility3` then fails and
+        the wrapper silently returns 0 items while pre-flight (which probes
+        `./venv/bin/vol`) reports OK (issue D1). We therefore try the venv's own
+        `vol` console script first — resolved from the running interpreter's
+        directory so it works regardless of CWD — then the CWD-relative path
+        pre-flight verifies, before falling back to whatever is on PATH.
+        """
+        candidates = []
+
+        venv_vol = os.path.join(os.path.dirname(sys.executable), "vol")
+        if os.path.exists(venv_vol):
+            candidates.append([venv_vol])
+
+        # CWD-relative shim — the exact path the pre-flight check probes.
+        cwd_vol = os.path.join("venv", "bin", "vol")
+        if os.path.exists(cwd_vol):
+            candidates.append([os.path.join(".", "venv", "bin", "vol")])
+
+        # Fallbacks for installs where Volatility is globally available.
+        candidates.append(["vol"])
+        candidates.append(["python3", "-m", "volatility3"])
+
+        return candidates
 
     def run(self, image_path: str) -> list:
 
@@ -105,10 +267,7 @@ class VolatilityWrapper(BaseWrapper):
 
         all_items = []
 
-        volatility_commands = [
-            ["vol"],
-            ["python3", "-m", "volatility3"]
-        ]
+        volatility_commands = self._volatility_command_candidates()
 
         working_command = None
 
@@ -713,10 +872,14 @@ class VolatilityWrapper(BaseWrapper):
 
             process_name = parts[1]
 
-            cmdline = line
-
             if len(parts) > 2:
                 cmdline = line.split(process_name, 1)[1].strip()
+            else:
+                # Exactly PID + process name, zero arguments (issue 3.4-r): the
+                # command line is just the executable. Store the process name, not
+                # the raw "PID<tab>Process" row (the PID is already in artifact_id),
+                # so the value matches the args-bearing case.
+                cmdline = process_name
 
             severity = (
                 "high"
@@ -1491,10 +1654,17 @@ class VolatilityWrapper(BaseWrapper):
 
             _add_item(addr, "email_address", "medium", 0.85, "email")
 
+        # The path char class excludes the pipe: `|` is not a legal character in
+        # a Windows registry key path, so a `|` means the string sweep has run
+        # past the real key into adjacent memory (e.g.
+        # "...\CurrentControlSet\Services|BatteryLife"). Stopping at the pipe both
+        # keeps the key clean and stops that stray `|` from corrupting the
+        # markdown report table (it was read as a column delimiter, shifting
+        # every later column one to the right).
         registry_patterns = [
-            r"(?:HKLM|HKEY_LOCAL_MACHINE|HKCU|HKEY_CURRENT_USER|HKCR|HKEY_CLASSES_ROOT|HKU|HKEY_USERS)\\[^\s\"']+",
-            r"\\Registry\\Machine\\[^\s\"']+",
-            r"\\Registry\\User\\[^\s\"']+",
+            r"(?:HKLM|HKEY_LOCAL_MACHINE|HKCU|HKEY_CURRENT_USER|HKCR|HKEY_CLASSES_ROOT|HKU|HKEY_USERS)\\[^\s\"'|]+",
+            r"\\Registry\\Machine\\[^\s\"'|]+",
+            r"\\Registry\\User\\[^\s\"'|]+",
         ]
 
         for pattern in registry_patterns:
@@ -1507,6 +1677,15 @@ class VolatilityWrapper(BaseWrapper):
             r"(?<![@\\])\b(?:[a-z0-9-]{1,63}\.)+(?P<tld>[a-z]{2,24})\b",
             flags=re.IGNORECASE,
         )
+
+        # Confidence tier per domain (issue D3): a domain that appears inside URL
+        # / network grammar even once is a likely real endpoint; one that only
+        # ever appears bare is likely string-fragment noise. Track the highest
+        # tier across all occurrences (anchored anywhere ⇒ anchored) so a real C2
+        # whose first textual hit happens to be bare is not mis-demoted.
+        ANCHORED_CONF, BARE_CONF = 0.45, 0.20
+        domain_conf = {}
+        domain_order = []
 
         for match in domain_pattern.finditer(corpus):
 
@@ -1531,14 +1710,51 @@ class VolatilityWrapper(BaseWrapper):
             if tld in ambiguous_code_tlds and len(labels) < 3:
                 continue
 
-            _add_item(value, "suspicious_domain", "medium", 0.80, "dom")
+            # Drop benign OS / browser / CDN / CA / telemetry infrastructure
+            # (issue D3) — these dominate a memory dump and are pure noise. The
+            # reputation rescorer (4.2) still elevates any curated bad host that
+            # survives, so this never suppresses real C2.
+            if _is_benign_domain(value):
+                continue
+
+            anchored = _has_network_context(corpus, match.start(), match.end(), value)
+
+            # Reject short bare ccTLD fragments (issue 3.3-J): a *bare* 2-label
+            # token on a 2-letter ccTLD whose SLD is < 4 chars ("ho.gn", "gc.ie",
+            # "exe.pt", "lp.sx") — and registry public-suffix labels swept from
+            # cert/TLD tables ("gob.ve", "asn.au", "pro.ae") — are string-fragment
+            # noise, not real endpoints. Real short domains have a longer TLD
+            # (ft.com) or an SLD >= 4 (google.de); anything in URL/network grammar
+            # (anchored) is kept regardless.
+            if (not anchored and len(labels) == 2
+                    and len(tld) == 2 and len(labels[-2]) < 4):
+                continue
+
+            # Reject the remaining bare string-fragment classes (issue 3.3-J):
+            # DOS `.com` executables ("more.com", "tree.com") and digit/repeat
+            # ccTLD junk ("f0hht.ht", "htaht.ht", "dn5t.aw"). Anchored hits are
+            # kept; see _is_string_fragment_domain for the exact rules.
+            if not anchored and _is_string_fragment_domain(labels, tld):
+                continue
+
+            conf = ANCHORED_CONF if anchored else BARE_CONF
+            if value not in domain_conf:
+                domain_order.append(value)
+            domain_conf[value] = max(domain_conf.get(value, 0.0), conf)
+
+        # A bare domain from a string sweep is an indicator, not a finding: it is
+        # low-severity by default (issue D3) and only becomes high/critical if the
+        # host-aware reputation layer matches it. Confidence encodes the URL-context
+        # tier so the report layer can rank anchored endpoints above bare tokens
+        # WITHOUT dropping anything — every domain stays available to P5 and the
+        # reputation rescorer.
+        for value in domain_order:
+            _add_item(value, "suspicious_domain", "low", domain_conf[value], "dom")
 
         return items
 
 
 if __name__ == "__main__":
-
-    import sys
 
     if len(sys.argv) < 2:
 

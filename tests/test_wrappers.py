@@ -7,6 +7,177 @@ from src.wrappers.volatility_wrapper import VolatilityWrapper
 
 
 # ─────────────────────────────────────────────────────────────
+# Volatility invocation regression (issue D1 — venv-aware command)
+# ─────────────────────────────────────────────────────────────
+
+def test_volatility_command_candidates_prefers_venv_shim(monkeypatch, tmp_path):
+    # D1: the pipeline runs as `venv/bin/python autoforensiq.py`, so the venv is
+    # not on PATH. The wrapper must try the venv's own `vol` shim (resolved from
+    # the running interpreter's directory) FIRST, not a bare `vol` that won't
+    # resolve. We fake an interpreter whose sibling `vol` exists.
+    import sys as _sys
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python"
+    fake_python.write_text("")
+    fake_vol = fake_bin / "vol"
+    fake_vol.write_text("")
+
+    monkeypatch.setattr(_sys, "executable", str(fake_python))
+    # Run from a dir with no ./venv so only the absolute shim is contributed.
+    monkeypatch.chdir(tmp_path)
+
+    candidates = VolatilityWrapper._volatility_command_candidates()
+
+    # The venv shim (absolute) is first and points at the interpreter's sibling.
+    assert candidates[0] == [str(fake_vol)]
+    # Bare-PATH fallbacks remain available but come after the venv shim.
+    assert ["vol"] in candidates
+    assert candidates.index([str(fake_vol)]) < candidates.index(["vol"])
+
+
+def test_volatility_command_candidates_falls_back_without_venv(monkeypatch, tmp_path):
+    # With no venv shim next to the interpreter and no ./venv, only the global
+    # fallbacks remain — but the list is never empty (the wrapper still tries).
+    import sys as _sys
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python"
+    fake_python.write_text("")  # no sibling `vol`
+
+    monkeypatch.setattr(_sys, "executable", str(fake_python))
+    monkeypatch.chdir(tmp_path)
+
+    candidates = VolatilityWrapper._volatility_command_candidates()
+    assert ["vol"] in candidates
+    assert ["python3", "-m", "volatility3"] in candidates
+    # No spurious venv shim was added.
+    assert all(c not in ([str(fake_bin / "vol")],) for c in candidates)
+
+
+# ─────────────────────────────────────────────────────────────
+# TSK / fls partitioned-disk regression (issue D2 — mmls offsets)
+# ─────────────────────────────────────────────────────────────
+
+# Real mmls output from the Windows Server 2022 E01 (DOS partition table,
+# NTFS at sector 2048 & 206848, plus an unknown-type slot).
+MMLS_WINSERVER = """DOS Partition Table
+Offset Sector: 0
+Units are in 512-byte sectors
+
+      Slot      Start        End          Length       Description
+000:  Meta      0000000000   0000000000   0000000001   Primary Table (#0)
+001:  -------   0000000000   0000002047   0000002048   Unallocated
+002:  000:000   0000002048   0000206847   0000204800   NTFS / exFAT (0x07)
+003:  000:001   0000206848   0103583743   0103376896   NTFS / exFAT (0x07)
+004:  000:002   0103583744   0104853503   0001269760   Unknown Type (0x27)
+005:  -------   0104853504   0104857599   0000004096   Unallocated
+"""
+
+# A single suspicious file in fls mactime-body format (pipe-delimited).
+FLS_BODY = "0|/Windows/Temp/evil.exe|0|0|0|0|512|0|0|0|0\n"
+
+
+def test_parse_fls_skips_directory_nodes():
+    # Issue B3: a directory whose path matches SUSPICIOUS_DIRS (mode "d/d...") is
+    # not a file artifact — only the files inside it are flagged on their own rows.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    body = "\n".join([
+        "0|/Windows/Temp|438|d/drwxrwxrwx|0|0|512|0|0|0|0",            # dir -> skipped
+        "0|/Windows/Temp/taskdl.exe|453|r/rrwxrwxrwx|0|0|42|0|0|0|0",  # file -> kept
+    ])
+    values = [i["value"] for i in TSKWrapper()._parse_fls_lines(body)]
+    assert any("taskdl.exe" in v for v in values)
+    assert not any(v.rstrip().endswith("/Windows/Temp") for v in values)
+
+
+def test_parse_cmdline_zero_args_stores_process_name():
+    # Issue 3.4-r: a process with exactly PID + name and zero arguments must store
+    # just the process name as `value`, not the raw "PID<tab>Process" row. The
+    # args-bearing rows are unchanged.
+    wrapper = VolatilityWrapper()
+    lines = [
+        "PID\tProcess\tArgs",
+        "1940\ttasksche.exe",                              # zero args
+        "1024\tsvchost.exe\tC:\\Windows\\svchost.exe -k netsvcs",  # with args
+    ]
+    by_id = {i["artifact_id"]: i for i in wrapper._parse_cmdline(lines)}
+    assert by_id["cmdline_1940"]["value"] == "tasksche.exe"
+    assert "1940" not in by_id["cmdline_1940"]["value"]
+    assert by_id["cmdline_1024"]["value"] == "C:\\Windows\\svchost.exe -k netsvcs"
+
+
+def test_tsk_enumerate_fs_offsets_parses_partitions(monkeypatch):
+    # D2: mmls must yield the filesystem sector offsets (2048, 206848, ...),
+    # skipping the Meta row and unallocated gaps, so fls can run with -o.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    w = TSKWrapper()
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: (MMLS_WINSERVER, "", 0))
+
+    offsets = w._enumerate_fs_offsets("/case/winserver.E01")
+    assert offsets == [2048, 206848, 103583744]
+
+
+def test_tsk_enumerate_fs_offsets_bare_filesystem(monkeypatch):
+    # A bare filesystem has no partition table — mmls exits non-zero, and the
+    # enumerator returns [] so the caller falls back to an offset-less fls.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    w = TSKWrapper()
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: ("", "Cannot determine", 1))
+
+    assert w._enumerate_fs_offsets("/case/ubuntu.E01") == []
+
+
+def test_tsk_run_fls_partitioned_uses_offset(monkeypatch):
+    # On a partitioned image, fls must be invoked WITH `-o <offset>`; a partition
+    # that errors (the corrupt/foreign slot) is skipped, not fatal.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    w = TSKWrapper()
+    calls = []
+
+    def fake(command, *a, **k):
+        calls.append(command)
+        if command[0] == "mmls":
+            return (MMLS_WINSERVER, "", 0)
+        # fls: first offset succeeds, the rest error out.
+        off = command[command.index("-o") + 1] if "-o" in command else None
+        if off == "2048":
+            return (FLS_BODY, "", 0)
+        return ("", "Error reading image file", 1)
+
+    monkeypatch.setattr(w, "run_command", fake)
+    output, items = w._run_fls("/case/winserver.E01")
+
+    fls_calls = [c for c in calls if c and c[0] == "fls"]
+    assert all("-o" in c for c in fls_calls)           # every fls used an offset
+    assert ["fls", "-o", "2048", "-r", "-m", "/", "/case/winserver.E01"] in calls
+    assert len(items) == 1                              # only the readable slot
+    assert "evil.exe" in items[0]["value"]
+
+
+def test_tsk_run_fls_bare_filesystem_no_offset(monkeypatch):
+    # On a bare filesystem (no partition table) fls runs WITHOUT `-o`, preserving
+    # the prior working behavior for images like the Ubuntu casper E01.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    w = TSKWrapper()
+    calls = []
+
+    def fake(command, *a, **k):
+        calls.append(command)
+        if command[0] == "mmls":
+            return ("", "Cannot determine", 1)       # no partition table
+        return (FLS_BODY, "", 0)
+
+    monkeypatch.setattr(w, "run_command", fake)
+    output, items = w._run_fls("/case/ubuntu.E01")
+
+    fls_calls = [c for c in calls if c and c[0] == "fls"]
+    assert len(fls_calls) == 1
+    assert "-o" not in fls_calls[0]                     # offset-less fallback
+    assert len(items) == 1
+
+
+# ─────────────────────────────────────────────────────────────
 # Volatility parser regression tests (issues 3.1 / 3.3)
 # ─────────────────────────────────────────────────────────────
 
@@ -357,6 +528,59 @@ def test_extract_strings_domain_tld_recall_and_denoise():
         assert noise not in domains
 
 
+def test_extract_strings_drops_short_cctld_fragments():
+    # Regression for 3.3-J: bare 2-label tokens on a 2-letter ccTLD with a < 4
+    # char SLD are string-fragment / public-suffix noise, not endpoints. They
+    # must drop when bare but survive when anchored in URL/network grammar, and
+    # genuine short domains (3-letter TLD, or SLD >= 4) must be kept.
+    wrapper = VolatilityWrapper()
+    corpus = "\n".join([
+        "ho.gn", "gc.ie", "ht.ht", "exe.pt", "lp.sx",   # fragments -> dropped
+        "gob.ve", "asn.au", "pro.ae",                    # public-suffix labels -> dropped
+        "ft.com",                                        # 3-letter TLD -> kept
+        "google.de",                                     # SLD >= 4 -> kept
+        "evil-c2.io",                                    # SLD >= 4 ccTLD -> kept
+        "http://ai.bj/login",                            # anchored fragment -> kept
+    ])
+    domains = {
+        it["value"] for it in wrapper._extract_strings(corpus)
+        if it["evidence_type"] == "suspicious_domain"
+    }
+    for frag in ("ho.gn", "gc.ie", "ht.ht", "exe.pt", "lp.sx", "gob.ve", "asn.au", "pro.ae"):
+        assert frag not in domains, frag
+    for keep in ("ft.com", "google.de", "evil-c2.io", "ai.bj"):
+        assert keep in domains, keep
+
+
+def test_extract_strings_drops_dos_exe_and_digit_fragments():
+    # Regression for 3.3-J residuals: DOS/console `.com` executables swept from a
+    # memory image (COMMAND.COM, MORE.COM, TREE.COM…) and digit/repeat ccTLD junk
+    # ("f0hht.ht", "htaht.ht", "dn5t.aw") are string fragments, not endpoints.
+    # They drop when bare but survive when anchored in URL grammar, and real
+    # domains that merely look short stay.
+    wrapper = VolatilityWrapper()
+    corpus = "\n".join([
+        "command.com", "format.com", "more.com", "tree.com", "edit.com",  # DOS exes
+        "f0hht.ht", "ltchht8ht.ht", "dn5t.aw", "qv0uz.sx",                 # digit junk
+        "htaht.ht", "hteht.ht",                                           # repeat-suffix junk
+        "evilcorp.com",                                                  # real .com (non-DOS) -> kept
+        "taxonomy.ht",                                                   # SLD no digit/repeat -> kept
+        "audit.it",                                                      # word ending in ccTLD (one occurrence) -> kept
+        "lonely-bare-c2.ru",                                             # hyphenated digit C2 -> kept
+        "http://more.com/payload",                                       # anchored -> kept
+    ])
+    domains = {
+        it["value"] for it in wrapper._extract_strings(corpus)
+        if it["evidence_type"] == "suspicious_domain"
+    }
+    for frag in ("command.com", "format.com", "tree.com", "edit.com",
+                 "f0hht.ht", "ltchht8ht.ht", "dn5t.aw", "qv0uz.sx",
+                 "htaht.ht", "hteht.ht"):
+        assert frag not in domains, frag
+    for keep in ("evilcorp.com", "taxonomy.ht", "audit.it", "lonely-bare-c2.ru", "more.com"):
+        assert keep in domains, keep  # more.com kept because anchored once
+
+
 def test_extract_strings_denoises_prefetch_and_email():
     # Prefetch filenames (.pf) and gibberish .nc must not leak as domains, and
     # the email regex must reject filename/binary noise while keeping real ones.
@@ -477,3 +701,172 @@ def test_map_evidence_files_separates_types():
     assert mapping["memory_dump"] == ["/c/mem.raw"]
     assert mapping["pcap"] == ["/c/cap.pcap"]
     assert mapping["disk_image"] == ["/c/disk.e01"]
+
+
+# ─────────────────────────────────────────────────────────────
+# suspicious_domain extraction regression (issue D3 — allowlist + downgrade)
+# ─────────────────────────────────────────────────────────────
+
+def test_extract_strings_drops_benign_infrastructure_domains():
+    # D3: a memory dump is saturated with OS/browser/CDN/CA hostnames; emitting
+    # each as a suspicious_domain floods the evidence set (~22k on win10ctf) and
+    # is what made P5 SHAP unscalable. Benign infra must be dropped at source.
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    corpus = "\n".join([
+        "www.microsoft.com", "ocsp.digicert.com", "fonts.gstatic.com",
+        "ubuntu.com", "settings-win.data.microsoft.com",
+    ])
+    items = VolatilityWrapper()._extract_strings(corpus)
+    domains = [i for i in items if i["evidence_type"] == "suspicious_domain"]
+    assert domains == [], f"benign infra leaked: {[d['value'] for d in domains]}"
+
+
+def test_extract_strings_downgrades_generic_domains_to_low():
+    # D3: a bare domain from a string sweep is an indicator, not a finding — it
+    # is low severity until the reputation layer (4.2) elevates it. (Was medium.)
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    items = VolatilityWrapper()._extract_strings("beacon to evil-c2-panel.xyz now")
+    doms = [i for i in items if i["evidence_type"] == "suspicious_domain"]
+    assert len(doms) == 1
+    assert doms[0]["value"] == "evil-c2-panel.xyz"
+    assert doms[0]["severity"] == "low"
+
+
+def test_extract_strings_keeps_onion_high():
+    # D3 must not weaken genuine indicators: .onion hidden services stay high.
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    items = VolatilityWrapper()._extract_strings(
+        "ransom abcdef1234567890abcd.onion site"
+    )
+    onion = [i for i in items if i["value"].endswith(".onion")]
+    assert len(onion) == 1
+    assert onion[0]["severity"] == "high"
+    assert onion[0]["evidence_type"] == "suspicious_domain"
+
+
+def test_is_benign_domain_is_host_aware():
+    # A lookalike subdomain ("microsoft.com.evil.ru") must NOT be whitelisted.
+    from src.wrappers.volatility_wrapper import _is_benign_domain
+    assert _is_benign_domain("www.microsoft.com") is True
+    assert _is_benign_domain("microsoft.com") is True
+    assert _is_benign_domain("microsoft.com.evil.ru") is False
+    assert _is_benign_domain("evil-c2-panel.xyz") is False
+
+
+def test_extract_strings_registry_key_stops_at_pipe():
+    # A pipe is not legal in a registry key path; when the string sweep hits one
+    # it has run past the real key into adjacent memory ("...\Services|BatteryLife").
+    # The captured key must stop at the pipe (clean key, and no stray `|` to
+    # corrupt the markdown report table by shifting columns right).
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    corpus = (
+        "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services|BatteryLife\n"
+        "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\bthserv\n"
+    )
+    keys = [i["value"] for i in VolatilityWrapper()._extract_strings(corpus)
+            if i["evidence_type"] == "registry_key"]
+    assert "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services" in keys
+    assert "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\bthserv" in keys
+    assert all("|" not in k for k in keys), f"pipe leaked into a key: {keys}"
+
+
+# ─────────────────────────────────────────────────────────────
+# Domain confidence-tier regression (issue D3 — URL context, non-destructive)
+# ─────────────────────────────────────────────────────────────
+
+def test_extract_strings_anchored_domains_get_higher_confidence():
+    # A domain inside URL/network grammar (scheme, Host:, www., :port, path) is a
+    # likely real endpoint and ranks above a bare token — but BOTH are kept.
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    corpus = "\n".join([
+        "GET http://callback-host.xyz/gate.php",   # scheme + path
+        "Host: beacon.example.to",                 # header anchor
+        "www.tracked.io here",                     # www. prefix
+        "endpoint api.svc.net:8443 ready",         # :port
+        "loose prose mentions across.com somewhere",  # bare
+    ])
+    conf = {i["value"]: i["confidence"] for i in VolatilityWrapper()._extract_strings(corpus)
+            if i["evidence_type"] == "suspicious_domain"}
+    assert conf.get("callback-host.xyz") == 0.45
+    assert conf.get("beacon.example.to") == 0.45
+    assert conf.get("www.tracked.io") == 0.45
+    assert conf.get("api.svc.net") == 0.45
+    assert conf.get("across.com") == 0.20          # bare token demoted, NOT dropped
+
+
+def test_extract_strings_bare_domain_is_kept_not_dropped():
+    # Non-destructive: a bare domain still appears in the evidence set (so the
+    # reputation layer can elevate it), just at the lower confidence tier.
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    items = VolatilityWrapper()._extract_strings("config c2 = lonely-bare-c2.ru ;")
+    sd = [i for i in items if i["evidence_type"] == "suspicious_domain"]
+    assert [i["value"] for i in sd] == ["lonely-bare-c2.ru"]
+    assert sd[0]["confidence"] == 0.20
+    assert sd[0]["severity"] == "low"
+
+
+def test_extract_strings_anchored_anywhere_wins():
+    # If a domain appears bare once and anchored once, it takes the anchored tier
+    # so a real C2 whose first textual hit is bare is not mis-demoted.
+    from src.wrappers.volatility_wrapper import VolatilityWrapper
+    corpus = "seen bare dual-host.io first, later GET https://dual-host.io/x"
+    conf = {i["value"]: i["confidence"] for i in VolatilityWrapper()._extract_strings(corpus)
+            if i["evidence_type"] == "suspicious_domain"}
+    assert conf.get("dual-host.io") == 0.45
+
+
+# ─────────────────────────────────────────────────────────────
+# Evidence routing for .dmg / .csv (issue D4 — previously dropped)
+# ─────────────────────────────────────────────────────────────
+
+def test_map_evidence_files_routes_dmg_to_disk_image():
+    import autoforensiq
+    mapping = autoforensiq._map_evidence_files(["/case/macbook.dmg"])
+    assert mapping.get("disk_image") == ["/case/macbook.dmg"]
+
+
+def test_map_evidence_files_routes_email_csv_when_named_like_mail():
+    import autoforensiq
+    mapping = autoforensiq._map_evidence_files(["/case/emails.csv", "/case/spam_corpus.csv"])
+    assert mapping.get("email") == ["/case/emails.csv", "/case/spam_corpus.csv"]
+
+
+def test_map_evidence_files_does_not_route_generic_csv_to_email():
+    # A bare data.csv (e.g. a process export) must NOT be keyword-scanned as a
+    # phishing archive — it falls through unrouted rather than mis-classified.
+    import autoforensiq
+    mapping = autoforensiq._map_evidence_files(["/case/process_dump.csv"])
+    assert "email" not in mapping
+
+
+# ─────────────────────────────────────────────────────────────
+# Plaso binary resolution (issue D5 — venv-aware, mirrors D1)
+# ─────────────────────────────────────────────────────────────
+
+def test_plaso_resolve_cmd_prefers_venv_bin(monkeypatch, tmp_path):
+    # D5: plaso installed via venv/bin/pip lands its log2timeline.py in venv/bin,
+    # which is NOT on PATH under `venv/bin/python autoforensiq.py`. The resolver
+    # must find it via the interpreter's own bin dir, not just shutil.which.
+    from src.wrappers import plaso_wrapper
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "python3").write_text("")
+    shim = fake_bin / "log2timeline.py"
+    shim.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(plaso_wrapper.sys, "executable", str(fake_bin / "python3"))
+    monkeypatch.setattr(plaso_wrapper.shutil, "which", lambda n: None)
+    assert plaso_wrapper._resolve_cmd("log2timeline.py", "log2timeline") == str(shim)
+
+
+def test_plaso_resolve_cmd_falls_back_to_path_then_bare(monkeypatch, tmp_path):
+    from src.wrappers import plaso_wrapper
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    monkeypatch.setattr(plaso_wrapper.sys, "executable", str(fake_bin / "python3"))
+    # Not in venv/bin and not on PATH -> bare fallback name (fails loudly later).
+    monkeypatch.setattr(plaso_wrapper.shutil, "which", lambda n: None)
+    assert plaso_wrapper._resolve_cmd("log2timeline.py", "log2timeline") == "log2timeline"
+    # On PATH -> use the PATH hit.
+    monkeypatch.setattr(plaso_wrapper.shutil, "which",
+                        lambda n: "/usr/bin/log2timeline.py" if n == "log2timeline.py" else None)
+    assert plaso_wrapper._resolve_cmd("log2timeline.py", "log2timeline") == "/usr/bin/log2timeline.py"

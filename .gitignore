@@ -1,5 +1,6 @@
 venv/
 __pycache__/
+node_modules/
 output/
 *.pyc
 *.dmp
@@ -11,3 +12,4 @@ output/
 data/test_cases/
 dashboard/node_modules/
 .venv/
+log2timeline-*.log.gz

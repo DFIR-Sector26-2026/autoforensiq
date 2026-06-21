@@ -24,6 +24,10 @@ except ImportError:
 
 from src.ml.feature_engineering import FEATURE_NAMES
 
+# SHAP background cost scales with the number of background rows. A small,
+# summarized background is the SHAP-recommended practice, so cap it (issue D3).
+_MAX_SHAP_BACKGROUND = 64
+
 
 # ── Indicator templates ───────────────────────────────────────────────────────
 # Each entry: (feature_index, weight, short_label, analyst_sentence)
@@ -181,14 +185,34 @@ def compute_shap_explanations(
         # shap not installed — fall back to empty top_factors; rule-based reason still works
         return [[] for _ in range(len(X_evidence))]
 
-    explainer = shap.PermutationExplainer(score_fn, X_baseline, max_evals=100)
-    shap_result = explainer(X_evidence)
+    # Cap the background deterministically (issue D3): PermutationExplainer cost
+    # scales with background size, so a large baseline makes every eval slow.
+    if len(X_baseline) > _MAX_SHAP_BACKGROUND:
+        rng = np.random.default_rng(0)
+        sampled = rng.choice(len(X_baseline), size=_MAX_SHAP_BACKGROUND, replace=False)
+        background = X_baseline[sampled]
+    else:
+        background = X_baseline
 
-    all_explanations = []
+    # The feature space is a handful of discrete features, so thousands of
+    # evidence rows collapse to a few dozen DISTINCT vectors. A SHAP attribution
+    # is a pure function of (row, background, model), so compute it once per
+    # unique row and scatter the result back to every row that shares it. This is
+    # exact — identical SHAP values — but turns one explainer eval per item
+    # (~23k on win10ctf, ~1.5h) into one per unique vector (issue D3).
+    unique_rows, inverse = np.unique(X_evidence, axis=0, return_inverse=True)
+    # numpy has returned `inverse` with varying shapes across versions; flatten
+    # so it is always a 1-D row→unique-index map.
+    inverse = np.asarray(inverse).reshape(-1)
+
+    explainer = shap.PermutationExplainer(score_fn, background, max_evals=100)
+    shap_result = explainer(unique_rows)
+
+    unique_explanations = []
 
     for row_idx, shap_row in enumerate(shap_result.values):
         ranked = sorted(
-            zip(FEATURE_NAMES, X_evidence[row_idx], shap_row),
+            zip(FEATURE_NAMES, unique_rows[row_idx], shap_row),
             key=lambda item: abs(item[2]),
             reverse=True,
         )[:max_features]
@@ -213,9 +237,10 @@ def compute_shap_explanations(
                 ),
             })
 
-        all_explanations.append(top_factors)
+        unique_explanations.append(top_factors)
 
-    return all_explanations
+    # Scatter the per-unique-row explanations back into original evidence order.
+    return [unique_explanations[i] for i in inverse]
 
 
 def compute_baseline_comparisons(

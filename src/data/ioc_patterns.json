@@ -14,6 +14,13 @@
       "category": "ransomware_marker"
     },
     {
+      "id": "wannacry_payload",
+      "_comment": "WannaCry unpacked component/resource files (c/s/t/u/b/r.wnry, m_*.wnry language packs). Strong corroborating evidence, but not the dropper/decryptor itself, so floored at high (not critical). '.wnry' is distinct from '.wncry'/'.wcry' (handled by wannacry_decryptor), so no overlap.",
+      "match": [".wnry"],
+      "severity": "high",
+      "category": "ransomware_marker"
+    },
+    {
       "id": "wannacry_killswitch",
       "_comment": "Canonical WannaCry killswitch/sinkhole domain. Recovered as a string IOC at medium; cataloguing it gives it an ioc_match so it becomes a Key Finding and is escalated.",
       "match": ["iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea"],
@@ -77,6 +84,12 @@
       "category": "code_injection"
     }
   ],
+  "bad_hosts": {
+    "_comment": "Domain / IP reputation list (issue 4.2). Matched HOST-AWARE — a domain matches only when an extracted host equals it or is a subdomain of it; an IP matches only on an exact dotted-quad token — against any item's value (so it catches dns_query / http_request / network_connection AND memory-recovered suspicious_domain). Severity is a floor (boost-only). This is curated named threat-intel, the same curation philosophy as the named-malware / wallet entries above; feed additional per-case known-bad indicators via case_context.known_bad_hosts (domains or IPs). Seed entries are the confirmed C2 of the bundled macOS infostealer sample: rapid-craft567.com is the low-entropy READABLE C2 domain that the 3.2 DNS entropy gate deliberately leaves for reputation matching here, and 165.245.215.18 is its hosting IP (ties the otherwise-low TCP connections + /contact beacons to the same infrastructure).",
+    "domains": ["rapid-craft567.com"],
+    "ips": ["165.245.215.18"],
+    "severity": "high"
+  },
   "c2_ports": {
     "ports": [4444, 4445, 1337, 31337, 8888, 9999, 6667, 6668, 6669],
     "severity": "critical"

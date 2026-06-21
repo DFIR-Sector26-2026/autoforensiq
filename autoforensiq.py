@@ -482,8 +482,8 @@ def _map_evidence_files(paths: list):
         elif ext in [".pcap", ".pcapng"]:
             _add("pcap", path)
 
-        # DISK IMAGE
-        elif ext in [".img", ".dd", ".e01"]:
+        # DISK IMAGE  (.dmg = Apple Disk Image — issue D4)
+        elif ext in [".img", ".dd", ".e01", ".dmg"]:
             _add("disk_image", path)
 
         # REGISTRY
@@ -495,8 +495,15 @@ def _map_evidence_files(paths: list):
         ):
             _add("registry_hive", path)
 
-        # EMAIL
-        elif ext in [".eml", ".msg"]:
+        # EMAIL  (issue D4: a .csv mailbox/spam export was previously dropped.
+        # .csv is ambiguous — route it to the email analyzer only when the
+        # filename signals mail, so a bare data.csv isn't keyword-scanned as a
+        # phishing archive. The email wrapper is text-based, so it parses any of
+        # these formats.)
+        elif ext in [".eml", ".msg"] or (
+            ext == ".csv"
+            and any(h in lower for h in ("email", "mail", "inbox", "phish", "spam"))
+        ):
             _add("email", path)
 
         # BROWSER

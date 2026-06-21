@@ -513,3 +513,59 @@ def test_build_ioc_report_truncates_long_xai_on_word_boundary():
     xai_cell = xai_row.split("|")[-2].strip()
     assert xai_cell.endswith("…")
     assert long_note.startswith(xai_cell[:-1])   # clean word-boundary prefix
+
+
+# ─────────────────────────────────────────────────────────────
+# IOC report presentation filter (issue D3 — surface elevated, fold low mass)
+# ─────────────────────────────────────────────────────────────
+
+def test_ioc_report_surfaces_elevated_low_domain():
+    # A domain emitted `low` by the wrapper but elevated to Critical downstream
+    # (P5 / reputation, via severity_lookup) must appear in the main table; an
+    # un-elevated low domain must be folded out of it (but stay in the doc).
+    items = [
+        {"evidence_type": "suspicious_domain", "source_tool": "volatility3",
+         "value": "beaconads.com", "severity": "low", "confidence": 0.45,
+         "artifact_id": "dom_1"},
+        {"evidence_type": "suspicious_domain", "source_tool": "volatility3",
+         "value": "across.com", "severity": "low", "confidence": 0.20,
+         "artifact_id": "dom_2"},
+    ]
+    md = _build_ioc_report(items, severity_lookup={"dom_1": "critical"})
+    main = md.split("<details>")[0]
+    assert "`beaconads.com`" in main          # elevated -> surfaced
+    assert "`across.com`" not in main         # un-elevated low -> folded out of table
+    assert "`across.com`" in md               # ...but NOT dropped (folded sample)
+    assert "<details>" in md
+
+
+def test_ioc_report_folds_low_severity_mass_with_cap():
+    # The low-severity string-sweep mass is folded into a capped sample, not
+    # rendered as hundreds of rows — and the full count is reported.
+    items = [
+        {"evidence_type": "suspicious_domain", "source_tool": "volatility3",
+         "value": f"noise{i}.com", "severity": "low", "confidence": 0.20,
+         "artifact_id": f"dom_{i}"}
+        for i in range(120)
+    ]
+    md = _build_ioc_report(items)
+    assert "120" in md                                   # full folded count reported
+    assert "<details>" in md
+    sample_row_count = md.split("<details>", 1)[1].count("\n| `")
+    assert sample_row_count <= 50                        # sample is capped
+
+
+def test_ioc_report_folded_sample_orders_anchored_before_bare():
+    # Within the folded sample, anchored (URL-context, conf>=0.45) domains rank
+    # above bare ones, and the tier is labelled.
+    items = [
+        {"evidence_type": "suspicious_domain", "source_tool": "volatility3",
+         "value": "bare-token.ru", "severity": "low", "confidence": 0.20,
+         "artifact_id": "d1"},
+        {"evidence_type": "suspicious_domain", "source_tool": "volatility3",
+         "value": "anchored-host.io", "severity": "low", "confidence": 0.45,
+         "artifact_id": "d2"},
+    ]
+    fold = _build_ioc_report(items).split("<details>", 1)[1]
+    assert fold.index("anchored-host.io") < fold.index("bare-token.ru")
+    assert "anchored" in fold and "bare" in fold

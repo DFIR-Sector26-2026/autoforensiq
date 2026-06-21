@@ -124,6 +124,53 @@ def deduplicate_items(all_items: list[dict]) -> tuple[list[dict], int]:
     return deduplicated, removed_count
 
 
+# A process's OWN pid in a value like "svchost.exe (PID:880 PPID:1944)" or
+# "svchost.exe (PID 880, PPID 1944)" — the negative lookbehind skips the P of
+# PPID so the parent pid is never mistaken for the process pid.
+_OWN_PID_RE = re.compile(r"(?<!P)PID[\s:]+(\d+)", re.IGNORECASE)
+
+
+def _own_process_pid(item: dict) -> str | None:
+    """The process's own PID, from the value (PID, not PPID) or, failing that,
+    a MemProcFS `memprocfs_proc_<pid>` artifact_id."""
+    match = _OWN_PID_RE.search(str(item.get("value", "")))
+    if match:
+        return match.group(1)
+    aid = re.search(r"memprocfs_proc_(\d+)", str(item.get("artifact_id", "")))
+    return aid.group(1) if aid else None
+
+
+def reconcile_memprocfs_processes(items: list[dict]) -> tuple[list[dict], int]:
+    """Drop MemProcFS process items that duplicate a Volatility one by PID (D6).
+
+    MemProcFS emits an unanalysed flat process inventory at medium severity; when
+    Volatility has already produced a richer, properly-scored `process` list for
+    the same PIDs, those copies are pure noise (one medium item per benign
+    process). Suppress a `memprocfs_process` only when Volatility covered its PID
+    — PIDs unique to MemProcFS are kept, and if Volatility produced no process
+    list at all, MemProcFS is left intact as the fallback.
+    """
+    vol_pids = {
+        _own_process_pid(i)
+        for i in items
+        if i.get("evidence_type") == "process"
+        and str(i.get("source_tool", "")).lower() == "volatility3"
+    }
+    vol_pids.discard(None)
+    if not vol_pids:
+        return items, 0
+
+    kept, removed = [], 0
+    for item in items:
+        if item.get("evidence_type") == "memprocfs_process":
+            pid = _own_process_pid(item)
+            if pid is not None and pid in vol_pids:
+                removed += 1
+                continue
+        kept.append(item)
+    return kept, removed
+
+
 def sort_evidence_items(items: list[dict]) -> list[dict]:
     """
     Sort evidence items by:
@@ -178,6 +225,35 @@ BYTES_RE = re.compile(r"(\d[\d,]*)\s+bytes", re.IGNORECASE)
 DESTINATION_RE = re.compile(
     r"(?P<dst>(?:\d{1,3}\.){3}\d{1,3})(?::(?P<port>\d+))?\s*(?:\(|$)"
 )
+# A hostname / domain token: dot-separated labels ending in an alphabetic TLD
+# (≥2). Mirrors `ioc_rescorer._HOST_TOKEN_RE`; kept local to avoid coupling the
+# aggregator to the rescorer. The alpha-TLD requirement means an IPv4 literal is
+# never mis-extracted as a host (issue B1 / P4-DOMAIN).
+HOST_RE = re.compile(
+    r"\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\b", re.IGNORECASE
+)
+# Only these evidence types carry a hostname we want to correlate on. Gating by
+# type keeps file/process/registry values (which contain dotted filenames) out
+# of the domain signal; the file-extension guard below is a second line.
+_DOMAIN_BEARING_TYPES = {"dns_query", "http_request", "suspicious_domain"}
+# Final-label tokens that look like a host but are really a filename — the host
+# regex would otherwise grab "tasksche.exe" out of an http path like
+# "host.xyz/tasksche.exe".
+_NON_DOMAIN_TLDS = {
+    "exe", "dll", "sys", "bin", "dat", "tmp", "pf", "res", "pky",
+    "bmp", "png", "jpg", "jpeg", "gif", "ico", "txt", "log", "ini",
+    "json", "js", "doc", "docx", "xls", "pdf", "zip", "rar",
+    "wnry", "wncry", "wcry",
+}
+# Evidence types that all describe the *same process's identity* from a single
+# volatility process enumeration (issue 4.7). A PID having a process row AND its
+# command line AND its tree position is the same fact three ways, not corroboration
+# — every process trivially produces these, so a same_pid group confined to them
+# (System PID 4, svchosts, lsass) is near-zero signal. A same_pid finding earns
+# its keep only when the PID *also* appears in evidence that adds information
+# (injected_code, a network connection, a touched file) or across >= 2 tools.
+_PROCESS_IDENTITY_TYPES = {"process", "commandline", "process_tree"}
+
 EXFIL_BYTES_THRESHOLD = 1_000_000
 EXFIL_TIME_WINDOW_SECONDS = 24 * 60 * 60
 
@@ -266,6 +342,31 @@ def _extract_paths(text: str) -> list[str]:
     return deduplicated
 
 
+def _normalize_host(host: str) -> str:
+    """Lowercase, strip a trailing dot and a leading `www.` so a bare host and
+    its `www.`-prefixed form collapse to one key (issue B1: the pcap saw the
+    killswitch as `iuqerf…com`, memory as `www.iuqerf…com`)."""
+    host = host.strip().strip(".").lower()
+    if host.startswith("www."):
+        host = host[len("www."):]
+    return host
+
+
+def _extract_domains(text: str) -> list[str]:
+    domains = []
+    seen = set()
+    for match in HOST_RE.findall(text):
+        normalized = _normalize_host(match)
+        if not normalized or "." not in normalized:
+            continue
+        if normalized.rsplit(".", 1)[-1] in _NON_DOMAIN_TLDS:
+            continue
+        if normalized not in seen:
+            seen.add(normalized)
+            domains.append(normalized)
+    return domains
+
+
 def _extract_bytes(text: str) -> int:
     match = BYTES_RE.search(text)
     if not match:
@@ -327,6 +428,13 @@ def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
             file_keys.append(file_name.lower())
     file_keys = sorted(set(file_keys))
 
+    # Domain correlation signal (issue B1): only for domain-bearing types, read
+    # from the clean value so artifact-id fragments don't leak in.
+    if evidence_type in _DOMAIN_BEARING_TYPES:
+        domains = _extract_domains(normalized_value)
+    else:
+        domains = []
+
     return {
         "artifact_id": artifact_id,
         "source_tool": source_tool,
@@ -341,6 +449,7 @@ def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
         "ips": ips,
         "paths": paths,
         "file_keys": file_keys,
+        "domains": domains,
         "bytes_transferred": _extract_bytes(combined),
         "destination_ip": destination_ip,
         "destination_port": destination_port,
@@ -423,7 +532,12 @@ def _make_finding(
     return output
 
 
-def _group_items_by_signal(items: list[dict], signals: dict[str, dict[str, Any]], key_name: str) -> list[dict[str, Any]]:
+def _group_items_by_signal(
+    items: list[dict],
+    signals: dict[str, dict[str, Any]],
+    key_name: str,
+    require_cross_source: bool = False,
+) -> list[dict[str, Any]]:
     grouped = defaultdict(list)
     for item in items:
         signal = signals.get(item.get("artifact_id", ""), {})
@@ -438,6 +552,27 @@ def _group_items_by_signal(items: list[dict], signals: dict[str, dict[str, Any]]
     for key, related_items in grouped.items():
         if len(related_items) < 2:
             continue
+        # The domain signal only earns its keep as a *cross-artifact* link; a
+        # group confined to one tool and one evidence type (e.g. www/non-www
+        # copies of the same benign host in a single memory image) is the
+        # near-zero-signal noise issue 4.7 flags, so skip it.
+        if require_cross_source:
+            tools = {i.get("source_tool", "") for i in related_items}
+            types = {i.get("evidence_type", "") for i in related_items}
+            if len(tools) < 2 and len(types) < 2:
+                continue
+        # Suppress near-zero-signal same_pid groups (issue 4.7): a PID seen only
+        # through the process-identity types (process row + command line + tree
+        # position, all from one enumeration) is the same fact restated, not a
+        # cross-artifact link. Keep it only when the PID also surfaces in
+        # information-adding evidence (injected_code / network / file) or across
+        # >= 2 tools — that's what distinguishes an injected/beaconing PID from
+        # System PID 4 and the svchost crowd.
+        if key_name == "pids":
+            tools = {i.get("source_tool", "") for i in related_items}
+            types = {i.get("evidence_type", "") for i in related_items}
+            if len(tools) < 2 and not (types - _PROCESS_IDENTITY_TYPES):
+                continue
         anchor = _select_anchor(related_items)
         if key_name == "pids":
             finding = f"PID {key} observed across multiple artifacts"
@@ -448,6 +583,9 @@ def _group_items_by_signal(items: list[dict], signals: dict[str, dict[str, Any]]
         elif key_name == "file_keys":
             finding = f"File {key} observed across multiple artifacts"
             reasons = [f"Same file/path {key} appeared in multiple artifacts"]
+        elif key_name == "domains":
+            finding = f"Domain {key} observed across multiple artifacts"
+            reasons = [f"Same domain {key} appeared in multiple artifacts"]
         else:
             finding = f"Shared {key_name[:-1] if key_name.endswith('s') else key_name} bucket {key} observed across multiple artifacts"
             reasons = [f"Same timestamp bucket {key} appeared in multiple artifacts"]
@@ -459,6 +597,7 @@ def _group_items_by_signal(items: list[dict], signals: dict[str, dict[str, Any]]
                 "pids": "same_pid",
                 "ips": "same_ip",
                 "file_keys": "same_file",
+                "domains": "same_domain",
                 "timestamp_bucket": "same_timestamp",
             }.get(key_name, key_name),
             finding=finding,
@@ -552,6 +691,95 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
     return findings
 
 
+def _resolve_linked_target(target: str, by_id: dict[str, dict]) -> list[dict]:
+    """Resolve a wrapper-emitted link target id to the real evidence item(s).
+
+    Handles the prefix mismatch: wrappers link to `proc_<pid>` while the actual
+    process item id is `proc_<pid>_<name>`. Exact id wins; otherwise any id
+    under the `<target>_` boundary matches (so `proc_59` never grabs
+    `proc_596_...`).
+    """
+    exact = by_id.get(target)
+    if exact is not None:
+        return [exact]
+    prefix = target + "_"
+    return [item for aid, item in by_id.items() if aid.startswith(prefix)]
+
+
+def _build_linked_artifact_findings(
+    items: list[dict],
+    existing_findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Promote wrapper-emitted `linked_artifacts` into correlation findings.
+
+    Wrappers declare authoritative cross-references the signal-based grouping
+    can't reconstruct from free text — e.g. a `process_relation` value names the
+    parent/child process *names*, not their PIDs, so `same_pid` never ties it to
+    the concrete `process` items; a malfind `injected_code` item links to its
+    host process. This reads those declared links, resolves each target to a
+    real item (incl. the `proc_<pid>` -> `proc_<pid>_<name>` prefix), and emits a
+    `linked_artifact` finding per link group — skipping any whose artifact set is
+    already fully covered by an existing signal finding, so already-correlated
+    pairs (e.g. injected_code/process sharing a PID) aren't duplicated.
+    """
+    by_id: dict[str, dict] = {}
+    for item in items:
+        aid = item.get("artifact_id", "")
+        if aid and aid not in by_id:
+            by_id[aid] = item
+
+    covered_sets = [frozenset(f.get("artifacts", [])) for f in existing_findings]
+
+    findings: list[dict[str, Any]] = []
+    emitted_groups: set[frozenset] = set()
+
+    for source in items:
+        links = source.get("linked_artifacts") or []
+        if not links:
+            continue
+        source_id = source.get("artifact_id", "")
+        resolved: list[dict] = []
+        seen_ids: set[str] = set()
+        for target in links:
+            if not target:
+                continue
+            for tgt in _resolve_linked_target(str(target), by_id):
+                tid = tgt.get("artifact_id", "")
+                if tid and tid != source_id and tid not in seen_ids:
+                    seen_ids.add(tid)
+                    resolved.append(tgt)
+        if not resolved:
+            continue
+
+        group = frozenset([source_id, *seen_ids])
+        if group in emitted_groups:
+            continue
+        # Skip links a signal finding already fully covers (avoid duplicate noise).
+        if any(group <= covered for covered in covered_sets):
+            continue
+        emitted_groups.add(group)
+
+        related_items = [source, *resolved]
+        anchor = _select_anchor(related_items)
+        linked_ids = sorted(group)
+        findings.append(_make_finding(
+            anchor=anchor,
+            related_items=related_items,
+            correlation_type="linked_artifact",
+            finding=(
+                f"Tool-declared link across {len(linked_ids)} artifacts: "
+                + ", ".join(linked_ids)
+            ),
+            what_confirmed_it=[
+                f"{source.get('source_tool', 'A wrapper')} explicitly linked "
+                "these artifacts during extraction"
+            ],
+            confidence=_correlation_confidence(related_items),
+        ))
+
+    return findings
+
+
 def annotate_item_correlations(items: list[dict], findings: list[dict[str, Any]]) -> list[dict]:
     by_artifact = defaultdict(list)
     for finding in findings:
@@ -587,8 +815,12 @@ def build_correlations(items: list[dict], signals: dict[str, dict[str, Any]]) ->
     findings.extend(_group_items_by_signal(items, signals, "pids"))
     findings.extend(_group_items_by_signal(items, signals, "ips"))
     findings.extend(_group_items_by_signal(items, signals, "file_keys"))
+    findings.extend(_group_items_by_signal(items, signals, "domains", require_cross_source=True))
     findings.extend(_group_items_by_signal(items, signals, "timestamp_bucket"))
     findings.extend(_build_exfiltration_findings(items, signals))
+    # Merge wrapper-declared explicit links (issue 4.6), after the signal-based
+    # findings so already-covered link sets can be skipped.
+    findings.extend(_build_linked_artifact_findings(items, findings))
 
     findings = sorted(
         findings,
@@ -722,6 +954,13 @@ def aggregate_evidence(
     # Step 3: Deduplicate
     unique_items, removed_count = deduplicate_items(all_items)
     print(f"  [DEDUP] Removed {removed_count} duplicates → {len(unique_items)} unique")
+
+    # Step 3a: Cross-tool process reconciliation (issue D6) — drop MemProcFS
+    # process items that merely duplicate Volatility's richer process list.
+    unique_items, memprocfs_dropped = reconcile_memprocfs_processes(unique_items)
+    if memprocfs_dropped:
+        print(f"  [RECONCILE] Dropped {memprocfs_dropped} MemProcFS process "
+              f"item(s) duplicating Volatility → {len(unique_items)} items")
 
     # Step 3b: IOC re-scoring (boost severity on known indicators).
     # Must run BEFORE sort, which keys on severity.
