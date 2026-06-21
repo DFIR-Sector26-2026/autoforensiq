@@ -849,12 +849,11 @@ def _indicators_cell(item):
     cell = " · ".join(parts)
     matches = sorted(set(item.get("ioc_match") or []))
     if matches:
-        # Put the catalog-match badge on its own line within the same cell.
-        # `<br>` survives _md_cell (no pipe/whitespace) and renders as a line
-        # break in both the dev_report HTML and raw-markdown views. The trailing
-        # &nbsp; indents the badge so it lines up under the indicator above it (a
-        # plain space would be collapsed by the browser after a line break).
-        cell = (cell + "<br>&nbsp;" if cell else "") + f"**IOC: {', '.join(matches)}**"
+        # Append the catalog-match badge inline, separated by " · " (the same
+        # separator used between indicators above). A markdown table cell can't
+        # line-break without raw `<br>` HTML, which renders literally in strict /
+        # CommonMark viewers — keep the report HTML-free and portable.
+        cell = (cell + " · " if cell else "") + f"**IOC: {', '.join(matches)}**"
     return _md_cell(cell or "-")
 
 

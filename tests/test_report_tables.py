@@ -271,8 +271,9 @@ def test_indicators_cell_renders_atoms_and_match_badge():
     cell = _indicators_cell(item)
     assert "`tasksche.exe` (Suspicious File)" in cell
     assert "**IOC: wannacry_dropper**" in cell
-    # Match badge sits on its own (indented) line within the cell.
-    assert "(Suspicious File)<br>&nbsp;**IOC: wannacry_dropper**" in cell
+    # Match badge follows inline via " · " (no raw <br> HTML, portable markdown).
+    assert "(Suspicious File) · **IOC: wannacry_dropper**" in cell
+    assert "<br>" not in cell
 
 
 def test_indicators_cell_empty_for_plain_finding():
