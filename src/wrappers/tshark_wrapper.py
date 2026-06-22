@@ -2,8 +2,8 @@ import os
 import json
 import subprocess
 from src.wrappers.base_wrapper import BaseWrapper
+from src.data.threat_intel import C2_PORTS_ALL, c2_port_severity
 import hashlib
-SUSPICIOUS_PORTS = [4444, 4445, 1337, 31337, 8888, 9999, 6667, 6668]
 SUSPICIOUS_PROTOS = ["dns", "http", "smb", "ftp"]
 
 # Known-good infrastructure — substring match against the full lowercased
@@ -89,7 +89,9 @@ class TsharkWrapper(BaseWrapper):
         for (src, dst, dport), agg in aggregates.items():
             try:
                 port = int(dport) if dport.isdigit() else 0
-                severity = "high" if port in SUSPICIOUS_PORTS else "low"
+                # Tiered C2-port severity (issue D1): high-confidence -> high,
+                # dual-use watch port -> medium, otherwise low.
+                severity = c2_port_severity(port) or "low"
                 ts = str(agg["first_ts"]) if agg.get("first_ts") is not None else ""
                 items.append(self.make_evidence_item(
                     artifact_id=(
@@ -210,7 +212,7 @@ class TsharkWrapper(BaseWrapper):
     def _get_suspicious_ports(self, pcap_path: str) -> list:
         print("  [TSHARK] Checking suspicious ports...")
         items = []
-        for port in SUSPICIOUS_PORTS:
+        for port in sorted(C2_PORTS_ALL):
             stdout, _, code = self.run_command([
                 "tshark", "-r", pcap_path,
                 "-Y", f"tcp.dstport == {port}",
@@ -228,11 +230,12 @@ class TsharkWrapper(BaseWrapper):
                 timestamp = first[0] if first else ""
                 src = first[1] if len(first) > 1 else "unknown"
                 dst = first[2] if len(first) > 2 else "unknown"
+                # High-confidence C2 port -> high; dual-use watch port -> medium.
                 items.append(self.make_evidence_item(
                     artifact_id=f"suspport_{port}",
                     evidence_type="suspicious_port",
                     value=f"Traffic on suspicious port {port}: {src} → {dst} ({len(lines)} packets)",
-                    severity="high",
+                    severity=c2_port_severity(port) or "high",
                     confidence=0.88,
                     timestamp=timestamp
                 ))

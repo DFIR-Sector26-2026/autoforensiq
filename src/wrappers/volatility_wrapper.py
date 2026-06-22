@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 from .base_wrapper import BaseWrapper
+from src.data.threat_intel import c2_port_severity
 
 PLUGINS = [
     "windows.pslist",
@@ -113,15 +114,6 @@ SUSPICIOUS_PARENTS = [
     "cscript.exe",
     "mshta.exe",
     "regsvr32.exe"
-]
-
-SUSPICIOUS_PORTS = [
-    4444,
-    4445,
-    1337,
-    31337,
-    8888,
-    9999
 ]
 
 SUSPICIOUS_RELATIONSHIPS = {
@@ -999,14 +991,20 @@ class VolatilityWrapper(BaseWrapper):
                     else 0
                 )
 
-                severity = (
-                    "high"
-                    if(
-                        local_p in SUSPICIOUS_PORTS
-                        or remote_p in SUSPICIOUS_PORTS
-                    )
-                    else "low"
-                )
+                # C2-port severity is tiered (issue D1): a high-confidence port
+                # (4444/4445/1337/31337) -> high; a dual-use watch port
+                # (IRC/8888/9999/...) -> medium; neither -> low. Take the
+                # stronger of the local/remote port verdicts.
+                port_sevs = [
+                    s for s in (c2_port_severity(local_p), c2_port_severity(remote_p))
+                    if s
+                ]
+                if "high" in port_sevs:
+                    severity = "high"
+                elif "medium" in port_sevs:
+                    severity = "medium"
+                else:
+                    severity = "low"
 
                 items.append(
                     self.make_evidence_item(

@@ -174,6 +174,34 @@ def test_c2_port_not_matched_from_byte_or_packet_count():
     assert "c2_port" in by_id["n3"]["ioc_match"]
 
 
+def test_c2_port_tiers_high_vs_watch():
+    """Issue D1: the centralised C2-port catalog is tiered. A high-confidence
+    port (4444) floors at critical under id 'c2_port'; a dual-use watch port
+    (8888) only floors at medium under id 'c2_port_watch', so a Jupyter/IRC-style
+    connection is surfaced without being escalated to a critical C2 finding."""
+    from src.data.threat_intel import c2_port_severity
+    assert c2_port_severity(4444) == "high"
+    assert c2_port_severity("8888") == "medium"      # accepts digit strings
+    assert c2_port_severity(2222) is None            # dropped: usually legitimate
+    assert c2_port_severity(443) is None
+
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        {"artifact_id": "hi", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCP 10.0.0.5 -> 9.9.9.9:4444 beacon"},
+        {"artifact_id": "watch", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCP 10.0.0.5 -> 9.9.9.9:8888 session"},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    assert by_id["hi"]["severity"] == "critical"
+    assert "c2_port" in by_id["hi"]["ioc_match"]
+    # watch-tier port is noted at medium, NOT escalated to critical
+    assert by_id["watch"]["severity"] == "medium"
+    assert "c2_port_watch" in by_id["watch"]["ioc_match"]
+
+
 def test_same_pid_requires_information_adding_evidence():
     """Issue 4.7: a same_pid group confined to the process-identity types
     (process row + command line + tree position, one tool) is the same fact

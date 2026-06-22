@@ -22,6 +22,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from src.data.threat_intel import C2_PORTS_HIGH, C2_PORTS_WATCH
+
 ROOT_DIR = Path(__file__).resolve().parents[2]
 _DEFAULT_CATALOG_PATH = ROOT_DIR / "src" / "data" / "ioc_patterns.json"
 
@@ -146,12 +148,23 @@ def _build_indicator_list(catalog: dict, case_context: dict) -> list[dict]:
     if reputation:
         indicators.append(reputation)
 
-    c2 = catalog.get("c2_ports") or {}
-    if c2.get("ports"):
+    # C2 ports come from the shared catalog (issue D1), tiered: high-confidence
+    # ports floor at critical; dual-use watch ports (IRC/8888/9999/old trojans)
+    # only at medium, so a Jupyter or IRC connection isn't escalated to a
+    # critical C2 finding. Keeping the high-tier id "c2_port" preserves the
+    # existing match label.
+    if C2_PORTS_HIGH:
         indicators.append({
             "id": "c2_port",
-            "ports": [int(p) for p in c2["ports"]],
-            "severity": c2.get("severity", "high"),
+            "ports": sorted(C2_PORTS_HIGH),
+            "severity": "critical",
+            "category": "c2_channel",
+        })
+    if C2_PORTS_WATCH:
+        indicators.append({
+            "id": "c2_port_watch",
+            "ports": sorted(C2_PORTS_WATCH),
+            "severity": "medium",
             "category": "c2_channel",
         })
 

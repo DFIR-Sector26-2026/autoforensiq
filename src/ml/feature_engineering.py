@@ -24,6 +24,10 @@ Feature vector layout (14 dimensions):
 import re
 from typing import Dict, Any, List
 
+# Known C2 ports come from the shared catalog (issue D1) so the ML "known C2
+# port" feature can never drift from what the wrappers/rescorer flag.
+from src.data.threat_intel import C2_PORTS_ALL as KNOWN_C2_PORTS
+
 # ── Threat intelligence lists ─────────────────────────────────────────────────
 
 SUSPICIOUS_PROCESSES = {
@@ -43,11 +47,6 @@ SYSTEM_PROCESSES = {
 SUSPICIOUS_PARENTS = {
     "cmd.exe", "powershell.exe", "wscript.exe", "cscript.exe",
     "mshta.exe", "python.exe", "python3", "bash", "sh",
-}
-
-KNOWN_C2_PORTS = {
-    4444, 1337, 8888, 9999, 31337, 6666, 12345, 54321,
-    4000, 5555, 7777, 2222, 3333, 6667,
 }
 
 STANDARD_PORTS = {80, 443, 0, 8080, 8443, 53, 22, 21, 25}
