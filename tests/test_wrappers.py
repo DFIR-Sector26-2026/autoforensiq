@@ -800,6 +800,18 @@ def test_base_wrapper_makes_evidence_item():
     assert item["severity"] == "high"
 
 
+def test_make_evidence_item_linked_artifacts_are_independent():
+    # Regression for the shared-mutable-default (4.1): two items created without
+    # linked_artifacts must NOT share one list object — mutating one must not
+    # leak into the other.
+    w = BaseWrapper("test_tool")
+    a = w.make_evidence_item("a", "process", "v")
+    b = w.make_evidence_item("b", "process", "v")
+    a["linked_artifacts"].append("proc_1")
+    assert a["linked_artifacts"] == ["proc_1"]
+    assert b["linked_artifacts"] == []
+
+
 def test_base_wrapper_run_command_success():
     w = BaseWrapper("echo_test")
     stdout, stderr, code = w.run_command(["echo", "hello"])

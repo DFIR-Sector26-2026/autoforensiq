@@ -59,7 +59,7 @@
 | **8 forensic tool wrappers** | Volatility3, MemProcFS, Tshark, Sleuthkit, RegRipper, Plaso, email & browser parsers |
 | **Anomaly detection** | Isolation Forest on normalised evidence features |
 | **Explainability** | SHAP global attributions + LIME local per-finding explanations |
-| **MITRE ATT&CK mapping** | Each evidence item mapped to tactic/technique IDs |
+| **MITRE ATT&CK mapping** | Per-case tactic/technique table in the report, keyed off the classified case type |
 | **Process tree reconstruction** | Parent→child hierarchy rebuilt from process evidence, pruned to flagged lineages |
 | **Per-indicator IOC report** | Standalone `ioc_report.md` with provenance and XAI context per indicator |
 | **Chain-of-custody audit log** | SHA-256 hash log written for every tool invocation |

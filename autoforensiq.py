@@ -633,32 +633,12 @@ def main(args=None):
 
     _ensure_output_dir()
 
-    # If bulk manifest provided, run bulk aggregation and exit early
+    # If a bulk manifest is provided, run bulk aggregation and exit early. Use
+    # the validated run_bulk_aggregation() path (manifest normalization +
+    # per-machine entry validation) instead of an inline weaker copy.
     if args.bulk_manifest:
-        print(f"\n[BULK] Loading manifest: {args.bulk_manifest}")
-        try:
-            with open(args.bulk_manifest) as f:
-                manifest = json.load(f)
-        except Exception as exc:
-            print(f"  [ERROR] Failed to load bulk manifest: {exc}")
-            return
-
-        machine_runs = manifest.get("machines") or manifest
-
-        try:
-            from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
-
-            summary = aggregate_bulk_evidence(
-                machine_runs, output_root=str(ROOT_DIR / "output" / "bulk")
-            )
-            summary_path = ROOT_DIR / "output" / "bulk_summary.json"
-            with open(summary_path, "w") as f:
-                json.dump(summary, f, indent=2)
-            print(f"  [BULK] Summary written → {summary_path}")
-            return
-        except Exception as exc:
-            print(f"  [ERROR] Bulk aggregation failed: {exc}")
-            return
+        run_bulk_aggregation(args.bulk_manifest)
+        return
 
     os.chdir(ROOT_DIR)
 

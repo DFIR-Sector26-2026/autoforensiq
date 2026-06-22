@@ -361,21 +361,26 @@ class VolatilityWrapper(BaseWrapper):
                 timeout=180
             )
 
-            print(f"\n  [DEBUG] Return code: {code}")
+            # Per-plugin return code + 1000-char stdout/stderr dumps are noisy on
+            # a normal run (the GUI streams all of it), so gate them behind
+            # VOL_DEBUG — same opt-in style as VOL_ENABLE_DUMPFILES below.
+            if os.getenv("VOL_DEBUG", "").lower() in {"1", "true", "yes"}:
 
-            if stderr.strip():
+                print(f"\n  [DEBUG] Return code: {code}")
 
-                print(
-                    f"\n  [DEBUG] STDERR:\n"
-                    f"{stderr[:1000]}"
-                )
+                if stderr.strip():
 
-            if stdout.strip():
+                    print(
+                        f"\n  [DEBUG] STDERR:\n"
+                        f"{stderr[:1000]}"
+                    )
 
-                print(
-                    f"\n  [DEBUG] STDOUT:\n"
-                    f"{stdout[:1000]}"
-                )
+                if stdout.strip():
+
+                    print(
+                        f"\n  [DEBUG] STDOUT:\n"
+                        f"{stdout[:1000]}"
+                    )
 
             # keep a combined corpus for regex-based extraction
             if stdout:

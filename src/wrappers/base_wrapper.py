@@ -1,18 +1,19 @@
 import subprocess
-import os
 from src.utils.audit_log import log_action
 
 class BaseWrapper:
     def __init__(self, tool_name: str):
         self.tool_name = tool_name
 
-    def run_command(self, command: list, input_files: list = [],
-                    output_files: list = [], timeout: int = 300) -> tuple:
+    def run_command(self, command: list, input_files: list = None,
+                    output_files: list = None, timeout: int = 300) -> tuple:
         """
         Runs a shell command.
         Returns (stdout, stderr, returncode).
         Logs to audit log automatically.
         """
+        input_files = input_files or []
+        output_files = output_files or []
         print(f"  [RUNNING] {' '.join(map(str,command))}")
         try:
             result = subprocess.run(
@@ -46,7 +47,7 @@ class BaseWrapper:
                            value: str, severity: str = "medium",
                            confidence: float = 0.7,
                            timestamp: str = "",
-                           linked_artifacts: list = []) -> dict:
+                           linked_artifacts: list = None) -> dict:
         """
         Returns a dict matching the agreed evidence_item schema exactly.
         Every wrapper uses this to produce output.
@@ -59,5 +60,5 @@ class BaseWrapper:
             "value": value,
             "severity": severity,
             "confidence": confidence,
-            "linked_artifacts": linked_artifacts
+            "linked_artifacts": linked_artifacts or []
         }
