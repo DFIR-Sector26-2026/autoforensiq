@@ -391,6 +391,90 @@ def test_memprocfs_find_pagefile(tmp_path, monkeypatch):
     assert w._find_pagefile(str(img)) == str(override)  # env var wins
 
 
+def test_memprocfs_enumerates_processes_from_pid_mount(tmp_path):
+    # 3.5-B: MemProcFS exposes processes under <mount>/pid/<pid>/, each carrying
+    # name/ppid virtual files — NOT <mount>/forensic/processes (which isn't part
+    # of the layout, so a successful mount used to enumerate nothing). Build a
+    # fake mount tree and confirm the enumerator reads pid/name/ppid.
+    from src.wrappers.memprocfs_wrapper import _enumerate_mounted_processes
+
+    mount = tmp_path / "mnt"
+    pid_root = mount / "pid"
+    for pid, name, ppid in [("4", "System", "0"),
+                            ("1940", "tasksche.exe", "1636"),
+                            ("740", "@WanaDecryptor@", "1940")]:
+        d = pid_root / pid
+        d.mkdir(parents=True)
+        (d / "pid").write_text(pid + "\n")
+        (d / "name").write_text(name + "\n")
+        (d / "ppid").write_text(ppid + "\n")
+    # a stray non-directory entry under /pid must be ignored, not crash.
+    (pid_root / "readme.txt").write_text("ignore me")
+
+    procs = _enumerate_mounted_processes(str(mount))
+    by_pid = {p["pid"]: p for p in procs}
+    assert set(by_pid) == {"4", "1940", "740"}
+    assert by_pid["1940"]["name"] == "tasksche.exe"
+    assert by_pid["1940"]["ppid"] == "1636"
+
+    # The legacy (wrong) path must no longer be what works: a mount that only
+    # has forensic/processes now yields nothing.
+    legacy = tmp_path / "legacy"
+    (legacy / "forensic" / "processes").mkdir(parents=True)
+    (legacy / "forensic" / "processes" / "1.txt").write_text("x")
+    assert _enumerate_mounted_processes(str(legacy)) == []
+
+    # No /pid at all -> empty, no crash.
+    assert _enumerate_mounted_processes(str(tmp_path / "nope")) == []
+
+
+def test_memprocfs_enumerates_missing_name_falls_back(tmp_path):
+    # A process dir with no `name` file still yields an entry (name "unknown"),
+    # so a partially-populated mount degrades gracefully.
+    from src.wrappers.memprocfs_wrapper import _enumerate_mounted_processes
+    d = tmp_path / "mnt" / "pid" / "1024"
+    d.mkdir(parents=True)
+    procs = _enumerate_mounted_processes(str(tmp_path / "mnt"))
+    assert procs == [{"pid": "1024", "name": "unknown", "ppid": ""}]
+
+
+def test_memprocfs_classify_process_tiers():
+    # 3.5-C: the process list must not land every process at medium/0.80.
+    # Benign system processes and ordinary apps stay low; only notable names
+    # escalate, so the medium/high tiers are not flooded on a supported image.
+    from src.wrappers.memprocfs_wrapper import _classify_process
+
+    # known-malicious name → high, no corroboration needed
+    sev, conf, note = _classify_process("tasksche.exe")
+    assert sev == "high" and conf == 0.85 and "tasksche" in note
+
+    # common Windows system process → low (name-only, masquerade-blind by design)
+    sev, conf, _ = _classify_process("svchost.exe")
+    assert sev == "low" and conf == 0.50
+    assert _classify_process("System")[0] == "low"
+
+    # ordinary third-party app we can't vouch for → low (not medium)
+    sev, conf, _ = _classify_process("chrome.exe")
+    assert sev == "low" and conf == 0.55
+
+    # unidentified process → low
+    assert _classify_process("unknown")[0] == "low"
+    assert _classify_process("")[0] == "low"
+
+
+def test_memprocfs_classify_flags_random_name_as_medium():
+    # 3.5-C: a hash-like / keyboard-mash executable name is a malware trait and
+    # earns medium — but ordinary product names must not be misflagged.
+    from src.wrappers.memprocfs_wrapper import _classify_process
+
+    assert _classify_process("a9f3c1b2.exe")[0] == "medium"   # hex/hash-like
+    assert _classify_process("xkzqwvbnm.exe")[0] == "medium"  # vowel-starved
+
+    # real product names stay low
+    for benign in ("notepad.exe", "firefox.exe", "OneDrive.exe", "Telegram.exe"):
+        assert _classify_process(benign)[0] == "low", benign
+
+
 def test_parse_filescan():
     wrapper = VolatilityWrapper()
 

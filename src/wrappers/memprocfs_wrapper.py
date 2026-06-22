@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import shutil
 import tempfile
@@ -6,6 +7,122 @@ from pathlib import Path
 
 from src.wrappers.base_wrapper import BaseWrapper
 from src.utils.audit_log import log_action
+
+
+# Process names that are part of a normal Windows session. Their mere presence
+# in the process list is unremarkable, so they stay at low severity rather than
+# being escalated. NOTE: name-only, hence masquerade-blind (issue 3.1-D, accepted
+# by design) — a malicious binary *named* `svchost.exe` stays low here; the
+# pipeline elevates it only via corroborating signals (injection, suspicious
+# parent/cmdline) emitted by the other wrappers.
+_BENIGN_SYSTEM_PROCESSES = {
+    "system", "registry", "memory compression", "secure system",
+    "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe", "services.exe",
+    "lsass.exe", "lsaiso.exe", "svchost.exe", "explorer.exe", "dwm.exe",
+    "spoolsv.exe", "conhost.exe", "taskhostw.exe", "taskhost.exe",
+    "runtimebroker.exe", "sihost.exe", "ctfmon.exe", "fontdrvhost.exe",
+    "searchindexer.exe", "searchprotocolhost.exe", "searchfilterhost.exe",
+    "dllhost.exe", "wmiprvse.exe", "audiodg.exe", "userinit.exe",
+    "smartscreen.exe", "shellexperiencehost.exe", "wudfhost.exe",
+}
+
+# Strong malware / ransomware indicators in a process *name*. A hit is suspicious
+# on its own (no corroboration needed) and escalates to high.
+_MALICIOUS_NAME_TOKENS = (
+    "tasksche", "wanadecrypt", "wannacry", "wncry", "wcry", "mssecsvc",
+    "@wana", "decrypt0r", "ransom", "locker", "cryptor", "mimikatz",
+    "cobaltstrike", "beacon", "meterpreter", "payload", "njrat", "darkcomet",
+)
+
+
+def _looks_like_random_name(name):
+    """Heuristic for a randomly generated / hash-like executable name — a common
+    malware trait (`a9f3c1b2.exe`, `xkzqwvbn.exe`). Operates on the stem (name
+    minus a single trailing extension) and stays conservative to avoid flagging
+    ordinary product names."""
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    stem = stem.strip().lower()
+    # only judge plausible single tokens; real product names carry separators
+    if len(stem) < 8 or not re.fullmatch(r"[a-z0-9]+", stem):
+        return False
+    # hex-string name of reasonable length with at least one digit → hash-like
+    if re.fullmatch(r"[0-9a-f]{8,}", stem) and any(c.isdigit() for c in stem):
+        return True
+    # long, vowel-starved token → keyboard-mash name
+    letters = [c for c in stem if c.isalpha()]
+    vowels = sum(1 for c in letters if c in "aeiou")
+    if len(letters) >= 8 and vowels <= max(1, len(letters) // 6):
+        return True
+    return False
+
+
+def _classify_process(name):
+    """Classify a MemProcFS-enumerated process by *name* into a severity tier
+    (issue 3.5-C). Without this filter every process landed at medium/0.80, which
+    floods the medium tier on a MemProcFS-supported image (potentially hundreds).
+
+    Returns ``(severity, confidence, note)``:
+      * known malware/ransomware name   → high   / 0.85
+      * random / hash-like name         → medium / 0.70
+      * common Windows system process   → low    / 0.50
+      * unidentified                    → low    / 0.50
+      * anything else (ordinary app)    → low    / 0.55
+    """
+    lowered = (name or "").strip().lower()
+
+    if not lowered or lowered == "unknown":
+        return "low", 0.50, "unidentified process"
+
+    for token in _MALICIOUS_NAME_TOKENS:
+        if token in lowered:
+            return "high", 0.85, f"name matches known-malicious indicator '{token}'"
+
+    if lowered in _BENIGN_SYSTEM_PROCESSES:
+        return "low", 0.50, "common Windows system process"
+
+    if _looks_like_random_name(lowered):
+        return "medium", 0.70, "random / hash-like process name"
+
+    return "low", 0.55, "ordinary process"
+
+
+def _read_mount_file(path):
+    """First line of a MemProcFS virtual file (e.g. a process's `name`/`ppid`),
+    stripped. Returns "" on any read error — these are FUSE-backed files."""
+    try:
+        with open(path, "r", errors="replace") as fh:
+            return fh.readline().strip()
+    except Exception:
+        return ""
+
+
+def _enumerate_mounted_processes(mount_dir):
+    """Read the process list from a MemProcFS mount.
+
+    MemProcFS exposes processes under ``<mount>/pid/<pid>/`` (the canonical
+    per-PID view), each directory carrying a ``name``/``ppid`` virtual file. The
+    old code scanned ``<mount>/forensic/processes``, which is not part of the
+    mount layout, so even a successful mount enumerated nothing (issue 3.5-B).
+
+    Returns a list of ``{"pid", "name", "ppid"}`` dicts (ppid may be "").
+    """
+    procs = []
+    pid_root = Path(mount_dir) / "pid"
+    if not pid_root.is_dir():
+        return procs
+
+    for entry in sorted(os.listdir(pid_root), key=lambda e: (not e.isdigit(), e)):
+        proc_dir = pid_root / entry
+        if not proc_dir.is_dir():
+            continue
+        # The directory name under /pid/ is the numeric PID; prefer the `pid`
+        # virtual file when present, falling back to the directory name.
+        pid = _read_mount_file(proc_dir / "pid") or entry.strip()
+        name = _read_mount_file(proc_dir / "name") or "unknown"
+        ppid = _read_mount_file(proc_dir / "ppid")
+        procs.append({"pid": pid, "name": name, "ppid": ppid})
+
+    return procs
 
 
 class MemProcFSWrapper(BaseWrapper):
@@ -97,16 +214,17 @@ class MemProcFSWrapper(BaseWrapper):
         try:
             for proc in vmm.process_list():
 
+                severity, confidence, note = _classify_process(proc.name)
                 items.append(
                     self.make_evidence_item(
                         artifact_id=f"memprocfs_proc_{proc.pid}",
                         evidence_type="memprocfs_process",
                         value=(
                             f"{proc.name} "
-                            f"(PID {proc.pid}, PPID {proc.ppid})"
+                            f"(PID {proc.pid}, PPID {proc.ppid}) — {note}"
                         ),
-                        severity="medium",
-                        confidence=0.80,
+                        severity=severity,
+                        confidence=confidence,
                     )
                 )
 
@@ -202,19 +320,23 @@ class MemProcFSWrapper(BaseWrapper):
 
 
         try:
-            process_path = Path(mount_dir) / "forensic" / "processes"
-
-            if process_path.exists():
-                for name in os.listdir(process_path):
-                    items.append(
-                        self.make_evidence_item(
-                            artifact_id=f"memprocfs_proc_{name}",
-                            evidence_type="memprocfs_process",
-                            value=f"Process artifact found: {name}",
-                            severity="medium",
-                            confidence=0.80,
-                        )
+            for proc in _enumerate_mounted_processes(mount_dir):
+                ppid = proc.get("ppid")
+                severity, confidence, note = _classify_process(proc["name"])
+                value = (
+                    f"{proc['name']} (PID {proc['pid']}"
+                    + (f", PPID {ppid}" if ppid else "")
+                    + f") — {note}"
+                )
+                items.append(
+                    self.make_evidence_item(
+                        artifact_id=f"memprocfs_proc_{proc['pid']}",
+                        evidence_type="memprocfs_process",
+                        value=value,
+                        severity=severity,
+                        confidence=confidence,
                     )
+                )
         finally:
             # try to unmount if mounted, then remove the temporary dir
             try:
