@@ -22,9 +22,7 @@ Key design decisions
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
-from typing import List, Tuple, Dict, Any
-
-from src.ml.feature_engineering import FEATURE_NAMES
+from typing import List, Dict, Any
 
 
 # ── Rule-based booster ────────────────────────────────────────────────────────
@@ -101,21 +99,6 @@ class AnomalyDetector:
             "is_anomaly": is_anomaly,
             "confidence": confidence,
         }
-
-    def score_samples(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Returns
-        -------
-        final_scores : ndarray shape (n,)   – combined score; negative = anomalous
-        is_anomaly   : ndarray shape (n,)   – bool array
-        confidence   : ndarray shape (n,)   – float in [0, 1]
-        """
-        components = self.score_components(X)
-        return (
-            components["final_scores"],
-            components["is_anomaly"],
-            components["confidence"],
-        )
 
     # ── Convenience wrapper ───────────────────────────────────────────────────
 

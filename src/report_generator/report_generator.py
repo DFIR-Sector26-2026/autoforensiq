@@ -20,107 +20,10 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT_DIR / "config.yaml"
 
 
-# ─────────────────────────────────────────────────────────────
-# MITRE ATT&CK MAPPING
-# ─────────────────────────────────────────────────────────────
-
-MITRE_BY_CASE = {
-    "ransomware": [
-        ("T1486", "Data Encrypted for Impact", "Impact"),
-        ("T1204", "User Execution", "Execution"),
-        ("T1547", "Boot/Logon Autostart Execution", "Persistence"),
-        ("T1083", "File and Directory Discovery", "Discovery"),
-    ],
-    "malware": [
-        ("T1055", "Process Injection", "Defense Evasion"),
-        ("T1059", "Command and Scripting Interpreter", "Execution"),
-        ("T1547", "Boot/Logon Autostart Execution", "Persistence"),
-        ("T1071", "Application Layer Protocol", "C2"),
-    ],
-    "data_exfiltration": [
-        ("T1041", "Exfiltration Over C2 Channel", "Exfiltration"),
-        ("T1048", "Exfiltration Over Alternative Protocol", "Exfiltration"),
-        ("T1560", "Archive Collected Data", "Collection"),
-        ("T1083", "File and Directory Discovery", "Discovery"),
-    ],
-    "insider_threat": [
-        ("T1078", "Valid Accounts", "Persistence"),
-        ("T1213", "Data from Information Repositories", "Collection"),
-        ("T1048", "Exfiltration Over Alternative Protocol", "Exfiltration"),
-    ],
-    "network_intrusion": [
-        ("T1190", "Exploit Public-Facing Application", "Initial Access"),
-        ("T1021", "Remote Services", "Lateral Movement"),
-        ("T1071", "Application Layer Protocol", "C2"),
-        ("T1046", "Network Service Discovery", "Discovery"),
-    ],
-    "phishing": [
-        ("T1566", "Phishing", "Initial Access"),
-        ("T1204", "User Execution", "Execution"),
-        ("T1059", "Command and Scripting Interpreter", "Execution"),
-        ("T1547", "Boot/Logon Autostart Execution", "Persistence"),
-    ],
-    "unknown": [
-        ("T1059", "Command and Scripting Interpreter", "Execution"),
-        ("T1071", "Application Layer Protocol", "C2"),
-    ],
-}
-
-
-# ─────────────────────────────────────────────────────────────
-# RECOMMENDATIONS BY CASE TYPE
-# ─────────────────────────────────────────────────────────────
-
-RECOMMENDATIONS_BY_CASE = {
-    "ransomware": [
-        "Immediately isolate affected systems from the network to prevent further encryption spread.",
-        "Do NOT power off affected systems — preserve volatile memory for forensic analysis.",
-        "Identify and revoke all compromised credentials associated with the initial access vector.",
-        "Restore systems from verified clean backups only after confirming backup integrity.",
-        "Engage law enforcement and notify relevant regulatory bodies as required.",
-    ],
-    "malware": [
-        "Isolate affected hosts and block identified C2 IP addresses and domains at the perimeter firewall.",
-        "Run a full AV/EDR scan with updated signatures on all potentially exposed systems.",
-        "Review and harden PowerShell and script execution policies (constrained language mode).",
-        "Audit scheduled tasks, run keys, and startup folders for persistence mechanisms.",
-        "Deploy network monitoring rules to detect further beaconing activity from identified IOCs.",
-    ],
-    "data_exfiltration": [
-        "Immediately block outbound connections to all identified exfiltration endpoints.",
-        "Determine the full scope of data accessed by reviewing DLP logs and file access audit trails.",
-        "Notify the relevant data protection officer and assess breach notification obligations.",
-        "Rotate all credentials that may have been accessed or exfiltrated during the incident.",
-        "Implement strict egress filtering and monitor for DNS tunnelling or covert channel patterns.",
-    ],
-    "insider_threat": [
-        "Suspend the implicated account(s) pending investigation — do not alert the subject prematurely.",
-        "Preserve all relevant logs, email, and file access records under formal legal hold.",
-        "Engage HR and legal counsel before taking any disciplinary action against the individual.",
-        "Audit access rights across all shared repositories and sensitive data stores.",
-        "Implement User and Entity Behaviour Analytics (UEBA) for ongoing behavioural monitoring.",
-    ],
-    "network_intrusion": [
-        "Patch all externally-facing services and audit for additional exploitation attempts.",
-        "Rotate all service account and privileged credentials on affected systems immediately.",
-        "Review and tighten firewall rules — remove any unnecessary port exposures.",
-        "Conduct a full Active Directory audit for unauthorised account creation or privilege changes.",
-        "Deploy honeypot assets to detect and track further lateral movement attempts.",
-    ],
-    "phishing": [
-        "Reset credentials for all accounts that interacted with the phishing link or opened the attachment.",
-        "Block the phishing sender domain and URL at the email gateway and proxy.",
-        "Conduct targeted security awareness training for all affected users.",
-        "Search mail logs for additional recipients of the same phishing campaign.",
-        "Review endpoint telemetry for post-exploitation activity on systems that executed the attachment.",
-    ],
-    "unknown": [
-        "Conduct a full manual triage of all flagged artifacts with an experienced analyst.",
-        "Preserve all evidence in its current state pending further investigation and chain-of-custody documentation.",
-        "Expand evidence collection to include any missing evidence types identified in the coverage section.",
-        "Review network logs for anomalous outbound connections over the full investigation period.",
-    ],
-}
+# NOTE: MITRE_BY_CASE and RECOMMENDATIONS_BY_CASE are defined further down,
+# next to _SEVERITY_RANK (the portable, HTML-free copies). A second, identical
+# pair used to live here and was silently re-bound at import — removed to avoid
+# the edit-the-wrong-copy foot-gun.
 
 
 # ─────────────────────────────────────────────────────────────
@@ -653,15 +556,6 @@ _ACQUIRE_NOTES = {
     "email":         "Export email artifacts (.eml/.msg) from the affected mail client.",
     "browser":       "Export browser History files from the user profile directory.",
 }
-
-
-def _derive_severity(anomaly_items):
-    best = "informational"
-    for item in anomaly_items:
-        sev = str(item.get("severity", "")).lower()
-        if _SEVERITY_RANK.get(sev, 0) > _SEVERITY_RANK.get(best, 0):
-            best = sev
-    return best.capitalize() if best else "Informational"
 
 
 def _is_internal_ip(ip):

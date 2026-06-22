@@ -10,6 +10,11 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
 
+# Ensure the project root is importable for the `src` package, once, at import
+# time — the per-stage functions below used to repeat this insert individually.
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 
 # ─────────────────────────────────────────────────────────────
 # Helpers
@@ -143,8 +148,6 @@ def run_orchestrator(execution_plan: dict, evidence_files: dict):
 
     try:
 
-        sys.path.insert(0, str(ROOT_DIR))
-
         from src.orchestrator import run_tools
 
         print("  [LIVE] Running orchestrator...")
@@ -169,8 +172,6 @@ def run_aggregator(case_context: dict):
     unified_path = ROOT_DIR / "output" / "unified_evidence.json"
 
     try:
-
-        sys.path.insert(0, str(ROOT_DIR))
 
         from src.aggregator.evidence_aggregator import (
             aggregate_evidence
@@ -247,8 +248,6 @@ def run_bulk_aggregation(manifest_path: str):
     _stage(4, "Bulk Evidence Aggregator")
 
     try:
-        sys.path.insert(0, str(ROOT_DIR))
-
         from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
 
         machine_runs, output_root, summary_path = _load_bulk_manifest(manifest_path)
@@ -299,8 +298,6 @@ def run_ml_pipeline():
     shap_path = ROOT_DIR / "output" / "shap_explanations.json"
 
     try:
-
-        sys.path.insert(0, str(ROOT_DIR))
 
         from src.ml.pipeline import (
             run_ml_pipeline as _run_p5
@@ -649,7 +646,6 @@ def main(args=None):
         machine_runs = manifest.get("machines") or manifest
 
         try:
-            sys.path.insert(0, str(ROOT_DIR))
             from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
 
             summary = aggregate_bulk_evidence(
@@ -727,7 +723,9 @@ def main(args=None):
 
     preflight_check(evidence_files, execution_plan)
 
-    raw_outputs = run_orchestrator(execution_plan, evidence_files)
+    # Side effects only: writes output/raw/<tool>_output.json, which Stage 4
+    # re-reads from disk. The returned dict is intentionally not used here.
+    run_orchestrator(execution_plan, evidence_files)
 
     # STAGE 4
     unified_evidence = run_aggregator(case_context)

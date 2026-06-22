@@ -39,11 +39,11 @@
                       │ unified_evidence.json · shap_explanations.json
           ┌───────────▼───────────┐
           │  Report Generator     │  LLM-written forensic report
-          │  (LLM + Kill Chain)   │  + interactive HTML timeline
+          │  (+ MITRE ATT&CK)     │  + per-indicator IOC report
           └───────────┬───────────┘
                       │
                final_report.md
-               timeline.html
+               ioc_report.md
                audit_log.json
 ```
 
@@ -56,12 +56,12 @@
 | **Zero-touch pipeline** | Incident text in → forensic report out, no analyst in the loop |
 | **Attack classification** | LLM-powered intent classifier with JSON schema validation |
 | **Dynamic tool selection** | DTSA algorithm selects forensic tools based on artifact types |
-| **7 forensic tool wrappers** | Volatility3, Tshark, Sleuthkit, RegRipper, Plaso, email & browser parsers |
+| **8 forensic tool wrappers** | Volatility3, MemProcFS, Tshark, Sleuthkit, RegRipper, Plaso, email & browser parsers |
 | **Anomaly detection** | Isolation Forest on normalised evidence features |
 | **Explainability** | SHAP global attributions + LIME local per-finding explanations |
 | **MITRE ATT&CK mapping** | Each evidence item mapped to tactic/technique IDs |
-| **Cyber Kill Chain tracker** | Shows attacker progression stage with gaps highlighted |
-| **Interactive timeline** | Self-contained HTML timeline of evidence coloured by severity |
+| **Process tree reconstruction** | Parent→child hierarchy rebuilt from process evidence, pruned to flagged lineages |
+| **Per-indicator IOC report** | Standalone `ioc_report.md` with provenance and XAI context per indicator |
 | **Chain-of-custody audit log** | SHA-256 hash log written for every tool invocation |
 | **Mock mode** | Full pipeline runs without any API key for CI and demos |
 
@@ -366,8 +366,9 @@ Everything is written to `output/` (gitignored). A complete run produces:
 | `anomaly_scores.json` | 5 — ML | Isolation Forest anomaly scores per evidence item |
 | `shap_explanations.json` | 6 — XAI | SHAP global weights + LIME plain-English reason per finding |
 | `audit_log.json` | 3 — Orchestrator | SHA-256 chain-of-custody log for every tool invocation |
-| `final_report.md` | 7 — Report Generator | Full forensic report with Kill Chain summary and ATT&CK table |
-| `timeline.html` | 7 — Report Generator | Self-contained interactive evidence timeline |
+| `final_report.md` | 7 — Report Generator | Full forensic report with process tree, MITRE ATT&CK table, and findings |
+| `ioc_report.md` | 7 — Report Generator | Per-indicator IOC report with provenance and XAI context |
+| `dev_report.html` | post-7 — Dev aid | Single tabbed HTML bundling every output artifact (developer convenience) |
 
 ---
 
