@@ -605,47 +605,26 @@ class VolatilityWrapper(BaseWrapper):
             if l.strip()
         ]
 
-        if plugin == "windows.pslist":
+        # Plugin -> parser lookup (issue D6), replacing the if/elif chain. The
+        # three yarascan plugin names share one parser; an unknown plugin yields
+        # no items.
+        dispatch = {
+            "windows.pslist": self._parse_pslist,
+            "windows.pstree": self._parse_pstree,
+            "windows.cmdline": self._parse_cmdline,
+            "windows.netstat": self._parse_netstat,
+            "windows.malfind": self._parse_malfind,
+            "windows.filescan": self._parse_filescan,
+            "windows.dumpfiles": self._parse_dumpfiles,
+            "windows.vadyarascan": self._parse_yarascan,
+            "yarascan.YaraScan": self._parse_yarascan,
+            "windows.yarascan": self._parse_yarascan,
+            "windows.strings": self._parse_strings,
+            "windows.dlllist": self._parse_dlllist,
+        }
 
-            return self._parse_pslist(lines)
-
-        elif plugin == "windows.pstree":
-
-            return self._parse_pstree(lines)
-
-        elif plugin == "windows.cmdline":
-
-            return self._parse_cmdline(lines)
-
-        elif plugin == "windows.netstat":
-
-            return self._parse_netstat(lines)
-
-        elif plugin == "windows.malfind":
-
-            return self._parse_malfind(lines)
-
-        elif plugin == "windows.filescan":
-
-            return self._parse_filescan(lines)
-
-        elif plugin == "windows.dumpfiles":
-
-            return self._parse_dumpfiles(lines)
-
-        elif plugin in {"windows.vadyarascan", "yarascan.YaraScan", "windows.yarascan"}:
-
-            return self._parse_yarascan(lines)
-
-        elif plugin == "windows.strings":
-
-            return self._parse_strings(lines)
-
-        elif plugin == "windows.dlllist":
-
-            return self._parse_dlllist(lines)
-
-        return []
+        parser = dispatch.get(plugin)
+        return parser(lines) if parser else []
 
     def _build_strings_file(self, image_path: str):
         """
