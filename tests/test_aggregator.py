@@ -521,6 +521,61 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
         assert exfil["bytes_transferred"] == 1500000
 
 
+def test_exfiltration_temporal_match_is_labelled_honestly():
+    """Issue 5.1: a plain TCP connection never names the transferred file, so the
+    exfil finding rests on temporal proximity only. It must be marked
+    match_type='temporal' and must NOT claim the file path 'matched' disk/
+    timeline evidence (the old finding text over-stated what was checked)."""
+    from src.aggregator.evidence_aggregator import (
+        enrich_evidence_items, _build_exfiltration_findings,
+    )
+    items = [
+        {"artifact_id": "net1", "source_tool": "tshark",
+         "evidence_type": "network_connection",
+         "value": "TCP 10.0.0.5 -> 9.9.9.9:4444 (1500000 bytes, 12 packets)",
+         "severity": "high", "confidence": 0.8,
+         "timestamp": "2026-05-08T12:05:00Z", "linked_artifacts": []},
+        {"artifact_id": "file1", "source_tool": "tsk_fls",
+         "evidence_type": "file_artifact",
+         "value": "Suspicious file: C:/Users/admin/AppData/Temp/payload.exe",
+         "severity": "medium", "confidence": 0.75,
+         "timestamp": "2026-05-08T12:01:00Z", "linked_artifacts": []},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "c"})
+    findings = _build_exfiltration_findings(enriched, signals)
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["match_type"] == "temporal"
+    assert f["file"].endswith("payload.exe")
+    assert not any("matched disk/timeline" in c for c in f["what_confirmed_it"])
+    assert any("Temporal correlation only" in c for c in f["what_confirmed_it"])
+
+
+def test_exfiltration_filename_match_is_strong():
+    """When the connection value DOES name the file (shared file key), it is a
+    filename match: the stronger claim and a higher confidence than temporal."""
+    from src.aggregator.evidence_aggregator import (
+        enrich_evidence_items, _build_exfiltration_findings,
+    )
+    items = [
+        {"artifact_id": "net1", "source_tool": "tshark",
+         "evidence_type": "network_connection",
+         "value": "TCP 10.0.0.5 -> 9.9.9.9:443 POST /upload/payload.exe (1500000 bytes)",
+         "severity": "high", "confidence": 0.8,
+         "timestamp": "2026-05-08T12:05:00Z", "linked_artifacts": []},
+        {"artifact_id": "file1", "source_tool": "tsk_fls",
+         "evidence_type": "file_artifact",
+         "value": "Suspicious file: C:/Users/admin/AppData/Temp/payload.exe",
+         "severity": "medium", "confidence": 0.75,
+         "timestamp": "2026-05-08T12:01:00Z", "linked_artifacts": []},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "c"})
+    findings = _build_exfiltration_findings(enriched, signals)
+    assert len(findings) == 1
+    assert findings[0]["match_type"] == "filename"
+    assert any("file name matched" in c for c in findings[0]["what_confirmed_it"])
+
+
 def test_run_bulk_aggregation_writes_summary():
     """Test that the CLI bulk helper aggregates multiple machine bundles."""
     with tempfile.TemporaryDirectory() as tmpdir:

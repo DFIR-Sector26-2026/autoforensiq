@@ -644,6 +644,12 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
             destination = f"{destination}:{network_signal['destination_port']}"
 
         matching_file_events = []
+        # A "filename match" means the connection's value actually named the
+        # file (shared file_keys). A plain TCP connection never names a file, so
+        # that's the strong-but-rare case; otherwise the match is purely temporal
+        # (file activity preceded the big transfer). Track which, so the finding
+        # claims only what was checked (issue 5.1).
+        filename_matched = False
         for file_event in file_events:
             file_signal = file_event["signal"]
             file_dt = file_signal.get("timestamp_dt")
@@ -656,9 +662,13 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
                 continue
 
             shared_keys = set(file_signal.get("file_keys", [])) & set(network_signal.get("file_keys", []))
-            path_overlap = shared_keys or file_signal.get("paths")
-            if not path_overlap:
+            # Temporal proximity alone is enough to surface the pair; a shared
+            # file name strengthens it but is not required (a TCP connection
+            # can't carry one).
+            if not (shared_keys or file_signal.get("paths")):
                 continue
+            if shared_keys:
+                filename_matched = True
 
             matching_file_events.append(file_event)
 
@@ -669,22 +679,44 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
         supporting_items = [event["item"] for event in matching_file_events]
         primary_file = matching_file_events[0]["signal"].get("paths", [])
         primary_file_path = primary_file[0] if primary_file else matching_file_events[0]["item"].get("normalized_value", matching_file_events[0]["item"].get("value", ""))
+
+        if filename_matched:
+            finding_text = f"Large outbound transfer of {primary_file_path} to {destination}"
+            confirmations = [
+                "Large outbound traffic exceeded the exfiltration threshold",
+                "File activity was observed before the outbound transfer",
+                "The transferred file name matched disk/timeline evidence",
+            ]
+            base_confidence = 0.82
+        else:
+            # Temporal correlation only — the connection did not name the file,
+            # so don't assert the file path "matched"; report the sequence
+            # honestly and at a lower confidence than a true filename match.
+            window_hours = EXFIL_TIME_WINDOW_SECONDS // 3600
+            finding_text = (
+                f"Large outbound transfer to {destination} shortly after file "
+                f"activity ({primary_file_path} staged within {window_hours}h)"
+            )
+            confirmations = [
+                "Large outbound traffic exceeded the exfiltration threshold",
+                "File activity was observed before the outbound transfer",
+                "Temporal correlation only — the connection did not name the file",
+            ]
+            base_confidence = 0.70
+
         findings.append(_make_finding(
             anchor=anchor,
             related_items=supporting_items,
             correlation_type="exfiltration",
-            finding=f"Large outbound transfer of {primary_file_path} to {destination}",
-            what_confirmed_it=[
-                "Large outbound traffic exceeded the exfiltration threshold",
-                "File activity was observed before the outbound transfer",
-                "The file path matched disk/timeline evidence from TSK",
-            ],
-            confidence=_correlation_confidence([anchor] + supporting_items, base=0.82),
+            finding=finding_text,
+            what_confirmed_it=confirmations,
+            confidence=_correlation_confidence([anchor] + supporting_items, base=base_confidence),
             extra={
                 "file": primary_file_path,
                 "destination": destination,
                 "timestamp": network_signal.get("timestamp", ""),
                 "bytes_transferred": network_signal.get("bytes_transferred", 0),
+                "match_type": "filename" if filename_matched else "temporal",
             },
         ))
 
