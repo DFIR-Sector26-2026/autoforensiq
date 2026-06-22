@@ -68,6 +68,30 @@ def _dedupe_iocs(iocs):
     return [merged[key] for key in order]
 
 
+def _emit(artifact_id, value, severity, confidence, source_id):
+    """Build one evidence-schema IOC item linked back to its source artifact."""
+    return {
+        "artifact_id": artifact_id,
+        "source_tool": "ioc_engine",
+        "evidence_type": "ioc",
+        "timestamp": "",
+        "value": value,
+        "severity": severity,
+        "confidence": confidence,
+        "linked_artifacts": [source_id],
+    }
+
+
+# Substring-match indicator rules: scan an item's (lowercased) value for any
+# catalog term, emitting one IOC per match. Adding an indicator class is a
+# one-line table edit. (id_prefix, terms, message_template, severity, confidence)
+_SUBSTRING_RULES = [
+    ("ioc_proc",    SUSPICIOUS_PROCESSES,  "Suspicious process detected: {term}", "high",     0.90),
+    ("ioc_keyword", SUSPICIOUS_KEYWORDS,   "Malware indicator detected: {term}",  "critical", 0.95),
+    ("ioc_dll",     SUSPICIOUS_DLL_PATHS,  "Suspicious DLL path detected: {term}", "high",     0.85),
+]
+
+
 def extract_iocs(evidence_items):
 
     iocs = []
@@ -85,106 +109,32 @@ def extract_iocs(evidence_items):
             continue
 
         value = str(item.get("value", "")).lower()
-
         artifact_id = item.get("artifact_id", "")
 
-        severity = "medium"
+        # Substring catalogs (processes / keywords / dll paths).
+        for prefix, terms, template, severity, confidence in _SUBSTRING_RULES:
+            for term in terms:
+                if term.lower() in value:
+                    iocs.append(_emit(
+                        f"{prefix}_{artifact_id}_{_slug(term)}",
+                        template.format(term=term),
+                        severity, confidence, artifact_id,
+                    ))
 
-        confidence = 0.75
-
-        # ---------------------------------------------------
-        # Suspicious Processes
-        # ---------------------------------------------------
-
-        for proc in SUSPICIOUS_PROCESSES:
-
-            if proc.lower() in value:
-
-                iocs.append({
-                    "artifact_id": f"ioc_proc_{artifact_id}_{_slug(proc)}",
-                    "source_tool": "ioc_engine",
-                    "evidence_type": "ioc",
-                    "timestamp": "",
-                    "value": f"Suspicious process detected: {proc}",
-                    "severity": "high",
-                    "confidence": 0.90,
-                    "linked_artifacts": [artifact_id]
-                })
-
-        # ---------------------------------------------------
-        # Malware Keywords
-        # ---------------------------------------------------
-
-        for keyword in SUSPICIOUS_KEYWORDS:
-
-            if keyword.lower() in value:
-
-                iocs.append({
-                    "artifact_id": f"ioc_keyword_{artifact_id}_{_slug(keyword)}",
-                    "source_tool": "ioc_engine",
-                    "evidence_type": "ioc",
-                    "timestamp": "",
-                    "value": f"Malware indicator detected: {keyword}",
-                    "severity": "critical",
-                    "confidence": 0.95,
-                    "linked_artifacts": [artifact_id]
-                })
-
-        # ---------------------------------------------------
-        # Injected Code
-        # ---------------------------------------------------
-
+        # Injected code is an evidence-type signal, not a substring match.
         if evidence_type == "injected_code":
+            iocs.append(_emit(
+                f"ioc_injection_{artifact_id}",
+                "Process injection detected", "critical", 0.97, artifact_id,
+            ))
 
-            iocs.append({
-                "artifact_id": f"ioc_injection_{artifact_id}",
-                "source_tool": "ioc_engine",
-                "evidence_type": "ioc",
-                "timestamp": "",
-                "value": "Process injection detected",
-                "severity": "critical",
-                "confidence": 0.97,
-                "linked_artifacts": [artifact_id]
-            })
-
-        # ---------------------------------------------------
-        # Suspicious DLL Paths
-        # ---------------------------------------------------
-
-        for dll_path in SUSPICIOUS_DLL_PATHS:
-
-            if dll_path in value:
-
-                iocs.append({
-                    "artifact_id": f"ioc_dll_{artifact_id}_{_slug(dll_path)}",
-                    "source_tool": "ioc_engine",
-                    "evidence_type": "ioc",
-                    "timestamp": "",
-                    "value": f"Suspicious DLL path detected: {dll_path}",
-                    "severity": "high",
-                    "confidence": 0.85,
-                    "linked_artifacts": [artifact_id]
-                })
-
-        # ---------------------------------------------------
-        # Suspicious Parent-Child Relationships
-        # ---------------------------------------------------
-
+        # Suspicious parent->child lineage (two-part term, two-slug id).
         for parent, child in SUSPICIOUS_RELATIONS:
-
-            relation_string = f"{parent.lower()} -> {child.lower()}"
-
-            if relation_string in value:
-
-                iocs.append({
-                    "artifact_id": f"ioc_relation_{artifact_id}_{_slug(parent)}_{_slug(child)}",
-                    "source_tool": "ioc_engine",
-                    "evidence_type": "ioc",
-                    "timestamp": "",
-                    "value": f"Suspicious lineage detected: {parent} -> {child}",
-                    "severity": "critical",
-                    "confidence": 0.96,
-                    "linked_artifacts": [artifact_id]
-                })
+            if f"{parent.lower()} -> {child.lower()}" in value:
+                iocs.append(_emit(
+                    f"ioc_relation_{artifact_id}_{_slug(parent)}_{_slug(child)}",
+                    f"Suspicious lineage detected: {parent} -> {child}",
+                    "critical", 0.96, artifact_id,
+                ))
 
     return _dedupe_iocs(iocs)
