@@ -40,6 +40,11 @@ SUSPICIOUS_SOURCES = [
 ]
 
 class PlasoWrapper(BaseWrapper):
+    # The orchestrator feeds plaso the disk image (the ontology lists
+    # disk_image/evidence_directory). The display layers previously called it
+    # log_files, which contradicted what actually runs (issue D2).
+    consumes = "disk_image"
+
     def __init__(self):
         super().__init__("plaso")
 

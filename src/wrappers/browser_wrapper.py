@@ -8,6 +8,8 @@ SUSPICIOUS_DOMAINS = [
 ]
 
 class BrowserWrapper(BaseWrapper):
+    consumes = "browser"
+
     def __init__(self):
         super().__init__("browser")
 

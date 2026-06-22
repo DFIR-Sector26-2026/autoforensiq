@@ -25,6 +25,8 @@ SUSPICIOUS_KEYS = [
 ]
 
 class RegRipperWrapper(BaseWrapper):
+    consumes = "registry_hive"
+
     def __init__(self):
         super().__init__("regripper")
 

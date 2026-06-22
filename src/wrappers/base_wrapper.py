@@ -2,6 +2,11 @@ import subprocess
 from src.utils.audit_log import log_action
 
 class BaseWrapper:
+    # The evidence_files key this tool consumes (issue D2). Subclasses override.
+    # The orchestrator reads this to pick the artifact for a tool, replacing the
+    # old per-tool if/elif ladder; None means the tool maps to no evidence type.
+    consumes = None
+
     def __init__(self, tool_name: str):
         self.tool_name = tool_name
 

@@ -37,6 +37,17 @@ WRAPPER_MAP = {
 }
 
 
+# Derived single source of truth for "which evidence type each tool consumes"
+# (issue D2). Built from each wrapper's `consumes` attribute, so autoforensiq's
+# pre-flight and the report's coverage table no longer keep their own (drifting)
+# copies of this mapping.
+TOOL_EVIDENCE_MAP = {
+    name: cls.consumes
+    for name, cls in WRAPPER_MAP.items()
+    if cls.consumes is not None
+}
+
+
 # ─────────────────────────────────────────────────────────────
 # MAIN ORCHESTRATOR
 # ─────────────────────────────────────────────────────────────
@@ -76,77 +87,9 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
         wrapper = WRAPPER_MAP[name]()
 
-        evidence_path = None
-
-        # ─────────────────────────────────────────
-        # MEMORY FORENSICS
-        # ─────────────────────────────────────────
-
-        if name in ["volatility3", "memprocfs"]:
-
-            evidence_path = evidence_files.get(
-                "memory_dump"
-            )
-
-        # ─────────────────────────────────────────
-        # NETWORK FORENSICS
-        # ─────────────────────────────────────────
-
-        elif name == "tshark":
-
-            evidence_path = evidence_files.get(
-                "pcap"
-            )
-
-        # ─────────────────────────────────────────
-        # DISK FORENSICS
-        # ─────────────────────────────────────────
-
-        elif name == "tsk_fls":
-
-            evidence_path = evidence_files.get(
-                "disk_image"
-            )
-
-        # ─────────────────────────────────────────
-        # REGISTRY FORENSICS
-        # ─────────────────────────────────────────
-
-        elif name == "regripper":
-
-            evidence_path = evidence_files.get(
-                "registry_hive"
-            )
-
-        # ─────────────────────────────────────────
-        # TIMELINE ANALYSIS
-        # ─────────────────────────────────────────
-
-        elif name == "plaso":
-
-            evidence_path = evidence_files.get(
-                "disk_image"
-            )
-
-        # ─────────────────────────────────────────
-        # EMAIL ANALYSIS
-        # ─────────────────────────────────────────
-
-        elif name == "email":
-
-            evidence_path = evidence_files.get(
-                "email"
-            )
-
-        # ─────────────────────────────────────────
-        # BROWSER ANALYSIS
-        # ─────────────────────────────────────────
-
-        elif name == "browser":
-
-            evidence_path = evidence_files.get(
-                "browser"
-            )
+        # Each wrapper declares the evidence_files key it consumes (issue D2),
+        # so the former per-tool if/elif ladder collapses to one lookup.
+        evidence_path = evidence_files.get(wrapper.consumes)
 
         # ─────────────────────────────────────────
         # VALIDATE EVIDENCE PATH(S)

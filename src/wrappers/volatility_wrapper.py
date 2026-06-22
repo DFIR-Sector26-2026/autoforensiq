@@ -259,6 +259,8 @@ def _has_network_context(corpus: str, start: int, end: int, value: str) -> bool:
 
 class VolatilityWrapper(BaseWrapper):
 
+    consumes = "memory_dump"
+
     def __init__(self):
 
         super().__init__("volatility3")

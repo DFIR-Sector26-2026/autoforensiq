@@ -531,16 +531,10 @@ RECOMMENDATIONS_BY_CASE = {
     ],
 }
 
-_TOOL_TO_EVIDENCE = {
-    "volatility3": "memory_dump",
-    "memprocfs":   "memory_dump",
-    "tshark":      "pcap",
-    "tsk_fls":     "disk_image",
-    "regripper":   "registry_hive",
-    "plaso":       "log_files",
-    "email":       "email",
-    "browser":     "browser",
-}
+# Single source of truth derived from each wrapper's `consumes` attribute
+# (issue D2). Was re-typed here and drifted (plaso said log_files while the
+# orchestrator runs it on the disk image).
+from src.orchestrator import TOOL_EVIDENCE_MAP as _TOOL_TO_EVIDENCE
 
 _ALL_EVIDENCE_TYPES = [
     "memory_dump", "pcap", "disk_image",

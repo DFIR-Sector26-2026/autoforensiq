@@ -8,6 +8,8 @@ SUSPICIOUS_KEYWORDS = [
 ]
 
 class EmailWrapper(BaseWrapper):
+    consumes = "email"
+
     def __init__(self):
         super().__init__("email")
 

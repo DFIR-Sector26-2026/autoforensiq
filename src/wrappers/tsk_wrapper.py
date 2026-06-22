@@ -10,6 +10,8 @@ SUSPICIOUS_DIRS = ["temp", "tmp", "appdata\\roaming", "recycle",
                    "programdata", "windows\\temp"]
 
 class TSKWrapper(BaseWrapper):
+    consumes = "disk_image"
+
     def __init__(self):
         super().__init__("tsk_fls")
 

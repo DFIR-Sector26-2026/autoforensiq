@@ -127,6 +127,8 @@ def _enumerate_mounted_processes(mount_dir):
 
 class MemProcFSWrapper(BaseWrapper):
 
+    consumes = "memory_dump"
+
     def __init__(self):
 
         super().__init__("memprocfs")

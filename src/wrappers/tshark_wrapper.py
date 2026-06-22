@@ -33,6 +33,8 @@ DNS_QTYPE_NAMES = {
 }
 
 class TsharkWrapper(BaseWrapper):
+    consumes = "pcap"
+
     def __init__(self):
         super().__init__("tshark")
 

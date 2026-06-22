@@ -536,17 +536,11 @@ def _provided_artifact_types(evidence_files: dict) -> list:
     })
 
 
-# Maps each forensic tool name → the evidence key it requires
-_TOOL_EVIDENCE_MAP = {
-    "volatility3": "memory_dump",
-    "memprocfs":   "memory_dump",
-    "tshark":      "pcap",
-    "tsk_fls":     "disk_image",
-    "regripper":   "registry_hive",
-    "plaso":       "log_files",
-    "email":       "email",
-    "browser":     "browser",
-}
+# Maps each forensic tool name → the evidence key it requires. Single source of
+# truth derived from each wrapper's `consumes` attribute (issue D2) — previously
+# re-typed here and in the orchestrator/report, which let plaso drift
+# (disk_image vs log_files).
+from src.orchestrator import TOOL_EVIDENCE_MAP as _TOOL_EVIDENCE_MAP
 
 _TOOL_DISPLAY = {
     "volatility3": "Volatility3       (memory analysis)",
