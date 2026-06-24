@@ -9,6 +9,8 @@ output/
 *.raw
 *.json
 !src/data/ioc_patterns.json
+!dashboard/package.json
+!dashboard/package-lock.json
 data/test_cases/
 dashboard/node_modules/
 .venv/
