@@ -14,21 +14,7 @@ import StatCard from "../components/StatCard";
 
 import ThreatFeed from "../components/panels/ThreatFeed";
 
-import { summary } from "../data/mockData";
-
-const severityData = [
-  { name: "Critical", value: 6 },
-  { name: "High", value: 12 },
-  { name: "Medium", value: 20 },
-  { name: "Low", value: 40 },
-];
-
-const timelineData = [
-  { stage: "Processes", count: 14 },
-  { stage: "Network", count: 31 },
-  { stage: "Injected", count: 2 },
-  { stage: "Threats", count: 6 },
-];
+import useEvidence from "../hooks/useEvidence";
 
 const COLORS = [
   "#ef4444",
@@ -38,6 +24,31 @@ const COLORS = [
 ];
 
 export default function Overview() {
+
+  const { summary, byTool, loading } = useEvidence();
+
+  if (loading) {
+
+    return <div className="text-white">Loading...</div>;
+  }
+
+  if (!summary) {
+
+    return <div className="text-white">No run data found.</div>;
+  }
+
+  const sd = summary.severity_distribution;
+
+  const severityData = [
+    { name: "Critical", value: sd.critical },
+    { name: "High", value: sd.high },
+    { name: "Medium", value: sd.medium },
+    { name: "Low", value: sd.low },
+  ];
+
+  const toolData = Object.entries(byTool).map(
+    ([stage, count]) => ({ stage, count })
+  );
 
   return (
 
@@ -51,25 +62,25 @@ export default function Overview() {
 
         <StatCard
           title="Total Evidence"
-          value={summary.totalEvidence}
+          value={summary.total_items}
           color="#38bdf8"
         />
 
         <StatCard
-          title="Critical Alerts"
-          value={summary.criticalAlerts}
+          title="Critical"
+          value={summary.critical_count}
           color="#ef4444"
         />
 
         <StatCard
-          title="Suspicious Processes"
-          value={summary.suspiciousProcesses}
+          title="High"
+          value={sd.high}
           color="#f97316"
         />
 
         <StatCard
-          title="Injected Code"
-          value={summary.injectedCode}
+          title="IOC Indicators"
+          value={summary.ioc_count}
           color="#eab308"
         />
 
@@ -129,14 +140,14 @@ export default function Overview() {
         ">
 
           <h2 className="text-2xl font-bold mb-6">
-            Evidence Timeline
+            Evidence by Tool
           </h2>
 
           <div className="h-80">
 
             <ResponsiveContainer width="100%" height="100%">
 
-              <BarChart data={timelineData}>
+              <BarChart data={toolData}>
 
                 <XAxis dataKey="stage" />
 

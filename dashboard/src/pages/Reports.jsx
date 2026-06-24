@@ -2,18 +2,14 @@ import useEvidence from "../hooks/useEvidence";
 
 export default function Reports() {
 
-  const { evidence, loading } = useEvidence();
+  const { summary, loading } = useEvidence();
 
   if (loading) {
 
     return <div>Loading...</div>;
   }
 
-  const stats = evidence.find(
-    (e) => e.evidence_type === "report_stats"
-  );
-
-  if (!stats) {
+  if (!summary) {
 
     return <div>No report stats.</div>;
   }
@@ -33,21 +29,27 @@ export default function Reports() {
       ">
 
         <p>
+          Overall Severity:
+          {" "}
+          {summary.overall_severity.toUpperCase()}
+        </p>
+
+        <p className="mt-4">
           Total Evidence:
           {" "}
-          {stats.value.total_items}
+          {summary.total_items}
         </p>
 
         <p className="mt-4">
           IOC Count:
           {" "}
-          {stats.value.ioc_count}
+          {summary.ioc_count}
         </p>
 
         <p className="mt-4">
           Critical Findings:
           {" "}
-          {stats.value.critical_count}
+          {summary.critical_count}
         </p>
 
       </div>

@@ -3,18 +3,26 @@ import { useEffect, useState } from "react";
 export default function useEvidence() {
 
   const [evidence, setEvidence] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [mitre, setMitre] = useState([]);
+  const [byTool, setByTool] = useState({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
 
-    fetch("/data/unified_evidence.json")
-      .then((res) => res.json())
-      .then((data) => {
+    Promise.all([
+      fetch("/data/unified_evidence.json").then((res) => res.json()),
+      fetch("/data/dashboard.json").then((res) => res.json()),
+    ])
+      .then(([unified, dashboard]) => {
 
-        const items =
-          data.evidence_items || data || [];
+        setEvidence(unified.evidence_items || unified || []);
 
-        setEvidence(items);
+        setSummary(dashboard.summary || null);
+
+        setMitre(dashboard.mitre || []);
+
+        setByTool(dashboard.by_tool || {});
 
         setLoading(false);
       })
@@ -27,5 +35,5 @@ export default function useEvidence() {
 
   }, []);
 
-  return { evidence, loading };
+  return { evidence, summary, mitre, byTool, loading };
 }

@@ -2,16 +2,12 @@ import useEvidence from "../hooks/useEvidence";
 
 export default function Mitre() {
 
-  const { evidence, loading } = useEvidence();
+  const { mitre, loading } = useEvidence();
 
   if (loading) {
 
     return <div>Loading...</div>;
   }
-
-  const items = evidence.filter(
-    (e) => e.evidence_type === "mitre_mapping"
-  );
 
   return (
 
@@ -23,7 +19,7 @@ export default function Mitre() {
 
       <div className="grid grid-cols-2 gap-4">
 
-        {items.map((item, index) => (
+        {mitre.map((item, index) => (
 
           <div
             key={index}
@@ -36,11 +32,15 @@ export default function Mitre() {
           >
 
             <h2 className="font-bold">
-              {item.value.technique}
+              {item.id} — {item.name}
             </h2>
 
-            <p>
-              {item.value.name}
+            <p className="text-slate-400 text-sm mt-1">
+              {item.tactic}
+            </p>
+
+            <p className="text-slate-500 text-xs mt-2">
+              {item.basis}
             </p>
 
           </div>
