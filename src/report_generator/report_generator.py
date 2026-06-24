@@ -1625,6 +1625,45 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     return "\n\n---\n\n".join(sections)
 
 
+def _build_dashboard_summary(unified_evidence, case_context, shap_explanations):
+    """Structured stats + MITRE for the web dashboard, written as a sidecar
+    `dashboard.json`. Mirrors the report's own headline semantics (same
+    `overall_sev` tie-breaker, same `_extract_iocs` count, same MITRE table)
+    so the UI and the markdown report never disagree."""
+    all_items = [e for e in unified_evidence.get("evidence_items", []) if isinstance(e, dict)]
+    by_sev = {s: 0 for s in ("critical", "high", "medium", "low")}
+    for e in all_items:
+        sev = str(e.get("severity", "")).lower()
+        if sev in by_sev:
+            by_sev[sev] += 1
+
+    n_anomalies = len(_xai_lookup(shap_explanations, only_anomalies=True))
+    rule_sev    = _highest_severity(all_items)
+    overall_sev = "high" if (rule_sev == "medium" and n_anomalies >= 1) else rule_sev
+
+    case_type = case_context.get("case_type", "unknown")
+    basis     = "Anomaly detected" if n_anomalies > 0 else "Inferred from case type"
+    mitre = [
+        {"id": tid, "name": tname, "tactic": tactic, "basis": basis}
+        for tid, tname, tactic in MITRE_BY_CASE.get(case_type, MITRE_BY_CASE["unknown"])
+    ]
+
+    return {
+        "case_id": unified_evidence.get("case_id", case_context.get("case_id", "")),
+        "case_type": case_type,
+        "generated_at": unified_evidence.get("generated_at", ""),
+        "summary": {
+            "total_items": unified_evidence.get("total_items", len(all_items)),
+            "overall_severity": overall_sev,
+            "critical_count": by_sev["critical"],
+            "ioc_count": len(_extract_iocs(all_items)),
+            "severity_distribution": by_sev,
+        },
+        "by_tool": {t: len(v) for t, v in unified_evidence.get("evidence_by_tool", {}).items()},
+        "mitre": mitre,
+    }
+
+
 # ─────────────────────────────────────────────────────────────
 # MAIN PUBLIC FUNCTION
 # ─────────────────────────────────────────────────────────────
@@ -1700,5 +1739,16 @@ def generate_report(
         print(f"  [DONE] IOC report written -> {ioc_path}")
     except Exception as exc:
         print(f"  [WARN] IOC report generation failed ({exc})")
+
+    # Dashboard sidecar: structured stats + MITRE for the web UI (data-derived,
+    # written in both mock and live modes alongside unified_evidence.json).
+    try:
+        dashboard = _build_dashboard_summary(unified_evidence, case_context, shap_explanations)
+        dash_path = Path(output_path).parent / "dashboard.json"
+        with open(dash_path, "w", encoding="utf-8") as f:
+            json.dump(dashboard, f, indent=2)
+        print(f"  [DONE] Dashboard data written -> {dash_path}")
+    except Exception as exc:
+        print(f"  [WARN] Dashboard data generation failed ({exc})")
 
     return report_text

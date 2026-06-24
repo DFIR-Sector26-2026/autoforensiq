@@ -6,6 +6,7 @@ sanitizer used by the IOC / MITRE / Critical Findings tables.
 """
 
 from src.report_generator.report_generator import (
+    _build_dashboard_summary,
     _build_evidence_coverage,
     _build_ioc_report,
     _build_ml_only_section,
@@ -660,3 +661,30 @@ def test_ml_only_section_empty_when_no_independent_anomalies():
     section = _build_ml_only_section(
         items, anomaly_ids=set(), anomaly_lookup={}, tool_sources={})
     assert "No artifacts were flagged by anomaly detection" in section
+
+
+def test_dashboard_summary_mirrors_report_headline_and_mitre():
+    # The dashboard sidecar must agree with the report it ships beside: same
+    # severity counts, same overall-severity tie-breaker, same MITRE table.
+    items = [_item("critical", "f1", ioc_match=["wannacry_dropper"]),
+             _item("high", "f2"), _item("medium", "f3"), _item("low", "f4")]
+    ue = _ue(items)
+    ue["evidence_by_tool"] = {"tsk_fls": items}
+    dash = _build_dashboard_summary(ue, {"case_type": "ransomware"}, {"explanations": {}})
+
+    assert dash["summary"]["total_items"] == 4
+    assert dash["summary"]["severity_distribution"] == {
+        "critical": 1, "high": 1, "medium": 1, "low": 1}
+    assert dash["summary"]["critical_count"] == 1
+    # critical evidence + zero anomalies still reads critical (5.3 tie-breaker)
+    assert dash["summary"]["overall_severity"] == "critical"
+    assert [m["id"] for m in dash["mitre"]] == ["T1486", "T1204", "T1547", "T1083"]
+    assert dash["by_tool"] == {"tsk_fls": 4}
+
+
+def test_dashboard_summary_anomaly_breaks_medium_tie():
+    # No critical/high evidence, one medium item, and a P5 anomaly → nudged HIGH.
+    items = [_item("medium", "m1")]
+    shap = {"explanations": {"m1": {"is_anomaly": True, "summary": "unusual"}}}
+    dash = _build_dashboard_summary(_ue(items), {"case_type": "malware"}, shap)
+    assert dash["summary"]["overall_severity"] == "high"

@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 import os
+import shutil
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -50,6 +51,18 @@ def _clear_stale_outputs():
         stale = ROOT_DIR / "output" / name
         if stale.exists():
             stale.unlink()
+
+
+def _publish_to_dashboard():
+    """Copy the artifacts the web dashboard reads into dashboard/public/data/
+    so `npm run dev` serves the latest run at /data/*."""
+    data_dir = ROOT_DIR / "dashboard" / "public" / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("unified_evidence.json", "dashboard.json", "final_report.md"):
+        src = ROOT_DIR / "output" / name
+        if src.exists():
+            shutil.copy2(src, data_dir / name)
+    print(f"  [DASHBOARD] Published run → {data_dir}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -738,6 +751,12 @@ def main(args=None):
         print(f"  [DEV] HTML report → {html_path}")
     except Exception as e:
         print(f"  [DEV] HTML report skipped: {e}")
+
+    # Publish the run to the web dashboard's static data dir.
+    try:
+        _publish_to_dashboard()
+    except Exception as e:
+        print(f"  [DASHBOARD] Publish skipped: {e}")
 
     print("\n" + "=" * 60)
     print("  PIPELINE COMPLETE")

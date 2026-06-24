@@ -13,5 +13,6 @@ output/
 !dashboard/package-lock.json
 data/test_cases/
 dashboard/node_modules/
+dashboard/public/data/
 .venv/
 log2timeline-*.log.gz
