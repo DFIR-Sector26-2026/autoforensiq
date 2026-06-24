@@ -1,11 +1,11 @@
-const alerts = [
-  "Injected code detected in winlogon.exe",
-  "Suspicious lineage: tasksche.exe -> WannaDecryptor",
-  "Critical process injection detected",
-  "Possible ransomware execution chain identified",
-];
+const RANK = { critical: 2, high: 1 };
 
-export default function ThreatFeed() {
+export default function ThreatFeed({ evidence = [] }) {
+
+  const alerts = evidence
+    .filter((e) => e.severity === "critical" || e.severity === "high")
+    .sort((a, b) => (RANK[b.severity] || 0) - (RANK[a.severity] || 0))
+    .slice(0, 6);
 
   return (
 
@@ -23,7 +23,13 @@ export default function ThreatFeed() {
 
       <div className="space-y-4">
 
-        {alerts.map((alert, index) => (
+        {alerts.length === 0 && (
+          <div className="text-slate-400">
+            No critical or high-severity alerts.
+          </div>
+        )}
+
+        {alerts.map((e, index) => (
 
           <div
             key={index}
@@ -31,11 +37,16 @@ export default function ThreatFeed() {
               bg-red-500/10
               border border-red-500/20
               p-4 rounded-xl
-              animate-pulse
             "
           >
 
-            {alert}
+            <span className="uppercase text-xs text-red-300">
+              {e.severity} · {e.evidence_type}
+            </span>
+
+            <div className="mt-1 text-sm">
+              {String(e.value).slice(0, 90)}
+            </div>
 
           </div>
 

@@ -1,5 +1,25 @@
 import useEvidence from "../hooks/useEvidence";
 
+function ProcNode({ node }) {
+
+  return (
+
+    <div className="ml-4 border-l border-slate-700 pl-3">
+
+      <span className={node.suspicious ? "text-red-400 font-bold" : "text-slate-200"}>
+        {node.name}
+        {" "}
+        <span className="text-slate-500 text-xs">(PID {node.pid})</span>
+      </span>
+
+      {(node.children || []).map((child, index) => (
+        <ProcNode key={index} node={child} />
+      ))}
+
+    </div>
+  );
+}
+
 export default function Processes() {
 
   const { evidence, loading } = useEvidence();
@@ -13,15 +33,8 @@ export default function Processes() {
     );
   }
 
-  // SAFETY CHECK
-  const safeEvidence = Array.isArray(evidence)
-    ? evidence
-    : [];
-
-  const processTrees = safeEvidence.filter(
-    (item) =>
-      item &&
-      item.evidence_type === "process_tree"
+  const processTrees = (Array.isArray(evidence) ? evidence : []).filter(
+    (item) => item && item.evidence_type === "process_tree"
   );
 
   return (
@@ -59,18 +72,13 @@ export default function Processes() {
             "
           >
 
-            <pre className="
-              text-sm
-              whitespace-pre-wrap
-            ">
-
-              {JSON.stringify(
-                tree,
-                null,
-                2
-              )}
-
-            </pre>
+            {tree.process_tree_json ? (
+              <ProcNode node={tree.process_tree_json} />
+            ) : (
+              <pre className="text-sm whitespace-pre-wrap">
+                {tree.value}
+              </pre>
+            )}
 
           </div>
         ))}

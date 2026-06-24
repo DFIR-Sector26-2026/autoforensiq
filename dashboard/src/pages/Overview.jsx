@@ -25,7 +25,7 @@ const COLORS = [
 
 export default function Overview() {
 
-  const { summary, byTool, loading } = useEvidence();
+  const { evidence, summary, byTool, loading } = useEvidence();
 
   if (loading) {
 
@@ -172,7 +172,7 @@ export default function Overview() {
 
       <div className="mt-10">
 
-        <ThreatFeed />
+        <ThreatFeed evidence={evidence} />
 
       </div>
 

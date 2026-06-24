@@ -11,6 +11,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import threading
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -93,8 +94,10 @@ class AutoForensiqGUI(ctk.CTk):
             name: ctk.BooleanVar(value=True) for name, _ in _TOOLS
         }
         self._pipeline_running = False
+        self._dashboard_proc: subprocess.Popen | None = None
 
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ── Layout skeleton ───────────────────────────────────────────────────────
 
@@ -569,10 +572,48 @@ class AutoForensiqGUI(ctk.CTk):
             proc.wait()
             status = "✓  Pipeline complete." if proc.returncode == 0 else f"✗  Exit code {proc.returncode}"
             self.after(0, self._console_write, f"\n{status}\n")
+            if proc.returncode == 0:
+                self.after(0, self._launch_dashboard)
         except Exception as exc:
             self.after(0, self._console_write, f"\n[ERROR] {exc}\n")
         finally:
             self.after(0, self._restore_run_btn)
+
+    def _launch_dashboard(self) -> None:
+        """Open the web dashboard once a run finishes. The pipeline already
+        published its data to dashboard/public/data/, so we just start the dev
+        server (which opens the browser itself) — or reopen it if already up.
+
+        We run the vite binary directly rather than via `npm run dev`: npm would
+        spawn vite as a child that survives terminate(), orphaning the server."""
+        url = "http://localhost:5173"
+        dash_dir = ROOT_DIR / "dashboard"
+        vite_bin = dash_dir / "node_modules" / ".bin" / "vite"
+
+        if not vite_bin.exists():
+            self._console_write(
+                "\n[DASHBOARD] Skipped — run `npm install` in dashboard/ first.\n")
+            return
+
+        # Already running from an earlier run: just bring the browser back.
+        if self._dashboard_proc and self._dashboard_proc.poll() is None:
+            webbrowser.open(url)
+            self._console_write(f"\n[DASHBOARD] Reopened {url}\n")
+            return
+
+        self._dashboard_proc = subprocess.Popen(
+            [str(vite_bin), "--port", "5173", "--strictPort", "--open"],
+            cwd=str(dash_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self._console_write(f"\n[DASHBOARD] Server starting → {url}\n")
+
+    def _on_close(self) -> None:
+        """Stop the dashboard dev server (if we started one) before quitting."""
+        if self._dashboard_proc and self._dashboard_proc.poll() is None:
+            self._dashboard_proc.terminate()
+        self.destroy()
 
     def _restore_run_btn(self) -> None:
         self._pipeline_running = False
