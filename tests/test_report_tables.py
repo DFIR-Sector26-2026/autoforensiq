@@ -8,6 +8,7 @@ sanitizer used by the IOC / MITRE / Critical Findings tables.
 from src.report_generator.report_generator import (
     _build_evidence_coverage,
     _build_ioc_report,
+    _build_ml_only_section,
     _build_process_tree,
     _extract_iocs,
     _finding_sort_key,
@@ -622,3 +623,40 @@ def test_p5_cannot_override_or_manufacture_severity():
     shap = {"explanations": {"f1": {"is_anomaly": True}, "f2": {"is_anomaly": True}}}
     r2 = _mock_report(_ue(low), shap, {"case_type": "unknown"})
     assert "Overall case severity: **LOW**" in r2
+
+
+# ─────────────────────────────────────────────────────────────
+# ML-only callout: P5's genuinely independent flags (5.3)
+# ─────────────────────────────────────────────────────────────
+
+def test_ml_only_section_lists_anomalies_without_rule_match():
+    # A low-severity item with no IOC match, flagged anomalous by P5, is the kind
+    # of independent signal the section exists to surface.
+    items = [_item("low", "d1", etype="suspicious_domain", value="oddhost.example")]
+    section = _build_ml_only_section(
+        items, anomaly_ids={"d1"}, anomaly_lookup={"d1": "statistical outlier"},
+        tool_sources={})
+    assert "oddhost.example" in section
+    assert "**1** artifact" in section
+    assert "statistical outlier" in section
+
+
+def test_ml_only_section_excludes_rule_caught_anomalies():
+    # Items the rules already elevated (critical / IOC match) are NOT ML-only,
+    # even when also flagged anomalous — they belong in Key Findings, not here.
+    items = [
+        _item("critical", "c1", ioc_match=["c2_port"]),   # rule-caught
+        _item("low", "i1", ioc_match=["wannacry_payload"]),  # low but IOC-matched
+    ]
+    section = _build_ml_only_section(
+        items, anomaly_ids={"c1", "i1"}, anomaly_lookup={"c1": "x", "i1": "y"},
+        tool_sources={})
+    assert "No artifacts were flagged" in section  # rule-caught items excluded
+    assert "artifact c1" not in section and "artifact i1" not in section
+
+
+def test_ml_only_section_empty_when_no_independent_anomalies():
+    items = [_item("high", "h1")]
+    section = _build_ml_only_section(
+        items, anomaly_ids=set(), anomaly_lookup={}, tool_sources={})
+    assert "No artifacts were flagged by anomaly detection" in section

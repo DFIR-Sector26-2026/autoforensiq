@@ -1324,6 +1324,59 @@ def _build_evidence_coverage(tools_ran, evidence_items=None):
     return "\n".join(rows)
 
 
+def _build_ml_only_section(all_items, anomaly_ids, anomaly_lookup, tool_sources):
+    """Artifacts P5 flagged as anomalous that the rule/IOC path did NOT elevate
+    (severity below high, no IOC match). This is anomaly detection's only
+    genuinely independent contribution — everything else it flags merely re-ranks
+    an item the rules already caught — so it gets its own review callout instead
+    of being folded silently into the full evidence file (issue 5.3)."""
+    ML_ONLY_CAP = 15
+    candidates = [
+        e for e in all_items
+        if isinstance(e, dict)
+        and e.get("artifact_id", "") in anomaly_ids
+        and str(e.get("severity", "")).lower() not in ("critical", "high")
+        and not e.get("ioc_match")
+        and e.get("evidence_type") != "process_tree"
+    ]
+    if not candidates:
+        return (
+            "## ML-Flagged for Review (no rule match)\n\n"
+            "_No artifacts were flagged by anomaly detection beyond those already "
+            "caught by rule/IOC matching._"
+        )
+    candidates.sort(key=_finding_sort_key)
+    shown = candidates[:ML_ONLY_CAP]
+    rows = [
+        "| Type | Artifact | Source · File | Why (XAI) |",
+        "|------|----------|---------------|-----------|",
+    ]
+    for e in shown:
+        aid      = e.get("artifact_id", "")
+        tool     = e.get("source_tool", "-")
+        src_file = tool_sources.get(tool, "-")
+        src_cell = tool if src_file in ("-", "", None) else f"{tool} · {src_file}"
+        rows.append(
+            f"| {_md_cell(_finding_type(e.get('evidence_type', '')))} "
+            f"| {_md_cell(str(e.get('value', '-'))[:70])} "
+            f"| {_md_cell(src_cell)} "
+            f"| {_md_cell(_truncate(anomaly_lookup.get(aid, '-'), 80))} |"
+        )
+    section = (
+        "## ML-Flagged for Review (no rule match)\n\n"
+        f"Anomaly detection independently flagged **{len(candidates)}** artifact(s) "
+        "that no rule or IOC match elevated — candidates for manual review the model "
+        "found unusual relative to the baseline.\n\n"
+        + "\n".join(rows)
+    )
+    overflow = len(candidates) - len(shown)
+    if overflow > 0:
+        section += (
+            f"\n\n_…and {overflow} more — see `output/unified_evidence.json`._"
+        )
+    return section
+
+
 # ─────────────────────────────────────────────────────────────
 # MOCK REPORT BUILDER
 # ─────────────────────────────────────────────────────────────
@@ -1559,9 +1612,13 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
         "and can be used to verify evidence integrity for chain-of-custody compliance."
     )
 
+    # P5's independent contribution: anomalies the rules didn't elevate (5.3).
+    ml_only_section = _build_ml_only_section(
+        all_items, anomaly_ids, anomaly_lookup, tool_sources)
+
     sections = [
         cover, exec_summary, classification, findings_section,
-        ioc_section, mitre_section, process_section,
+        ml_only_section, ioc_section, mitre_section, process_section,
         hyp_section, verdict_section, recs_section,
         coverage_section, audit_section,
     ]
