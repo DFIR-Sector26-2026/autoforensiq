@@ -570,3 +570,55 @@ def test_ioc_report_folded_sample_orders_anchored_before_bare():
     fold = _build_ioc_report(items).split("#### Folded", 1)[1]
     assert fold.index("anchored-host.io") < fold.index("bare-token.ru")
     assert "anchored" in fold and "bare" in fold
+
+
+# ─────────────────────────────────────────────────────────────
+# Overall severity: rule/IOC evidence is primary, P5 is a tie-breaker (5.3)
+# ─────────────────────────────────────────────────────────────
+
+def _ue(items):
+    return {"evidence_items": items, "total_items": len(items),
+            "tools_aggregated": sorted({e["source_tool"] for e in items})}
+
+
+def _item(sev, aid="x1", etype="file_artifact", **extra):
+    item = {"evidence_type": etype, "source_tool": "tsk_fls",
+            "value": f"artifact {aid}", "severity": sev, "artifact_id": aid}
+    item.update(extra)
+    return item
+
+
+def test_overall_severity_is_driven_by_evidence_not_anomaly_count():
+    # A critical-IOC case with ZERO P5 anomalies must still read CRITICAL — the
+    # old formula (high if n_anomalies>=3 ...) both capped at HIGH and ignored the
+    # rule/IOC severities entirely (issue 5.3).
+    items = [_item("critical", "f1", ioc_match=["wannacry_dropper"]),
+             _item("high", "f2"), _item("low", "f3")]
+    report = _mock_report(_ue(items), {"explanations": {}}, {"case_type": "ransomware"})
+    assert "Overall case severity: **CRITICAL**" in report
+
+
+def test_p5_breaks_tie_only_at_the_medium_high_margin():
+    # Highest evidence severity is medium. With no anomaly it stays MEDIUM; one
+    # independent P5 anomaly nudges it to HIGH (the tie-breaker), nothing more.
+    items = [_item("medium", "f1"), _item("low", "f2")]
+    quiet = _mock_report(_ue(items), {"explanations": {}}, {"case_type": "malware"})
+    assert "Overall case severity: **MEDIUM**" in quiet
+
+    shap = {"explanations": {"f1": {"is_anomaly": True, "reason": "outlier"}}}
+    nudged = _mock_report(_ue(items), shap, {"case_type": "malware"})
+    assert "Overall case severity: **HIGH**" in nudged
+
+
+def test_p5_cannot_override_or_manufacture_severity():
+    # P5 silence does not downgrade a critical case...
+    crit = [_item("critical", "f1", ioc_match=["c2_port"])]
+    r1 = _mock_report(_ue(crit), {"explanations": {}}, {"case_type": "ransomware"})
+    assert "Overall case severity: **CRITICAL**" in r1
+
+    # ...and P5 anomalies on an otherwise-low case do not manufacture a higher
+    # headline (the tie-breaker only spans medium<->high).
+    low = [_item("low", "f1"), _item("low", "f2")]
+    shap = {"explanations": {"f1": {"is_anomaly": True}, "f2": {"is_anomaly": True}}}
+    r2 = _mock_report(_ue(low), shap, {"case_type": "unknown"})
+    assert "Overall case severity: **LOW**" in r2

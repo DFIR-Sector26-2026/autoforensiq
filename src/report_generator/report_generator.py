@@ -438,6 +438,20 @@ _SEVERITY_RANK = {
     "informational": 1,
 }
 
+
+def _highest_severity(items):
+    """The case's headline severity = the highest severity corroborated across
+    the evidence set. This is the rule/IOC path's verdict; P5 anomaly detection
+    only adjusts it at the margin (see `_mock_report`). Defaults to "low" for an
+    empty / informational-only set."""
+    best, best_rank = "low", _SEVERITY_RANK["low"]
+    for e in items:
+        sev = str(e.get("severity", "")).lower()
+        rank = _SEVERITY_RANK.get(sev, 0)
+        if rank > best_rank:
+            best, best_rank = sev, rank
+    return best
+
 MITRE_BY_CASE = {
     "ransomware": [
         ("T1486", "Data Encrypted for Impact", "Impact"),
@@ -1192,49 +1206,54 @@ def _build_process_tree(evidence_items, anomaly_ids, tool_sources=None):
     return "\n".join(lines)
 
 
-def _evaluate_hypothesis(hypothesis, anomaly_reason_texts, n_anomalies):
+def _evaluate_hypothesis(hypothesis, overall_sev, n_anomalies):
     """
-    Evaluate a single hypothesis against the anomaly evidence.
+    Evaluate a single hypothesis against the case evidence.
 
-    Uses anomaly count as the primary signal — the word-overlap approach
-    was replaced because XAI reason vocabulary never matched forensic
-    hypothesis vocabulary, producing a permanently-inconclusive result.
+    Led by the overall (rule/IOC) severity, with anomaly detection as
+    corroboration — not the other way round (issue 5.3). Per-hypothesis
+    word-overlap with XAI reasons was tried and removed: the XAI reason
+    vocabulary never matched forensic hypothesis vocabulary, producing a
+    permanently-inconclusive result.
     """
-    if n_anomalies == 0:
-        return "**Not Evidenced** — no anomalous artifacts detected in the current evidence set"
-    if n_anomalies >= 3:
-        return "**Supported** — multiple anomalous artifacts corroborate this hypothesis"
-    if n_anomalies >= 1:
-        return "**Partially Supported** — anomalous artifact(s) detected; further manual review recommended"
-    return "**Inconclusive** — anomaly evidence is insufficient to confirm or refute this hypothesis"
+    sev = overall_sev.lower()
+    if sev in ("critical", "high"):
+        tail = " and corroborated by anomaly detection" if n_anomalies else ""
+        return f"**Supported** — elevated-severity findings in the evidence set{tail}"
+    if sev == "medium" or n_anomalies >= 1:
+        return "**Partially Supported** — suspicious artifact(s) detected; further manual review recommended"
+    return "**Not Evidenced** — no elevated-severity or anomalous artifacts in the current evidence set"
 
 
 def _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence):
     ct = case_type.replace("_", " ").title()
     sev_lower = overall_sev.lower()
-    if sev_lower == "critical" or n_anomalies >= 3:
-        _plur = "y" if n_anomalies == 1 else "ies"
-        _verb = "was" if n_anomalies == 1 else "were"
+    # The verdict is led by the evidence severity; P5 corroboration is mentioned
+    # only when anomaly detection actually fired, not used to drive the tier
+    # (issue 5.3).
+    corrob = (
+        f" {n_anomalies} artifact(s) were independently flagged by anomaly detection."
+        if n_anomalies else ""
+    )
+    if sev_lower == "critical":
         return (
-            f"This investigation reveals strong indicators of a confirmed {ct} incident. "
-            f"{n_anomalies} high-confidence anomal{_plur} {_verb} detected across the evidence set. "
+            f"This investigation reveals strong indicators of a confirmed {ct} incident, "
+            f"with critical-severity artifacts corroborated across the evidence set.{corrob} "
             "Immediate escalation to incident response is warranted."
         )
-    elif sev_lower == "high" or n_anomalies >= 1:
+    elif sev_lower == "high":
         return (
-            f"Evidence is consistent with {ct} activity. "
-            f"{n_anomalies} anomalous artifact(s) were identified with high confidence. "
-            "Analyst review and targeted containment steps are recommended."
+            f"Evidence is consistent with {ct} activity, with high-severity findings in the "
+            f"evidence set.{corrob} Analyst review and targeted containment steps are recommended."
         )
-    elif n_anomalies > 0:
+    elif sev_lower == "medium":
         return (
-            f"Evidence shows suspicious activity consistent with early-stage {ct} indicators. "
-            f"{n_anomalies} artifact(s) triggered anomaly detection. "
+            f"Evidence shows suspicious activity consistent with early-stage {ct} indicators.{corrob} "
             "Further monitoring and expanded evidence collection are advised."
         )
     else:
         return (
-            f"No anomalous artifacts were detected in the current evidence set. "
+            f"No elevated-severity artifacts were detected in the current evidence set. "
             f"The incident report was classified as {ct} with {confidence:.0%} confidence. "
             "Manual review is recommended to confirm benign status or expand evidence scope."
         )
@@ -1333,12 +1352,19 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     # Bridge aliases used by post-resolution code
     anomaly_lookup       = {aid: d.get("summary", "-") for aid, d in xai_lookup.items()}
     anomaly_ids          = set(xai_lookup.keys())
-    anomaly_reason_texts = [d.get("summary", "") for d in xai_lookup.values()]
     n_anomalies          = len(xai_lookup)
-    overall_sev          = "high" if n_anomalies >= 3 else ("medium" if n_anomalies >= 1 else "low")
-
 
     all_items = [e for e in unified_evidence.get("evidence_items", []) if isinstance(e, dict)]
+
+    # Overall severity is driven by the rule/IOC evidence — the highest severity
+    # corroborated across the evidence set. P5 anomaly detection is a tie-breaker,
+    # not the headline: it only nudges an ambiguous *medium* case up to high when
+    # the model independently agrees, and never overrides or manufactures a
+    # verdict. (Before 2026-06-24 this was `high if n_anomalies>=3 ...`, so a clear
+    # critical-IOC case capped at HIGH and a quiet model could silently downgrade
+    # it — issue 5.3.)
+    rule_sev    = _highest_severity(all_items)
+    overall_sev = "high" if (rule_sev == "medium" and n_anomalies >= 1) else rule_sev
     # A "finding" worth its own Key Findings row: elevated severity or a fired
     # IOC match (e.g. a medium ransom-note binary). Bare low-severity anomalies
     # are left to the full evidence file so they don't flood the table. The
@@ -1507,7 +1533,7 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
 
     hyp_lines = []
     for h in hypotheses:
-        verdict = _evaluate_hypothesis(h, anomaly_reason_texts, n_anomalies)
+        verdict = _evaluate_hypothesis(h, overall_sev, n_anomalies)
         hyp_lines.append(f"**Hypothesis:** {h}  \n**Verdict:** {verdict}\n")
     hyp_section = (
         "## Hypotheses Evaluated\n\n" + "\n".join(hyp_lines)
