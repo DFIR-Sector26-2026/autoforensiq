@@ -6,6 +6,7 @@ export default function useEvidence() {
   const [summary, setSummary] = useState(null);
   const [mitre, setMitre] = useState([]);
   const [byTool, setByTool] = useState({});
+  const [reconciliation, setReconciliation] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -13,8 +14,12 @@ export default function useEvidence() {
     Promise.all([
       fetch("/data/unified_evidence.json").then((res) => res.json()),
       fetch("/data/dashboard.json").then((res) => res.json()),
+      // Reconciliation is optional — older runs may not have published it.
+      fetch("/data/evidence_reconciliation.json")
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null),
     ])
-      .then(([unified, dashboard]) => {
+      .then(([unified, dashboard, recon]) => {
 
         setEvidence(unified.evidence_items || unified || []);
 
@@ -23,6 +28,8 @@ export default function useEvidence() {
         setMitre(dashboard.mitre || []);
 
         setByTool(dashboard.by_tool || {});
+
+        setReconciliation(recon);
 
         setLoading(false);
       })
@@ -35,5 +42,5 @@ export default function useEvidence() {
 
   }, []);
 
-  return { evidence, summary, mitre, byTool, loading };
+  return { evidence, summary, mitre, byTool, reconciliation, loading };
 }

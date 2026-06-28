@@ -3,6 +3,7 @@ import {
   Pie,
   Cell,
   Tooltip,
+  Legend,
   ResponsiveContainer,
   BarChart,
   Bar,
@@ -12,20 +13,21 @@ import {
 
 import StatCard from "../components/StatCard";
 
-import ThreatFeed from "../components/panels/ThreatFeed";
-
 import useEvidence from "../hooks/useEvidence";
 
-const COLORS = [
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-];
+import { SEVERITY_HEX, SEVERITY_TEXT } from "../data/severity";
+
+// Dark tooltip so recharts' default white popover doesn't clash with the theme.
+const TOOLTIP_STYLE = {
+  backgroundColor: "#1e293b",
+  border: "1px solid #334155",
+  borderRadius: "0.5rem",
+  color: "#e2e8f0",
+};
 
 export default function Overview() {
 
-  const { evidence, summary, byTool, loading } = useEvidence();
+  const { summary, byTool, reconciliation, loading } = useEvidence();
 
   if (loading) {
 
@@ -108,21 +110,33 @@ export default function Overview() {
                 <Pie
                   data={severityData}
                   dataKey="value"
-                  outerRadius={120}
+                  outerRadius={110}
                 >
 
                   {severityData.map((entry, index) => (
 
                     <Cell
                       key={index}
-                      fill={COLORS[index % COLORS.length]}
+                      fill={SEVERITY_HEX[entry.name.toLowerCase()]}
                     />
 
                   ))}
 
                 </Pie>
 
-                <Tooltip />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  itemStyle={{ color: "#38bdf8" }}
+                  isAnimationActive={false}
+                  wrapperStyle={{ transition: "none" }}
+                />
+
+                <Legend
+                  layout="vertical"
+                  align="left"
+                  verticalAlign="middle"
+                  formatter={(value, entry) => `${value}: ${entry.payload.value}`}
+                />
 
               </PieChart>
 
@@ -153,7 +167,12 @@ export default function Overview() {
 
                 <YAxis />
 
-                <Tooltip />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  cursor={{ fill: "rgba(56, 189, 248, 0.1)" }}
+                  isAnimationActive={false}
+                  wrapperStyle={{ transition: "none" }}
+                />
 
                 <Bar
                   dataKey="count"
@@ -170,11 +189,48 @@ export default function Overview() {
 
       </div>
 
-      <div className="mt-10">
+      {reconciliation && (
 
-        <ThreatFeed evidence={evidence} />
+        <div className="
+          bg-slate-900/70
+          border border-slate-700
+          rounded-2xl
+          p-6 mt-10
+        ">
 
-      </div>
+          <div className="text-sm uppercase tracking-wide text-slate-400 mb-3">
+            Case Verdict
+          </div>
+
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+
+            <span className={`text-3xl font-bold ${SEVERITY_TEXT[summary.overall_severity] || "text-white"}`}>
+              {summary.overall_severity.toUpperCase()}
+            </span>
+
+            <span className="text-2xl text-slate-300">·</span>
+
+            <span className="text-2xl text-slate-200 capitalize">
+              {reconciliation.narrative_case_type}
+            </span>
+
+            <span className="text-2xl text-slate-300">·</span>
+
+            <span className="text-xl text-slate-400">
+              {Math.round((reconciliation.reconciled_confidence || 0) * 100)}% confidence
+            </span>
+
+          </div>
+
+          {reconciliation.notes && reconciliation.notes.length > 0 && (
+            <p className="text-slate-400 mt-4">
+              {reconciliation.notes[0]}
+            </p>
+          )}
+
+        </div>
+
+      )}
 
     </div>
   );

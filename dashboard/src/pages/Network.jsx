@@ -1,15 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useCallback } from "react";
 
 import ForceGraph2D from "react-force-graph-2d";
 
 import useEvidence from "../hooks/useEvidence";
 
-const SEV_COLOR = {
-  critical: "#ef4444",
-  high: "#f97316",
-  medium: "#eab308",
-  low: "#22c55e",
-};
+import { SEVERITY_HEX } from "../data/severity";
 
 const NET_TYPES = [
   "network_connection",
@@ -44,7 +39,7 @@ function buildGraph(evidence) {
       if (!src || !dst) return;
 
       add(src, "#38bdf8");
-      add(dst, SEV_COLOR[e.severity] || "#94a3b8");
+      add(dst, SEVERITY_HEX[e.severity] || "#94a3b8");
       links[`${src}->${dst}`] = { source: src, target: dst };
     });
 
@@ -54,11 +49,28 @@ function buildGraph(evidence) {
 export default function Network() {
 
   const { evidence, loading } = useEvidence();
+  const graphRef = useRef(null);
 
   const graphData = useMemo(
     () => buildGraph(evidence),
     [evidence]
   );
+
+  // Apply the spacing forces the moment the graph instance exists (via the
+  // callback ref) so the warmup ticks lay the nodes out spread-apart *before*
+  // the first paint — no visible settling.
+  const configure = useCallback((fg) => {
+    graphRef.current = fg;
+    if (!fg) return;
+    fg.d3Force("charge")?.strength(-260);
+    fg.d3Force("link")?.distance(110);
+  }, []);
+
+  // Frame the pre-warmed graph instantly (duration 0) so it appears already
+  // centred and fitted instead of zooming in a couple of seconds later.
+  const handleEngineStop = useCallback(() => {
+    requestAnimationFrame(() => graphRef.current?.zoomToFit(0, 60));
+  }, []);
 
   if (loading) {
 
@@ -81,6 +93,7 @@ export default function Network() {
         rounded-2xl
         h-[80vh]
         border border-slate-700
+        overflow-hidden
       ">
 
         {graphData.nodes.length === 0 ? (
@@ -93,17 +106,25 @@ export default function Network() {
 
           <ForceGraph2D
 
-            graphData={graphData}
+            ref={configure}
 
-            nodeLabel="id"
+            graphData={graphData}
 
             backgroundColor="#0f172a"
 
             linkColor={() => "#38bdf8"}
 
-            nodeCanvasObject={(node, ctx) => {
+            linkWidth={1.5}
 
-              const label = node.id;
+            warmupTicks={120}
+
+            cooldownTicks={0}
+
+            onEngineStop={handleEngineStop}
+
+            nodeCanvasObject={(node, ctx, globalScale) => {
+
+              const fontSize = 14 / globalScale;
 
               ctx.fillStyle = node.color;
 
@@ -112,7 +133,7 @@ export default function Network() {
               ctx.arc(
                 node.x,
                 node.y,
-                10,
+                6,
                 0,
                 2 * Math.PI,
                 false
@@ -120,14 +141,15 @@ export default function Network() {
 
               ctx.fill();
 
-              ctx.fillStyle = "white";
-
-              ctx.font = "14px Sans-Serif";
+              ctx.font = `${fontSize}px Inter, system-ui, sans-serif`;
+              ctx.textAlign = "left";
+              ctx.textBaseline = "middle";
+              ctx.fillStyle = "#e2e8f0";
 
               ctx.fillText(
-                label,
-                node.x + 14,
-                node.y + 5
+                node.id,
+                node.x + 10,
+                node.y
               );
             }}
           />

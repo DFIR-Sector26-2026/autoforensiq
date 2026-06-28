@@ -58,7 +58,8 @@ def _publish_to_dashboard():
     so `npm run dev` serves the latest run at /data/*."""
     data_dir = ROOT_DIR / "dashboard" / "public" / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("unified_evidence.json", "dashboard.json", "final_report.md"):
+    for name in ("unified_evidence.json", "dashboard.json", "final_report.md",
+                 "evidence_reconciliation.json"):
         src = ROOT_DIR / "output" / name
         if src.exists():
             shutil.copy2(src, data_dir / name)
