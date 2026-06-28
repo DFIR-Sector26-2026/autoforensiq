@@ -6,6 +6,8 @@ import useEvidence from "../hooks/useEvidence";
 
 import { SEVERITY_TEXT } from "../data/severity";
 
+import { humanize } from "../utils/format";
+
 // Severities shown on this page, in display order.
 const SEV_ORDER = ["critical", "high", "low"];
 
@@ -55,11 +57,11 @@ function Section({ severity, items }) {
                 </td>
 
                 <td className="py-2 pr-4 text-slate-300 whitespace-nowrap">
-                  {e.evidence_type}
+                  {humanize(e.evidence_type)}
                 </td>
 
                 <td className="py-2 pr-4 text-slate-400 whitespace-nowrap">
-                  {e.source_tool}
+                  {humanize(e.source_tool)}
                 </td>
 
                 <td className="py-2 pr-4 font-mono text-xs text-slate-200 break-all">
@@ -67,7 +69,7 @@ function Section({ severity, items }) {
                 </td>
 
                 <td className="py-2 text-xs text-orange-300 break-all">
-                  {(e.ioc_match || []).join(", ")}
+                  {(e.ioc_match || []).map(humanize).join(", ")}
                 </td>
 
               </tr>
@@ -151,7 +153,7 @@ function TypeFilter({ types, selected, allSelected, onToggle, onToggleAll }) {
                 checked={selected.includes(t)}
                 onChange={() => onToggle(t)}
               />
-              {t}
+              {humanize(t)}
             </label>
           ))}
 

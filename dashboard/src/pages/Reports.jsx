@@ -2,6 +2,8 @@ import useEvidence from "../hooks/useEvidence";
 
 import { SEVERITY_TEXT } from "../data/severity";
 
+import { humanize } from "../utils/format";
+
 function pct(x) {
   return `${Math.round((x || 0) * 100)}%`;
 }
@@ -41,7 +43,7 @@ function List({ title, items, tone }) {
       {items && items.length > 0 ? (
         <ul className="space-y-1">
           {items.map((it, i) => (
-            <li key={i} className={`text-sm ${tone}`}>• {it}</li>
+            <li key={i} className={`text-sm ${tone}`}>• {humanize(it)}</li>
           ))}
         </ul>
       ) : (
@@ -97,7 +99,7 @@ export default function Reports() {
 
           {r && (
             <span className="text-xl text-slate-200 capitalize">
-              {r.narrative_case_type}
+              {humanize(r.narrative_case_type)}
             </span>
           )}
 
@@ -152,7 +154,7 @@ export default function Reports() {
             Evidence suggests:
             {" "}
             <span className="text-slate-200 font-semibold">
-              {r.evidence_suggests}
+              {humanize(r.evidence_suggests)}
             </span>
           </p>
 

@@ -17,6 +17,8 @@ import useEvidence from "../hooks/useEvidence";
 
 import { SEVERITY_HEX, SEVERITY_TEXT } from "../data/severity";
 
+import { humanize } from "../utils/format";
+
 // Dark tooltip so recharts' default white popover doesn't clash with the theme.
 const TOOLTIP_STYLE = {
   backgroundColor: "#1e293b",
@@ -163,7 +165,7 @@ export default function Overview() {
 
               <BarChart data={toolData}>
 
-                <XAxis dataKey="stage" />
+                <XAxis dataKey="stage" tickFormatter={humanize} />
 
                 <YAxis />
 
@@ -172,6 +174,7 @@ export default function Overview() {
                   cursor={{ fill: "rgba(56, 189, 248, 0.1)" }}
                   isAnimationActive={false}
                   wrapperStyle={{ transition: "none" }}
+                  labelFormatter={humanize}
                 />
 
                 <Bar
@@ -211,7 +214,7 @@ export default function Overview() {
             <span className="text-2xl text-slate-300">·</span>
 
             <span className="text-2xl text-slate-200 capitalize">
-              {reconciliation.narrative_case_type}
+              {humanize(reconciliation.narrative_case_type)}
             </span>
 
             <span className="text-2xl text-slate-300">·</span>
@@ -224,7 +227,7 @@ export default function Overview() {
 
           {reconciliation.notes && reconciliation.notes.length > 0 && (
             <p className="text-slate-400 mt-4">
-              {reconciliation.notes[0]}
+              {humanize(reconciliation.notes[0])}
             </p>
           )}
 
