@@ -336,7 +336,7 @@ def _extract_ips(text: str) -> list[str]:
 # (e.g. "0.11.5.10" from a _dns-sd PTR query) aren't mistaken for a host.
 _NETWORK_EVIDENCE_TYPES = {
     "network_connection", "dns_query", "http_request", "suspicious_port",
-    "http_body",
+    "http_body", "host_identity",
 }
 
 _LAN_RANGES = (

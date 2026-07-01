@@ -26,6 +26,16 @@ BODY_MAX_BYTES = 8192
 _BODY_URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 _BODY_HEXID_RE = re.compile(r"\b[0-9a-f]{32,64}\b")
 
+
+def _is_lan_ipv4(ip: str) -> bool:
+    """True for RFC1918 addresses — the internal hosts whose MAC identifies the
+    machine (issue B4)."""
+    return (
+        ip.startswith("10.")
+        or ip.startswith("192.168.")
+        or any(ip.startswith(f"172.{n}.") for n in range(16, 32))
+    )
+
 # DNS_ALLOWLIST / DNS_ALLOWLIST_SUFFIXES now live in src.data.threat_intel so the
 # aggregator's B1 co-occurrence pass shares the same benign-infra definition.
 
@@ -58,6 +68,7 @@ class TsharkWrapper(BaseWrapper):
         all_items.extend(self._get_dns_queries(pcap_path))
         all_items.extend(self._get_http_requests(pcap_path))
         all_items.extend(self._get_http_bodies(pcap_path))
+        all_items.extend(self._get_host_identities(pcap_path))
         all_items.extend(self._get_suspicious_ports(pcap_path))
         return all_items
 
@@ -300,6 +311,49 @@ class TsharkWrapper(BaseWrapper):
                 timestamp=timestamp
             ))
         print(f"  [TSHARK] HTTP bodies → {len(items)} indicator item(s)")
+        return items
+
+    def _get_host_identities(self, pcap_path: str) -> list:
+        """Map internal (RFC1918) hosts to their MAC address, so the victim's
+        hardware identity is surfaced alongside its IP (issue B4)."""
+        print("  [TSHARK] Extracting host identities (IP → MAC)...")
+        stdout, _, code = self.run_command([
+            "tshark", "-r", pcap_path,
+            "-Y", "eth.src and ip.src",
+            "-T", "fields",
+            "-e", "frame.time_epoch",
+            "-e", "ip.src",
+            "-e", "eth.src"
+        ], input_files=[pcap_path], timeout=60)
+
+        items = []
+        if code != 0 or not stdout.strip():
+            return items
+
+        macs = {}       # internal ip -> (mac, first_timestamp), first seen wins
+        for line in stdout.strip().splitlines():
+            parts = line.split("\t")
+            if len(parts) < 3:
+                continue
+            timestamp = parts[0]
+            # tshark may emit multiple ip.src values (comma-joined); take the
+            # first LAN address. eth.src is a single source MAC.
+            ip = next((t for t in parts[1].split(",") if _is_lan_ipv4(t)), "")
+            mac = parts[2].split(",")[0]
+            if not ip or not mac or ip in macs:
+                continue
+            macs[ip] = (mac, timestamp)
+
+        for ip, (mac, timestamp) in macs.items():
+            items.append(self.make_evidence_item(
+                artifact_id=f"hostid_{ip.replace('.','_')}_{mac.replace(':','')}",
+                evidence_type="host_identity",
+                value=f"Host {ip} has MAC {mac}",
+                severity="low",
+                confidence=0.90,
+                timestamp=timestamp
+            ))
+        print(f"  [TSHARK] Host identities → {len(items)} item(s)")
         return items
 
     def _get_suspicious_ports(self, pcap_path: str) -> list:
