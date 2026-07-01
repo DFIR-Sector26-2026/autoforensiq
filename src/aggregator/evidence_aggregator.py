@@ -16,7 +16,6 @@ Usage (standalone):
 
 from __future__ import annotations
 
-import ipaddress
 import json
 import os
 import re
@@ -27,7 +26,7 @@ from typing import Any
 import jsonschema
 
 from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
-from src.data.threat_intel import DNS_ALLOWLIST, DNS_ALLOWLIST_SUFFIXES
+from src.data.threat_intel import DNS_ALLOWLIST, DNS_ALLOWLIST_SUFFIXES, is_lan_ipv4
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
@@ -339,22 +338,12 @@ _NETWORK_EVIDENCE_TYPES = {
     "http_body", "host_identity",
 }
 
-_LAN_RANGES = (
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-)
-
 
 def _host_from_network_item(item: dict) -> str | None:
     if item.get("evidence_type") not in _NETWORK_EVIDENCE_TYPES:
         return None
     for ip in _extract_ips(str(item.get("value", ""))):
-        try:
-            addr = ipaddress.ip_address(ip)
-        except ValueError:
-            continue
-        if any(addr in net for net in _LAN_RANGES):
+        if is_lan_ipv4(ip):
             return ip
     return None
 

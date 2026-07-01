@@ -50,6 +50,16 @@ DNS_ALLOWLIST = (
 DNS_ALLOWLIST_SUFFIXES = (".local", ".arpa", ".lan", ".internal", ".home")
 
 
+def is_lan_ipv4(ip: str) -> bool:
+    """True for an RFC1918 (LAN) IPv4 address string — the internal hosts. Used
+    to pick the affected machine out of a connection and to map hosts to MACs."""
+    return (
+        ip.startswith("10.")
+        or ip.startswith("192.168.")
+        or any(ip.startswith(f"172.{n}.") for n in range(16, 32))
+    )
+
+
 def c2_port_severity(port):
     """Return the severity a C2-indicator port warrants, or None if the port is
     not a C2 indicator. `port` may be an int or a digit string."""

@@ -6,6 +6,7 @@ import Overview from "./Overview";
 import Processes from "./Processes";
 import Network from "./Network";
 import Threats from "./Threats";
+import Files from "./Files";
 import Reports from "./Reports";
 import Mitre from "./Mitre";
 
@@ -26,6 +27,9 @@ export default function Dashboard() {
 
       case "Threats":
         return <Threats />;
+
+      case "Files":
+        return <Files />;
 
       case "Reports":
         return <Reports />;

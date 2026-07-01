@@ -11,7 +11,7 @@ import { humanize } from "../utils/format";
 // Severities shown on this page, in display order.
 const SEV_ORDER = ["critical", "high", "low"];
 
-function Section({ severity, items }) {
+function Section({ severity, items, sources }) {
 
   if (items.length === 0) return null;
 
@@ -37,6 +37,7 @@ function Section({ severity, items }) {
               <th className="py-2 pr-4 font-semibold">Severity</th>
               <th className="py-2 pr-4 font-semibold">Type</th>
               <th className="py-2 pr-4 font-semibold">Tool</th>
+              <th className="py-2 pr-4 font-semibold">Source File</th>
               <th className="py-2 pr-4 font-semibold">Detail</th>
               <th className="py-2 font-semibold">IOC</th>
             </tr>
@@ -62,6 +63,10 @@ function Section({ severity, items }) {
 
                 <td className="py-2 pr-4 text-slate-400 whitespace-nowrap">
                   {humanize(e.source_tool)}
+                </td>
+
+                <td className="py-2 pr-4 font-mono text-xs text-slate-400 break-all">
+                  {sources[e.source_tool] || "—"}
                 </td>
 
                 <td className="py-2 pr-4 font-mono text-xs text-slate-200 break-all">
@@ -166,7 +171,7 @@ function TypeFilter({ types, selected, allSelected, onToggle, onToggleAll }) {
 
 export default function Threats() {
 
-  const { evidence, loading } = useEvidence();
+  const { evidence, sources, loading } = useEvidence();
 
   // Multi-select severity filter; Critical + High selected by default.
   const [sevFilter, setSevFilter] = useState(["critical", "high"]);
@@ -262,6 +267,7 @@ export default function Threats() {
           key={sev}
           severity={sev}
           items={visible.filter((e) => e.severity === sev)}
+          sources={sources}
         />
       ))}
 

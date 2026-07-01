@@ -14,5 +14,6 @@ output/
 data/test_cases/
 dashboard/node_modules/
 dashboard/public/data/
+dashboard/dist/
 .venv/
 log2timeline-*.log.gz

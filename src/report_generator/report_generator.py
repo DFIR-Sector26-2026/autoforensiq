@@ -1660,6 +1660,9 @@ def _build_dashboard_summary(unified_evidence, case_context, shap_explanations):
             "severity_distribution": by_sev,
         },
         "by_tool": {t: len(v) for t, v in unified_evidence.get("evidence_by_tool", {}).items()},
+        # tool -> source evidence file, so the UI can attribute each finding to
+        # the artifact it came from (issue U4).
+        "evidence_sources": case_context.get("evidence_sources", {}),
         "mitre": mitre,
     }
 

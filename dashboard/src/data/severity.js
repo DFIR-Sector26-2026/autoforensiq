@@ -14,3 +14,11 @@ export const SEVERITY_HEX = {
   medium: "#eab308",
   low: "#22c55e",
 };
+
+// Ordinal rank for sorting / comparing severities (higher = worse).
+export const SEVERITY_RANK = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+};

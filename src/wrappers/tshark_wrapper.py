@@ -5,6 +5,7 @@ import subprocess
 from src.wrappers.base_wrapper import BaseWrapper
 from src.data.threat_intel import (
     C2_PORTS_ALL, c2_port_severity, DNS_ALLOWLIST, DNS_ALLOWLIST_SUFFIXES,
+    is_lan_ipv4,
 )
 import hashlib
 SUSPICIOUS_PROTOS = ["dns", "http", "smb", "ftp"]
@@ -27,14 +28,6 @@ _BODY_URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 _BODY_HEXID_RE = re.compile(r"\b[0-9a-f]{32,64}\b")
 
 
-def _is_lan_ipv4(ip: str) -> bool:
-    """True for RFC1918 addresses — the internal hosts whose MAC identifies the
-    machine (issue B4)."""
-    return (
-        ip.startswith("10.")
-        or ip.startswith("192.168.")
-        or any(ip.startswith(f"172.{n}.") for n in range(16, 32))
-    )
 
 # DNS_ALLOWLIST / DNS_ALLOWLIST_SUFFIXES now live in src.data.threat_intel so the
 # aggregator's B1 co-occurrence pass shares the same benign-infra definition.
@@ -338,7 +331,7 @@ class TsharkWrapper(BaseWrapper):
             timestamp = parts[0]
             # tshark may emit multiple ip.src values (comma-joined); take the
             # first LAN address. eth.src is a single source MAC.
-            ip = next((t for t in parts[1].split(",") if _is_lan_ipv4(t)), "")
+            ip = next((t for t in parts[1].split(",") if is_lan_ipv4(t)), "")
             mac = parts[2].split(",")[0]
             if not ip or not mac or ip in macs:
                 continue

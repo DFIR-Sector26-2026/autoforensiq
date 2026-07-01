@@ -6,6 +6,7 @@ export default function useEvidence() {
   const [summary, setSummary] = useState(null);
   const [mitre, setMitre] = useState([]);
   const [byTool, setByTool] = useState({});
+  const [sources, setSources] = useState({});
   const [reconciliation, setReconciliation] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -29,6 +30,8 @@ export default function useEvidence() {
 
         setByTool(dashboard.by_tool || {});
 
+        setSources(dashboard.evidence_sources || {});
+
         setReconciliation(recon);
 
         setLoading(false);
@@ -42,5 +45,5 @@ export default function useEvidence() {
 
   }, []);
 
-  return { evidence, summary, mitre, byTool, reconciliation, loading };
+  return { evidence, summary, mitre, byTool, sources, reconciliation, loading };
 }
