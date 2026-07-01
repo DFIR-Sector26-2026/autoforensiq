@@ -6,6 +6,14 @@ from src.data.threat_intel import C2_PORTS_ALL, c2_port_severity
 import hashlib
 SUSPICIOUS_PROTOS = ["dns", "http", "smb", "ftp"]
 
+# Non-browser HTTP User-Agents typical of malware droppers and C2 clients. A
+# scripted UA on outbound web traffic is a strong signal (issue B2: the macOS
+# stealer beaconed with curl/8.7.1). Matched case-insensitively as substrings.
+SUSPICIOUS_USER_AGENTS = (
+    "curl/", "wget/", "python-requests", "python-urllib", "go-http-client",
+    "libwww-perl", "powershell", "okhttp", "java/", "axios/", "winhttp",
+)
+
 # Known-good infrastructure — substring match against the full lowercased
 # domain. A random-looking subdomain under one of these (e.g. a hex label
 # under cloudfront.net) is still legitimate, so we match the parent.
@@ -179,7 +187,8 @@ class TsharkWrapper(BaseWrapper):
             "-e", "frame.time_epoch",
             "-e", "ip.src",
             "-e", "http.host",
-            "-e", "http.request.uri"
+            "-e", "http.request.uri",
+            "-e", "http.user_agent"
         ], input_files=[pcap_path], timeout=60)
 
         items = []
@@ -194,6 +203,17 @@ class TsharkWrapper(BaseWrapper):
             src  = parts[1]
             host = parts[2] if len(parts) > 2 else ""
             uri  = parts[3] if len(parts) > 3 else ""
+            user_agent = parts[4] if len(parts) > 4 else ""
+
+            # A non-browser UA on outbound HTTP is a strong automation/malware
+            # signal — surface it in the value and raise severity (issue B2).
+            suspicious_ua = any(
+                tok in user_agent.lower() for tok in SUSPICIOUS_USER_AGENTS
+            )
+            value = f"HTTP {src} → {host}{uri}"
+            if user_agent:
+                value += f" [UA: {user_agent}]"
+
             items.append(self.make_evidence_item(
                 artifact_id=(
                     f"http_"
@@ -203,11 +223,11 @@ class TsharkWrapper(BaseWrapper):
                     f"{timestamp}"
                 ),
                 evidence_type="http_request",
-                value=f"HTTP {src} → {host}{uri}",
-                severity="medium",
+                value=value,
+                severity="high" if suspicious_ua else "medium",
                 confidence=0.70,
                 timestamp=timestamp
-            ))	
+            ))
         print(f"  [TSHARK] HTTP requests → {len(items)} items")
         return items
 

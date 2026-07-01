@@ -9,6 +9,15 @@ SUSPICIOUS_EXTENSIONS = [".exe", ".dll", ".bat", ".ps1", ".vbs",
 SUSPICIOUS_DIRS = ["temp", "tmp", "appdata\\roaming", "recycle",
                    "programdata", "windows\\temp"]
 
+
+def _in_suspicious_dir(lower_path: str) -> bool:
+    """Match SUSPICIOUS_DIRS against the directory portion only, so a file merely
+    *named* like a temp file (e.g. Spotlight's `tmp.Cab`) isn't flagged — only
+    files that actually live under a suspicious directory (issue B6)."""
+    directory = lower_path.rsplit("/", 1)[0] if "/" in lower_path else ""
+    return any(d in directory for d in SUSPICIOUS_DIRS)
+
+
 class TSKWrapper(BaseWrapper):
     consumes = "disk_image"
 
@@ -90,7 +99,7 @@ class TSKWrapper(BaseWrapper):
 
                 suspicious = (
                     any(filepath.endswith(ext) for ext in SUSPICIOUS_EXTENSIONS) or
-                    any(d in lower_path for d in SUSPICIOUS_DIRS) or
+                    _in_suspicious_dir(lower_path) or
                     is_deleted
                 )
 
@@ -188,7 +197,7 @@ class TSKWrapper(BaseWrapper):
                 lower = filepath.lower()
 
                 if any(filepath.endswith(ext) for ext in SUSPICIOUS_EXTENSIONS) or \
-                   any(d in lower for d in SUSPICIOUS_DIRS):
+                   _in_suspicious_dir(lower):
                     items.append(self.make_evidence_item(
                         artifact_id=f"timeline_{abs(hash(filepath+timestamp)) % 99999}",
                         evidence_type="timeline_event",

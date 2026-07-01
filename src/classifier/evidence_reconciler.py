@@ -70,15 +70,21 @@ _NO_SUPPORT_FLOOR = 0.5
 def _present_evidence_types(unified_evidence: dict) -> set:
     """Evidence types that actually carry at least one item."""
     by_type = unified_evidence.get("evidence_by_type") or {}
+    evidence_items = unified_evidence.get("evidence_items", [])
     present = {etype for etype, items in by_type.items() if items}
-    if present:
-        return present
-    # Fall back to scanning items if the index isn't populated.
-    return {
-        item.get("evidence_type", "")
-        for item in unified_evidence.get("evidence_items", [])
-        if item.get("evidence_type")
-    }
+    if not present:
+        # Fall back to scanning items if the index isn't populated.
+        present = {
+            item.get("evidence_type", "")
+            for item in evidence_items
+            if item.get("evidence_type")
+        }
+    # IOCs are carried as the `ioc_match` annotation on items, not as a distinct
+    # evidence_type, so the "ioc" category counts as present whenever any item is
+    # IOC-tagged (issue B5: it was always reported absent despite matches).
+    if any(item.get("ioc_match") for item in evidence_items):
+        present.add("ioc")
+    return present
 
 
 def _support_score(case_type: str, present: set):

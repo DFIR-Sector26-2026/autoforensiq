@@ -16,6 +16,7 @@ Usage (standalone):
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -326,6 +327,36 @@ def _extract_ips(text: str) -> list[str]:
     return sorted(set(IP_RE.findall(text)))
 
 
+# Network evidence is attributed to the internal endpoint (the affected host),
+# not the case_context default (issue B4: pcap findings showed the template's
+# affected-system IP instead of the real victim). For traffic the host is the
+# LAN (RFC1918) address in the value, regardless of packet direction. We match
+# only the RFC1918 ranges — not is_private — so reversed in-addr.arpa octets
+# (e.g. "0.11.5.10" from a _dns-sd PTR query) aren't mistaken for a host.
+_NETWORK_EVIDENCE_TYPES = {
+    "network_connection", "dns_query", "http_request", "suspicious_port",
+}
+
+_LAN_RANGES = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+)
+
+
+def _host_from_network_item(item: dict) -> str | None:
+    if item.get("evidence_type") not in _NETWORK_EVIDENCE_TYPES:
+        return None
+    for ip in _extract_ips(str(item.get("value", ""))):
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        if any(addr in net for net in _LAN_RANGES):
+            return ip
+    return None
+
+
 def _extract_paths(text: str) -> list[str]:
     candidates = []
     for match in WINDOWS_PATH_RE.findall(text):
@@ -466,7 +497,11 @@ def enrich_evidence_items(items: list[dict], case_context: dict) -> tuple[list[d
         artifact_id = str(enriched_item.get("artifact_id", ""))
         enriched_item["raw_value"] = str(enriched_item.get("value", ""))
         enriched_item["normalized_value"] = _normalize_whitespace(enriched_item.get("value", ""))
-        enriched_item["machine_id"] = str(enriched_item.get("machine_id") or default_machine)
+        enriched_item["machine_id"] = str(
+            enriched_item.get("machine_id")
+            or _host_from_network_item(enriched_item)
+            or default_machine
+        )
         if not isinstance(enriched_item.get("correlations"), list):
             enriched_item["correlations"] = []
         signals_by_artifact[artifact_id] = _extract_item_signals(enriched_item, default_machine)
