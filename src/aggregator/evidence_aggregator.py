@@ -27,6 +27,7 @@ from typing import Any
 import jsonschema
 
 from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+from src.data.threat_intel import DNS_ALLOWLIST, DNS_ALLOWLIST_SUFFIXES
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
@@ -335,6 +336,7 @@ def _extract_ips(text: str) -> list[str]:
 # (e.g. "0.11.5.10" from a _dns-sd PTR query) aren't mistaken for a host.
 _NETWORK_EVIDENCE_TYPES = {
     "network_connection", "dns_query", "http_request", "suspicious_port",
+    "http_body",
 }
 
 _LAN_RANGES = (
@@ -396,6 +398,57 @@ def _extract_domains(text: str) -> list[str]:
             seen.add(normalized)
             domains.append(normalized)
     return domains
+
+
+# Session co-occurrence elevation (issue B1). Once a machine has a confirmed
+# bad_host/bad-IP reputation match, its *other* external (non-allowlisted) domain
+# contacts are worth analyst review — the readable delivery/C2 domains
+# (suzke.com, alragaa.com, …) that the DNS entropy gate and the curated catalog
+# both miss. Bounded to a medium floor and gated on an existing confirmed
+# indicator, so it never fires on clean traffic.
+_COOCCURRENCE_TYPES = {"dns_query", "http_request"}
+
+
+def _is_allowlisted_domain(domain: str) -> bool:
+    d = domain.lower()
+    return any(good in d for good in DNS_ALLOWLIST) or d.endswith(DNS_ALLOWLIST_SUFFIXES)
+
+
+def _has_bad_host_match(item: dict) -> bool:
+    return any(str(tag).startswith("bad_host:") for tag in (item.get("ioc_match") or []))
+
+
+def apply_session_cooccurrence(items: list[dict]) -> int:
+    """Floor a compromised machine's non-allowlisted external domains low ->
+    medium. A machine is compromised if any of its items carries a bad_host
+    reputation match. Returns the number of items elevated."""
+    compromised = {
+        item.get("machine_id")
+        for item in items
+        if item.get("machine_id") and _has_bad_host_match(item)
+    }
+    if not compromised:
+        return 0
+
+    elevated = 0
+    for item in items:
+        if item.get("machine_id") not in compromised:
+            continue
+        if item.get("evidence_type") not in _COOCCURRENCE_TYPES:
+            continue
+        if item.get("severity") != "low":
+            continue
+        external = [
+            d for d in _extract_domains(str(item.get("value", "")))
+            if not _is_allowlisted_domain(d)
+        ]
+        if not external:
+            continue
+        item["severity"] = "medium"
+        existing = item.get("ioc_match") if isinstance(item.get("ioc_match"), list) else []
+        item["ioc_match"] = list(dict.fromkeys(existing + [f"associated_host:{external[0]}"]))
+        elevated += 1
+    return elevated
 
 
 def _extract_bytes(text: str) -> int:
@@ -1036,6 +1089,12 @@ def aggregate_evidence(
 
     # Step 4: Enrich items with normalized values and machine grouping
     enriched_items, signals_by_artifact = enrich_evidence_items(unique_items, case_context)
+
+    # Step 4b: Session co-occurrence — elevate a compromised host's other
+    # external domain contacts low -> medium (issue B1). Runs after enrich (needs
+    # machine_id) and after IOC re-scoring (needs the bad_host tags), before sort.
+    cooccurrence_count = apply_session_cooccurrence(enriched_items)
+    print(f"  [IOC] Session co-occurrence elevated {cooccurrence_count} item(s)")
 
     # Step 5: Sort by severity and confidence
     sorted_items = sort_evidence_items(enriched_items)

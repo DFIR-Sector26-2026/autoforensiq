@@ -32,6 +32,24 @@ C2_PORTS_WATCH = frozenset({6666, 6667, 6668, 6669, 8888, 9999, 12345, 54321})
 C2_PORTS_ALL = C2_PORTS_HIGH | C2_PORTS_WATCH
 
 
+# Known-good infrastructure — substring match against the full lowercased
+# domain. A random-looking subdomain under one of these (e.g. a hex label under
+# cloudfront.net) is still legitimate, so we match the parent. Shared so both the
+# tshark wrapper (DNS gating) and the aggregator (issue B1 co-occurrence) agree
+# on what counts as benign.
+DNS_ALLOWLIST = (
+    "apple.com", "icloud.com", "aaplimg.com", "apple-dns.net",
+    "apple-cloudkit", "cdn-apple.com", "mzstatic.com",
+    "akamai", "akamaized.net", "akadns.net",
+    "cloudflare", "fastly", "google", "gstatic", "googleapis", "ggpht",
+    "amazonaws", "cloudfront", "azureedge", "microsoft", "windows.com",
+    "windowsupdate", "msftncsi", "msftconnecttest", "mshome.net", "mozilla",
+    "ubuntu.com", "debian.org", "fedoraproject.org", "digicert", "verisign",
+)
+# Suffixes that are always local/non-routable noise.
+DNS_ALLOWLIST_SUFFIXES = (".local", ".arpa", ".lan", ".internal", ".home")
+
+
 def c2_port_severity(port):
     """Return the severity a C2-indicator port warrants, or None if the port is
     not a C2 indicator. `port` may be an int or a digit string."""

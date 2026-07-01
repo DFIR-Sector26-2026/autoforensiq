@@ -1,8 +1,11 @@
 import os
+import re
 import json
 import subprocess
 from src.wrappers.base_wrapper import BaseWrapper
-from src.data.threat_intel import C2_PORTS_ALL, c2_port_severity
+from src.data.threat_intel import (
+    C2_PORTS_ALL, c2_port_severity, DNS_ALLOWLIST, DNS_ALLOWLIST_SUFFIXES,
+)
 import hashlib
 SUSPICIOUS_PROTOS = ["dns", "http", "smb", "ftp"]
 
@@ -14,18 +17,17 @@ SUSPICIOUS_USER_AGENTS = (
     "libwww-perl", "powershell", "okhttp", "java/", "axios/", "winhttp",
 )
 
-# Known-good infrastructure — substring match against the full lowercased
-# domain. A random-looking subdomain under one of these (e.g. a hex label
-# under cloudfront.net) is still legitimate, so we match the parent.
-DNS_ALLOWLIST = (
-    "apple.com", "icloud.com", "akamai", "akamaized.net", "akadns.net",
-    "cloudflare", "fastly", "google", "gstatic", "googleapis", "ggpht",
-    "amazonaws", "cloudfront", "azureedge", "microsoft", "windows.com",
-    "windowsupdate", "msftncsi", "msftconnecttest", "mozilla", "ubuntu.com",
-    "debian.org", "fedoraproject.org", "digicert", "verisign",
-)
-# Suffixes that are always local/non-routable noise.
-DNS_ALLOWLIST_SUFFIXES = (".local", ".arpa", ".lan", ".internal", ".home")
+# HTTP-body inspection (issue B3). Only text bodies are read — binary/multipart
+# (e.g. the exfil upload) is skipped — and reads are size-capped. A body is only
+# surfaced when it carries an embedded URL or a long hex token (bot/campaign id),
+# so heartbeats and host fingerprints don't add noise.
+BODY_TEXT_CONTENT_TYPES = ("json", "text", "urlencoded", "xml", "javascript")
+BODY_MAX_BYTES = 8192
+_BODY_URL_RE = re.compile(r"https?://[^\s\"'<>]+")
+_BODY_HEXID_RE = re.compile(r"\b[0-9a-f]{32,64}\b")
+
+# DNS_ALLOWLIST / DNS_ALLOWLIST_SUFFIXES now live in src.data.threat_intel so the
+# aggregator's B1 co-occurrence pass shares the same benign-infra definition.
 
 # A domain is only "high" when its longest label is BOTH long AND high-entropy.
 DNS_SUSPICIOUS_MIN_LABEL_LEN = 12
@@ -55,6 +57,7 @@ class TsharkWrapper(BaseWrapper):
         all_items.extend(self._get_conversations(pcap_path))
         all_items.extend(self._get_dns_queries(pcap_path))
         all_items.extend(self._get_http_requests(pcap_path))
+        all_items.extend(self._get_http_bodies(pcap_path))
         all_items.extend(self._get_suspicious_ports(pcap_path))
         return all_items
 
@@ -229,6 +232,74 @@ class TsharkWrapper(BaseWrapper):
                 timestamp=timestamp
             ))
         print(f"  [TSHARK] HTTP requests → {len(items)} items")
+        return items
+
+    def _get_http_bodies(self, pcap_path: str) -> list:
+        """Inspect text HTTP bodies (requests and responses) for embedded C2
+        indicators. The stealer's task command carries its bot id and a C2 URL
+        in the response body — invisible to header-only parsing (issue B3).
+        Binary/multipart bodies (e.g. the exfil upload) and oversized reads are
+        skipped."""
+        print("  [TSHARK] Inspecting HTTP bodies...")
+        stdout, _, code = self.run_command([
+            "tshark", "-r", pcap_path,
+            "-Y", "http.file_data",
+            "-T", "fields",
+            "-e", "frame.time_epoch",
+            "-e", "ip.src",
+            "-e", "ip.dst",
+            "-e", "http.content_type",
+            "-e", "http.request.uri",
+            "-e", "http.file_data"
+        ], input_files=[pcap_path], timeout=60)
+
+        items = []
+        if code != 0 or not stdout.strip():
+            return items
+
+        for line in stdout.strip().splitlines():
+            parts = line.split("\t")
+            if len(parts) < 6:
+                continue
+            timestamp, src, dst, ctype, uri, hexdata = parts[:6]
+            if not hexdata:
+                continue
+            # Text bodies only — skip the multipart exfil upload and other binary.
+            if not any(t in ctype.lower() for t in BODY_TEXT_CONTENT_TYPES):
+                continue
+            try:
+                raw = bytes.fromhex(hexdata.replace(":", ""))
+            except ValueError:
+                continue
+            text = raw[:BODY_MAX_BYTES].decode("utf-8", "ignore")
+
+            urls = list(dict.fromkeys(_BODY_URL_RE.findall(text)))
+            ids = list(dict.fromkeys(_BODY_HEXID_RE.findall(text)))
+            # No embedded URL or long token → heartbeat/fingerprint, not worth an item.
+            if not urls and not ids:
+                continue
+
+            indicators = []
+            if urls:
+                indicators.append("url=" + ", ".join(urls)[:200])
+            if ids:
+                indicators.append("id=" + ", ".join(ids)[:120])
+
+            items.append(self.make_evidence_item(
+                artifact_id=(
+                    f"httpbody_"
+                    f"{src.replace('.','_')}_"
+                    f"{dst.replace('.','_')}_"
+                    f"{hashlib.md5((uri + text).encode()).hexdigest()[:8]}_"
+                    f"{timestamp}"
+                ),
+                evidence_type="http_body",
+                value=f"HTTP body {src} → {dst}{uri} [{'; '.join(indicators)}]",
+                severity="high" if urls else "medium",
+                confidence=0.75,
+                timestamp=timestamp
+            ))
+        print(f"  [TSHARK] HTTP bodies → {len(items)} indicator item(s)")
         return items
 
     def _get_suspicious_ports(self, pcap_path: str) -> list:
