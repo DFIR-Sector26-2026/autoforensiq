@@ -12,9 +12,17 @@ export default function useEvidence() {
 
   useEffect(() => {
 
+    // Each fetch falls back to an empty default on a missing/404 file (e.g.
+    // opening the dashboard before the first run, or a stale published dir) so
+    // one absent artifact can't reject the whole hook and blank the UI — render
+    // whatever data is available.
     Promise.all([
-      fetch("/data/unified_evidence.json").then((res) => res.json()),
-      fetch("/data/dashboard.json").then((res) => res.json()),
+      fetch("/data/unified_evidence.json")
+        .then((res) => (res.ok ? res.json() : []))
+        .catch(() => []),
+      fetch("/data/dashboard.json")
+        .then((res) => (res.ok ? res.json() : {}))
+        .catch(() => ({})),
       // Reconciliation is optional — older runs may not have published it.
       fetch("/data/evidence_reconciliation.json")
         .then((res) => (res.ok ? res.json() : null))
