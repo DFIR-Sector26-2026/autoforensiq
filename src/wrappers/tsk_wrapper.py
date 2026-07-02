@@ -1,21 +1,59 @@
 import os
 import re
 import json
+import hashlib
 import tempfile
 from src.wrappers.base_wrapper import BaseWrapper
-
-SUSPICIOUS_EXTENSIONS = [".exe", ".dll", ".bat", ".ps1", ".vbs",
-                          ".js", ".jar", ".scr", ".locked", ".encrypted"]
-SUSPICIOUS_DIRS = ["temp", "tmp", "appdata\\roaming", "recycle",
-                   "programdata", "windows\\temp"]
+from src.data.threat_intel import RANSOM_EXTENSIONS, EXECUTABLE_EXTENSIONS
 
 
-def _in_suspicious_dir(lower_path: str) -> bool:
-    """Match SUSPICIOUS_DIRS against the directory portion only, so a file merely
-    *named* like a temp file (e.g. Spotlight's `tmp.Cab`) isn't flagged — only
-    files that actually live under a suspicious directory (issue B6)."""
-    directory = lower_path.rsplit("/", 1)[0] if "/" in lower_path else ""
-    return any(d in directory for d in SUSPICIOUS_DIRS)
+def _path_id(prefix: str, *parts: str) -> str:
+    """Stable, collision-resistant artifact_id from the file path (+ optional
+    timestamp). The old `abs(hash(path)) % 99999` had only ~100k buckets AND used
+    Python's per-process-salted hash(), so on a real disk it (a) collided
+    thousands of distinct files onto shared ids — which the aggregator's
+    dedup-by-artifact_id then silently dropped (68,690 files -> 49,738 on dev01)
+    — and (b) produced different ids every run. A 64-bit md5 slice removes the
+    collision ceiling and is deterministic across runs."""
+    digest = hashlib.md5("|".join(parts).encode("utf-8", "replace")).hexdigest()
+    return f"{prefix}_{digest[:16]}"
+
+
+# EXECUTABLE_EXTENSIONS (executable/script files) are only notable when they sit
+# in a user-writable staging / execution directory (or are deleted): a
+# .dll/.exe/.js in Windows, Program Files, or an app's node_modules is ordinary
+# and must NOT be flagged — flagging on extension alone flooded a real OS disk
+# with tens of thousands of benign binaries (~37k node_modules .js + ~28k Windows
+# .dll on a dev host). RANSOM_EXTENSIONS (encrypted/ransomware files) are flagged
+# wherever they live. Both lists are centralised in threat_intel.
+
+# User-writable staging / execution directories where a dropped executable is a
+# real signal. Matched as path segments against fls's forward-slash output (TSK
+# emits '/' even for NTFS). The surrounding slashes mean a file merely *named*
+# like a temp file (e.g. tmp.Cab) isn't flagged — only files that actually live
+# inside such a directory (issue B6).
+STAGING_DIRS = (
+    "/temp/", "/tmp/", "/appdata/", "/downloads/", "/users/public/",
+    "/programdata/", "/$recycle", "/perflogs/",
+)
+
+
+def _in_staging_dir(lower_path: str) -> bool:
+    return any(seg in lower_path for seg in STAGING_DIRS)
+
+
+def _file_signal(filepath: str):
+    """Return (severity, label) if the path is a notable file artifact by
+    extension + location, else None. Payload/encrypted extensions count anywhere;
+    executable/script extensions count only inside a staging directory. Deleted-
+    file handling stays in the caller (it needs the fls deletion flag)."""
+    lower = filepath.lower()
+    base = lower.rsplit("/", 1)[-1]
+    if base.endswith(RANSOM_EXTENSIONS):
+        return "high", "Payload/encrypted file"
+    if base.endswith(EXECUTABLE_EXTENSIONS) and _in_staging_dir(lower):
+        return "medium", "Executable in staging directory"
+    return None
 
 
 class TSKWrapper(BaseWrapper):
@@ -88,31 +126,29 @@ class TSKWrapper(BaseWrapper):
                 filepath = parts[1].strip() if len(parts) > 1 else line
                 # mactime body field 3 is the type/mode string ("r/rrwxrwxrwx"
                 # for files, "d/drwxrwxrwx" for directories). Skip directory
-                # nodes (issue B3): the dir itself matches SUSPICIOUS_DIRS by
-                # path substring, but it isn't a file artifact — the malware is
-                # the files *inside* it, which are flagged on their own rows.
+                # nodes (issue B3): a staging directory itself isn't a file
+                # artifact — the malware is the files *inside* it, which are
+                # flagged on their own rows.
                 mode = parts[3].strip() if len(parts) > 3 else ""
                 if mode.startswith("d/"):
                     continue
                 is_deleted = line.startswith("r/r *") or "* " in parts[0]
-                lower_path = filepath.lower()
 
-                suspicious = (
-                    any(filepath.endswith(ext) for ext in SUSPICIOUS_EXTENSIONS) or
-                    _in_suspicious_dir(lower_path) or
-                    is_deleted
-                )
+                if is_deleted:
+                    severity, label = "high", "DELETED file"
+                else:
+                    signal = _file_signal(filepath)
+                    if not signal:
+                        continue
+                    severity, label = signal
 
-                if suspicious:
-                    severity = "high" if is_deleted else "medium"
-                    label = "DELETED file" if is_deleted else "Suspicious file"
-                    items.append(self.make_evidence_item(
-                        artifact_id=f"file_{abs(hash(filepath)) % 99999}",
-                        evidence_type="file_artifact",
-                        value=f"{label}: {filepath}",
-                        severity=severity,
-                        confidence=0.75
-                    ))
+                items.append(self.make_evidence_item(
+                    artifact_id=_path_id("file", filepath),
+                    evidence_type="file_artifact",
+                    value=f"{label}: {filepath}",
+                    severity=severity,
+                    confidence=0.75
+                ))
             except Exception:
                 continue
         return items
@@ -194,12 +230,10 @@ class TSKWrapper(BaseWrapper):
                 timestamp = parts[0].strip()
                 filepath  = parts[3].strip() if len(parts) > 3 else ""
                 activity  = parts[2].strip() if len(parts) > 2 else ""
-                lower = filepath.lower()
 
-                if any(filepath.endswith(ext) for ext in SUSPICIOUS_EXTENSIONS) or \
-                   _in_suspicious_dir(lower):
+                if _file_signal(filepath):
                     items.append(self.make_evidence_item(
-                        artifact_id=f"timeline_{abs(hash(filepath+timestamp)) % 99999}",
+                        artifact_id=_path_id("timeline", filepath, timestamp),
                         evidence_type="timeline_event",
                         value=f"[{timestamp}] {activity} → {filepath}",
                         severity="medium",

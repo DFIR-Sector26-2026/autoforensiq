@@ -10,6 +10,8 @@ import yaml
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.data.threat_intel import EXECUTABLE_EXTENSIONS
+
 
 # ─────────────────────────────────────────────────────────────
 # PATHS
@@ -601,7 +603,8 @@ _URL_RE = re.compile(r"→\s*(\S+/\S*)")
 # pattern also matches .onion hidden services (e.g. <16-56 base32>.onion).
 _SUSP_DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9.\-]*\.[a-z]{2,})\b", re.IGNORECASE)
 _CRYPTO_RE = re.compile(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b")
-_FNAME_EXTS = (".exe", ".dll", ".bat", ".ps1", ".vbs", ".cmd", ".scr")
+# Executable/script filename extensions for IOC extraction — shared with the disk
+# wrapper via threat_intel.EXECUTABLE_EXTENSIONS (was a private _FNAME_EXTS copy).
 # Aggregate items re-list many process names (the whole tree, a parent->child
 # pair); tokenizing them would stamp the aggregate's severity/ioc_match onto
 # every benign name, so files come only from discrete items.
@@ -708,7 +711,7 @@ def _item_indicators(item):
         or bool(item.get("ioc_match"))
     )
     if etype not in _AGG_PROC_TYPES and file_signal:
-        ext_tokens = [t for t in val.split() if t.lower().endswith(_FNAME_EXTS)]
+        ext_tokens = [t for t in val.split() if t.lower().endswith(EXECUTABLE_EXTENSIONS)]
         if ext_tokens:
             for tok in ext_tokens:
                 out.append(("Suspicious File", tok[:60]))

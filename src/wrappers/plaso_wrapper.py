@@ -61,10 +61,48 @@ class PlasoWrapper(BaseWrapper):
         stdout, stderr, code = self.run_command(
             [
                 LOG2TIMELINE,
-                "--status_view",
-                "none",
-                "--storage_file",
-                str(plaso_dump),
+                "--status_view", "none",
+                # A bare `log2timeline <image>` runs EVERY parser and MD5-hashes
+                # every file on the disk. On an 11 GB E01 that never finished
+                # inside the 600s timeout below, so the stage was killed and
+                # returned zero events. Restrict to the artifacts _parse_csv
+                # actually keeps (SUSPICIOUS_SOURCES: run keys, scheduled tasks,
+                # powershell/cmd, downloads) so it completes in minutes:
+                #   win7      -> winreg (run keys/autorun), winjob + winevtx
+                #                (scheduled tasks, powershell/cmd command lines),
+                #                webhist (downloads), powershell transcripts.
+                #                Despite the name, "win7" is plaso's preset for
+                #                Windows 7 AND LATER — the same evtx/registry/
+                #                prefetch/NTFS formats cover 8/10/11 and Server
+                #                2008-2022 (verified on the dev01 Server 2022 E01).
+                #   winxp     -> the pre-Win7 formats (.evt event logs, INFO2
+                #                recyclers). Near-free on a modern image (its
+                #                XP-only parsers just find nothing) but makes the
+                #                stage version-agnostic across all Windows.
+                #   prefetch  -> execution evidence (cmd.exe/powershell .pf)
+                # These presets also drag in two parsers whose output the
+                # SUSPICIOUS_SOURCES filter throws away but which dominate cost,
+                # so exclude them (a full super-timeline is wasted here — the
+                # pipeline only keeps events matching a handful of keywords):
+                #   !filestat -> one event per file (millions on a full disk);
+                #                ballooned the run to 300 MB+ and duplicates the
+                #                tsk_fls wrapper's per-file timeline.
+                #   !pe       -> parses every executable on disk (heavy I/O);
+                #                its PE compile-time events never match the
+                #                filter keywords.
+                "--parsers", "win7,winxp,prefetch,!filestat,!pe",
+                # Nothing downstream uses plaso hashes, and hashing every file
+                # was the single biggest time sink.
+                "--hashers", "none",
+                # Process all partitions non-interactively; a multi-partition
+                # image would otherwise prompt for a selection with no TTY.
+                "--partitions", "all",
+                # Same reason for shadow copies: an image with VSS snapshots
+                # (like the dev01 E01) prompts "VSS identifier(s):" and blocks
+                # forever with no TTY. "none" = current volume only, no prompt
+                # (processing every snapshot would also multiply runtime).
+                "--vss_stores", "none",
+                "--storage_file", str(plaso_dump),
                 source_path
             ],
             input_files=[source_path],

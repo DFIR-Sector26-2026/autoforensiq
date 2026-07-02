@@ -196,19 +196,27 @@ def build_indices(items: list[dict]) -> dict[str, dict]:
     """
     Build lookup indices for evidence items.
     Returns {
-      'by_type': {evidence_type: [items]},
-      'by_tool': {source_tool: [items]},
-      'by_machine': {machine_id: [items]}
+      'by_type': {evidence_type: [artifact_id]},
+      'by_tool': {source_tool: [artifact_id]},
+      'by_machine': {machine_id: [artifact_id]}
     }
+
+    The indices hold artifact_id REFERENCES, not full item copies. The full
+    objects already live once in `evidence_items`; embedding a second, third and
+    fourth copy here (one per index) quadrupled the serialized unified_evidence
+    size — a real disk run produced ~50k items and an 843 MB file. Consumers only
+    need the grouping (which types are present, per-tool counts, ids per machine)
+    and resolve full objects from `evidence_items` when required.
     """
     by_type = defaultdict(list)
     by_tool = defaultdict(list)
     by_machine = defaultdict(list)
 
     for item in items:
-        by_type[item.get("evidence_type", "unknown")].append(item)
-        by_tool[item.get("source_tool", "unknown")].append(item)
-        by_machine[item.get("machine_id", "unknown")].append(item)
+        artifact_id = item.get("artifact_id", "")
+        by_type[item.get("evidence_type", "unknown")].append(artifact_id)
+        by_tool[item.get("source_tool", "unknown")].append(artifact_id)
+        by_machine[item.get("machine_id", "unknown")].append(artifact_id)
 
     return {
         "by_type": dict(by_type),

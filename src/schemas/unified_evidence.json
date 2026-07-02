@@ -51,32 +51,26 @@
     },
     "evidence_by_type": {
       "type": "object",
-      "description": "Evidence items grouped by evidence_type for quick lookup",
+      "description": "artifact_id references grouped by evidence_type for quick lookup (resolve full objects from evidence_items)",
       "additionalProperties": {
         "type": "array",
-        "items": {
-          "$ref": "evidence_item.json"
-        }
+        "items": { "type": "string" }
       }
     },
     "evidence_by_tool": {
       "type": "object",
-      "description": "Evidence items grouped by source_tool for provenance tracking",
+      "description": "artifact_id references grouped by source_tool for provenance tracking (resolve full objects from evidence_items)",
       "additionalProperties": {
         "type": "array",
-        "items": {
-          "$ref": "evidence_item.json"
-        }
+        "items": { "type": "string" }
       }
     },
     "evidence_by_machine": {
       "type": "object",
-      "description": "Evidence items grouped by machine_id for bulk analysis",
+      "description": "artifact_id references grouped by machine_id for bulk analysis (resolve full objects from evidence_items)",
       "additionalProperties": {
         "type": "array",
-        "items": {
-          "$ref": "evidence_item.json"
-        }
+        "items": { "type": "string" }
       }
     },
     "findings": {

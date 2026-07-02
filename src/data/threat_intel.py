@@ -50,6 +50,30 @@ DNS_ALLOWLIST = (
 DNS_ALLOWLIST_SUFFIXES = (".local", ".arpa", ".lan", ".internal", ".home")
 
 
+# Ransomware / encrypted-payload file extensions. A file carrying one of these is
+# a strong signal on its own, regardless of where it sits. Shared so the disk
+# (tsk_fls) and memory-filescan (volatility) paths match against ONE list instead
+# of keeping their own drifting copies. Stored as a tuple so it works directly
+# with str.endswith(...) as well as `in` membership.
+RANSOM_EXTENSIONS = (
+    ".wnry", ".wncry", ".wcry", ".wncryt",
+    ".locky", ".zepto", ".odin", ".cerber", ".cerber3",
+    ".crypt", ".crypto", ".crypted", ".encrypted", ".enc",
+    ".locked", ".ecc", ".ezz", ".exx",
+    ".ryuk", ".lockbit", ".conti", ".djvu",
+)
+
+# Executable / script file extensions. Shared so the disk wrapper (which flags
+# them only inside a staging directory) and the report's IOC filename extraction
+# agree on what counts as an executable/script. Stored as a tuple for
+# str.endswith(...). NOT flagged on extension alone — see the staging-dir gate in
+# tsk_wrapper (flagging every binary flooded a real OS disk).
+EXECUTABLE_EXTENSIONS = (
+    ".exe", ".dll", ".bat", ".cmd", ".ps1", ".vbs", ".vbe",
+    ".js", ".jse", ".wsf", ".hta", ".scr", ".jar",
+)
+
+
 def is_lan_ipv4(ip: str) -> bool:
     """True for an RFC1918 (LAN) IPv4 address string — the internal hosts. Used
     to pick the affected machine out of a connection and to map hosts to MACs."""

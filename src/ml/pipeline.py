@@ -111,21 +111,12 @@ def _group_records(records):
     return groups
 
 
-def _build_machine_index(unified_evidence, evidence_records):
+def _build_machine_index(evidence_records):
+    # Build machine_id -> [full item] straight from evidence_records. The
+    # unified_evidence `evidence_by_machine` index now holds artifact_id
+    # references rather than full objects (to keep the file small), so rebuild
+    # the grouping here from the authoritative item list.
     machine_index = {}
-
-    if isinstance(unified_evidence, dict):
-        by_machine = unified_evidence.get("evidence_by_machine", {})
-        if isinstance(by_machine, dict):
-            for machine_id, items in by_machine.items():
-                if isinstance(items, list):
-                    machine_index[str(machine_id)] = [
-                        item for item in items if isinstance(item, dict)
-                    ]
-
-    if machine_index:
-        return machine_index
-
     for record in evidence_records:
         machine_id = str(record.get("machine_id", "")).strip()
         if machine_id:
@@ -214,7 +205,7 @@ def run_ml_pipeline(
             or []
         )
 
-    machine_index = _build_machine_index(unified_evidence, evidence_records)
+    machine_index = _build_machine_index(evidence_records)
     findings_lookup = _build_finding_lookup(
         unified_evidence.get("findings", [])
         if isinstance(unified_evidence, dict)

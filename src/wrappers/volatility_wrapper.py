@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from .base_wrapper import BaseWrapper
-from src.data.threat_intel import c2_port_severity
+from src.data.threat_intel import c2_port_severity, RANSOM_EXTENSIONS
 
 PLUGINS = [
     "windows.pslist",
@@ -178,60 +178,14 @@ def _is_benign_domain(host: str) -> bool:
     return False
 
 
-# DOS / Windows console executables whose 8.3 names end in `.com` (issue 3.3-J).
-# In a memory string sweep these basenames (COMMAND.COM, FORMAT.COM, MORE.COM…)
-# are swept as if they were `*.com` domains. They are single-label filenames, so
-# we only suppress them when they appear bare (no sub-domain, no URL/network
-# context); a real "more.com" inside URL grammar is still kept by the anchor tier.
-_DOS_COM_EXECUTABLES = frozenset({
-    "append", "assign", "attrib", "chcp", "chkdsk", "choice", "command",
-    "comp", "country", "ctty", "debug", "deltree", "diskcomp", "diskcopy",
-    "display", "doskey", "edit", "edlin", "exe2bin", "expand", "fastopen",
-    "fc", "fdisk", "find", "format", "graftabl", "graphics", "keyb", "label",
-    "loadfix", "loadhigh", "mem", "mode", "more", "mscdex", "ntdetect",
-    "nlsfunc", "power", "print", "replace", "restore", "scandisk", "setver",
-    "share", "smartdrv", "sort", "subst", "sys", "tree", "undelete",
-    "unformat", "win", "xcopy",
-})
-
-
-def _is_string_fragment_domain(labels: list, tld: str) -> bool:
-    """True when a *bare* (non-anchored) domain token is string-sweep noise rather
-    than a real endpoint (issue 3.3-J). Caller has already confirmed it is not
-    anchored in URL/network grammar. Three fragment classes are caught:
-
-      * DOS/console `.com` executables (COMMAND.COM, MORE.COM, TREE.COM …) — a
-        single-label `.com` whose SLD is a known DOS binary name.
-      * 2-letter ccTLD tokens whose SLD carries a digit and has no hyphen
-        ("f0hht.ht", "dn5t.aw", "qv0uz.sx") — gibberish, not a real host. The
-        no-hyphen guard preserves legitimate digit-bearing C2 like
-        "lonely-bare-c2.ru".
-      * 2-letter ccTLD tokens whose SLD repeats the TLD string >= 2x ("htaht.ht",
-        "hteht.ht") — a repeated-suffix sweep, not a registration. Requiring two
-        occurrences keeps real words that merely end in the ccTLD ("audit.it").
-    """
-    sld = labels[-2]
-
-    if len(labels) == 2 and tld == "com" and sld in _DOS_COM_EXECUTABLES:
-        return True
-
-    if len(labels) == 2 and len(tld) == 2:
-        if "-" not in sld and any(ch.isdigit() for ch in sld):
-            return True
-        if sld.endswith(tld) and sld.count(tld) >= 2:
-            return True
-
-    return False
-
-
-# URL / network-context anchors (issue D3, confidence tier). A domain recovered
-# from a flat string sweep is far more likely to be a real network endpoint when
-# it sits inside URL grammar — a scheme, an HTTP header, a www. prefix, or a
-# trailing path/port/query — than when it is a bare token adrift in prose or
-# binary. We use this only as a CONFIDENCE signal, never a gate: anchored domains
-# rank above bare ones, but bare domains stay in the evidence set, so a
-# bare-but-real C2 survives for the reputation layer to elevate. The anchor set
-# is fixed from URL grammar, not tuned to any one image, so it generalises.
+# URL / network-context anchors (issue D3). A domain recovered from a flat string
+# sweep is treated as a real network endpoint only when it sits inside URL grammar
+# — a scheme, an HTTP header, a www. prefix, or a trailing path/port/query. This
+# is the GATE for string-derived domains (see _extract_strings): an anchored
+# domain is emitted; a bare token adrift in prose or binary is dropped as noise,
+# since a bare-but-real C2 still reaches the pipeline through its actual
+# connection/DNS artifact. The anchor set is fixed from URL grammar, not tuned to
+# any one image, so it generalises.
 _URL_SCHEME_RE = re.compile(r"(?:https?|ftp|wss?)://$", re.IGNORECASE)
 _HEADER_ANCHORS = ("host:", "referer:", "referrer:", "location:", "origin:",
                    "url=", "uri=")
@@ -1327,14 +1281,8 @@ class VolatilityWrapper(BaseWrapper):
         # independent of where the file sits. The staging-path gate otherwise
         # drops these (e.g. WannaCry *.WNCRY encrypted victim files in a
         # Pictures folder, or a named dropper outside \Intel\).
-        ransom_extensions = {
-            ".wnry", ".wncry", ".wcry", ".wncryt",
-            ".locky", ".zepto", ".odin", ".cerber", ".cerber3",
-            ".crypt", ".crypto", ".crypted", ".encrypted", ".enc",
-            ".locked", ".ecc", ".ezz", ".exx",
-            ".ryuk", ".lockbit", ".conti", ".djvu",
-        }
-
+        # Ransomware / encrypted-payload extensions come from the shared
+        # threat-intel list (RANSOM_EXTENSIONS) so tsk and volatility agree.
         malware_filename_markers = [
             "@wanadecryptor@", "wanadecryptor", "wannadecryptor",
             "tasksche", "taskdl", "taskse", "mssecsvc",
@@ -1378,7 +1326,7 @@ class VolatilityWrapper(BaseWrapper):
                     # signal on its own, so flag it high regardless of path
                     # (bypasses the staging-marker / system-binary gates below).
                     if (
-                        ext in ransom_extensions or
+                        ext in RANSOM_EXTENSIONS or
                         any(tok in basename for tok in malware_filename_markers)
                     ):
                         seen.add(normalized)
@@ -1824,14 +1772,20 @@ class VolatilityWrapper(BaseWrapper):
             flags=re.IGNORECASE,
         )
 
-        # Confidence tier per domain (issue D3): a domain that appears inside URL
-        # / network grammar even once is a likely real endpoint; one that only
-        # ever appears bare is likely string-fragment noise. Track the highest
-        # tier across all occurrences (anchored anywhere ⇒ anchored) so a real C2
-        # whose first textual hit happens to be bare is not mis-demoted.
-        ANCHORED_CONF, BARE_CONF = 0.45, 0.20
-        domain_conf = {}
-        domain_order = []
+        # Emit a memory-string domain ONLY when it is anchored in URL / DNS /
+        # connection grammar at least once (see _has_network_context). A bare
+        # domain fragment — a naked token adrift in prose or binary — carries no
+        # network evidence and is overwhelmingly noise: a memory sweep yields tens
+        # of thousands of them (25k of 36k on the dev01 image, e.g.
+        # "conticrypt.ph/.pa/.pe" smeared across ccTLDs), which flooded
+        # unified_evidence (27 MB) and stalled the P5 ML stage. A genuinely
+        # malicious host reaches the pipeline through its real network artifact
+        # (a connection / DNS query / URL), which is anchored and kept here; the
+        # reputation rescorer then elevates it. .onion hosts are emitted above at
+        # high severity regardless.
+        ANCHORED_CONF = 0.45
+        seen_domains = set()
+        anchored_domains = []
 
         for match in domain_pattern.finditer(corpus):
 
@@ -1845,57 +1799,32 @@ class VolatilityWrapper(BaseWrapper):
             if any(not label or label.startswith("-") or label.endswith("-") for label in labels):
                 continue
 
-            # Drop 1-character second-level labels ("t.com", "h.it", "t.ht") —
-            # almost always string-fragment noise, not real registrations.
+            # Drop 1-character second-level labels ("t.com", "h.it") — noise.
             if len(labels[-2]) < 2:
                 continue
 
             # Disambiguate ccTLDs that double as script extensions: only accept
-            # them when there's a sub-domain (e.g. "panel.c2.pl"), not a bare
-            # "script.py" / "lib.so".
+            # them with a sub-domain (e.g. "panel.c2.pl"), not a bare "script.py".
             if tld in ambiguous_code_tlds and len(labels) < 3:
                 continue
 
-            # Drop benign OS / browser / CDN / CA / telemetry infrastructure
-            # (issue D3) — these dominate a memory dump and are pure noise. The
-            # reputation rescorer (4.2) still elevates any curated bad host that
-            # survives, so this never suppresses real C2.
+            # Drop benign OS / browser / CDN / CA / telemetry infrastructure —
+            # these dominate a memory dump and are pure noise.
             if _is_benign_domain(value):
                 continue
 
-            anchored = _has_network_context(corpus, match.start(), match.end(), value)
-
-            # Reject short bare ccTLD fragments (issue 3.3-J): a *bare* 2-label
-            # token on a 2-letter ccTLD whose SLD is < 4 chars ("ho.gn", "gc.ie",
-            # "exe.pt", "lp.sx") — and registry public-suffix labels swept from
-            # cert/TLD tables ("gob.ve", "asn.au", "pro.ae") — are string-fragment
-            # noise, not real endpoints. Real short domains have a longer TLD
-            # (ft.com) or an SLD >= 4 (google.de); anything in URL/network grammar
-            # (anchored) is kept regardless.
-            if (not anchored and len(labels) == 2
-                    and len(tld) == 2 and len(labels[-2]) < 4):
+            # The gate: keep only domains seen in real URL/network grammar. Bare
+            # string fragments (short ccTLD junk, DOS `.com` names, digit/repeat
+            # noise) are all dropped here — no per-class bare filters needed.
+            if not _has_network_context(corpus, match.start(), match.end(), value):
                 continue
 
-            # Reject the remaining bare string-fragment classes (issue 3.3-J):
-            # DOS `.com` executables ("more.com", "tree.com") and digit/repeat
-            # ccTLD junk ("f0hht.ht", "htaht.ht", "dn5t.aw"). Anchored hits are
-            # kept; see _is_string_fragment_domain for the exact rules.
-            if not anchored and _is_string_fragment_domain(labels, tld):
-                continue
+            if value not in seen_domains:
+                seen_domains.add(value)
+                anchored_domains.append(value)
 
-            conf = ANCHORED_CONF if anchored else BARE_CONF
-            if value not in domain_conf:
-                domain_order.append(value)
-            domain_conf[value] = max(domain_conf.get(value, 0.0), conf)
-
-        # A bare domain from a string sweep is an indicator, not a finding: it is
-        # low-severity by default (issue D3) and only becomes high/critical if the
-        # host-aware reputation layer matches it. Confidence encodes the URL-context
-        # tier so the report layer can rank anchored endpoints above bare tokens
-        # WITHOUT dropping anything — every domain stays available to P5 and the
-        # reputation rescorer.
-        for value in domain_order:
-            _add_item(value, "suspicious_domain", "low", domain_conf[value], "dom")
+        for value in anchored_domains:
+            _add_item(value, "suspicious_domain", "low", ANCHORED_CONF, "dom")
 
         return items
 
