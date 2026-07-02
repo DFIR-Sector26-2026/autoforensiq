@@ -1,7 +1,7 @@
 import hashlib
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 AUDIT_LOG_PATH = "output/audit_log.json"
 
@@ -19,7 +19,7 @@ def log_action(tool_name: str, command: list, input_files: list,
     os.makedirs("output", exist_ok=True)
 
     entry = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "tool": tool_name,
         "command": " ".join(command),
         "status": status,
