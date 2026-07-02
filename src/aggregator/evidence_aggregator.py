@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from collections import defaultdict
 from typing import Any
 import jsonschema
+from referencing import Registry, Resource
 
 from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
 from src.data.threat_intel import DNS_ALLOWLIST, DNS_ALLOWLIST_SUFFIXES, is_lan_ipv4
@@ -1122,13 +1123,24 @@ def aggregate_evidence(
     }
 
     # Step 8: Validate output schema
-    if _UNIFIED_EVIDENCE_SCHEMA:
+    if _UNIFIED_EVIDENCE_SCHEMA and _EVIDENCE_ITEM_SCHEMA:
         try:
-            resolver = jsonschema.RefResolver(
-                base_uri=_SCHEMAS_DIR.as_uri() + "/",
-                referrer=_UNIFIED_EVIDENCE_SCHEMA,
+            # unified_evidence.json $refs "evidence_item.json" as a sibling file.
+            # jsonschema.RefResolver (used here before) is deprecated since 4.18;
+            # resolve the sibling through a referencing.Registry instead. The
+            # schemas carry no $id, so register evidence_item.json under the
+            # schemas-dir base URI and stamp the root schema with that same base
+            # so its relative $ref resolves.
+            base_uri = _SCHEMAS_DIR.as_uri() + "/"
+            registry = Registry().with_resource(
+                uri=base_uri + "evidence_item.json",
+                resource=Resource.from_contents(_EVIDENCE_ITEM_SCHEMA),
             )
-            jsonschema.validate(instance=unified, schema=_UNIFIED_EVIDENCE_SCHEMA, resolver=resolver)
+            validator = jsonschema.Draft7Validator(
+                {**_UNIFIED_EVIDENCE_SCHEMA, "$id": base_uri + "unified_evidence.json"},
+                registry=registry,
+            )
+            validator.validate(unified)
         except jsonschema.ValidationError as ve:
             print(f"  [WARN] Output schema violation: {ve.message}")
 
