@@ -39,6 +39,20 @@ SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 # from IOC matching and keep the structural severity the wrapper assigned.
 _STRUCTURAL_SUMMARY_TYPES = {"process_tree"}
 
+# String-derived domain evidence (e.g. a `suspicious_domain` scraped from memory
+# strings) is only a *finding* if the host was actually contacted. Without a
+# matching network/DNS/HTTP item it stays a visible indicator (keeps its
+# `ioc_match` tag) but is NOT severity-boosted, so an EDR / threat-intel feed
+# resident in memory can't manufacture a CRITICAL verdict from ransomware
+# families no host ever talked to (B-2).
+_CORROBORATION_REQUIRED_TYPES = {"suspicious_domain"}
+
+# Evidence types that prove the subject actually contacted a host — the
+# corroboration source for the gate above.
+_NETWORK_CONTACT_TYPES = {
+    "network_connection", "dns_query", "http_request", "http_body",
+}
+
 # Candidate ports, extracted only from genuine port grammar (issue 4.1-r). A bare
 # 2–5 digit token is NOT a port — a byte count ("442 bytes"), packet count, or PID
 # would otherwise read as a critical C2 port. We accept a number only when it sits
@@ -186,12 +200,51 @@ def _build_indicator_list(catalog: dict, case_context: dict) -> list[dict]:
     return indicators
 
 
-def rescore_item(item: dict, indicators: list[dict]) -> tuple[dict, list[str]]:
+def _norm_host(host: str) -> str:
+    """Lowercase, strip a trailing dot and a leading `www.` so the `www.`-prefixed
+    memory copy of a host and the bare form seen in a pcap collapse to one key
+    (mirrors evidence_aggregator._normalize_host)."""
+    host = host.strip().rstrip(".").lower()
+    return host[len("www."):] if host.startswith("www.") else host
+
+
+def _corroborated_hosts(items: list[dict]) -> set[str]:
+    """Hosts (domains + IP literals) the subject actually contacted, harvested
+    from network/DNS/HTTP items. A string-only domain IOC is a finding only if it
+    appears here (B-2)."""
+    hosts: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict) or item.get("evidence_type") not in _NETWORK_CONTACT_TYPES:
+            continue
+        value = str(item.get("value", ""))
+        hosts.update(_norm_host(h) for h in _HOST_TOKEN_RE.findall(value))
+        hosts.update(_IP_TOKEN_RE.findall(value))
+    return hosts
+
+
+def _domain_corroborated(value: str, corroborated: set[str]) -> bool:
+    """True if any domain in `value` was contacted — exact host or subdomain of a
+    contacted host (`host == c` or `host.endswith("." + c)`), matching the
+    reputation rule's host-aware semantics."""
+    for raw in _HOST_TOKEN_RE.findall(value):
+        h = _norm_host(raw)
+        if any(h == c or h.endswith("." + c) for c in corroborated):
+            return True
+    return False
+
+
+def rescore_item(
+    item: dict,
+    indicators: list[dict],
+    corroborated_hosts: set[str] | None = None,
+) -> tuple[dict, list[str]]:
     """Re-score one evidence item against the indicator list.
 
     Returns (item, matched_ids). Boosts item['severity'] up to the highest
     matched severity floor (never downgrades) and records matches in
-    item['ioc_match'].
+    item['ioc_match']. When `corroborated_hosts` is given, a string-derived
+    domain IOC whose host was never contacted keeps its match tag but is not
+    boosted (B-2).
     """
     if not isinstance(item, dict):
         return item, []
@@ -242,8 +295,18 @@ def rescore_item(item: dict, indicators: list[dict]) -> tuple[dict, list[str]]:
     if not matched_ids:
         return item, []
 
+    # B-2: an uncorroborated string-derived domain keeps its match tag (below)
+    # but must not drive the verdict, so skip the severity boost. A corroborated
+    # one — the same domain also seen in a real connection/DNS — escalates
+    # normally, becoming a genuine finding.
+    boost_allowed = not (
+        corroborated_hosts is not None
+        and item.get("evidence_type") in _CORROBORATION_REQUIRED_TYPES
+        and not _domain_corroborated(value, corroborated_hosts)
+    )
+
     current_rank = SEVERITY_ORDER.get(item.get("severity", "low"), 0)
-    if best_severity and best_rank > current_rank:
+    if boost_allowed and best_severity and best_rank > current_rank:
         item["severity"] = best_severity
 
     # Record matches (de-duplicated, order-preserving) for report transparency.
@@ -262,10 +325,11 @@ def rescore_items(
     if not indicators:
         return items, 0
 
+    corroborated = _corroborated_hosts(items)
     n_boosted = 0
     for item in items:
         before = item.get("severity") if isinstance(item, dict) else None
-        rescore_item(item, indicators)
+        rescore_item(item, indicators, corroborated)
         after = item.get("severity") if isinstance(item, dict) else None
         if before != after:
             n_boosted += 1

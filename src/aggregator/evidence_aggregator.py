@@ -21,7 +21,7 @@ import os
 import re
 from pathlib import Path
 from datetime import datetime, timezone
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Any
 import jsonschema
 from referencing import Registry, Resource
@@ -476,6 +476,35 @@ def _default_machine_id(case_context: dict) -> str:
     return str(case_context.get("case_id", "unknown"))
 
 
+def _resolve_subject_host(items: list[dict], case_context: dict) -> str:
+    """The host all non-network evidence is attributed to.
+
+    Normally the narrative's affected_systems[0], but B-1: when the narrative
+    supplies a bare IP literal that owns *zero* network evidence (dev01:
+    172.16.4.22 was scraped from the incident text and appeared in no
+    connections, while 172.16.4.9 owned them all), that IP is a phantom subject.
+    Only in that case do we defer to the LAN host that actually owns the most
+    network evidence. A hostname default, or an IP that does own connections, is
+    kept as-is — so a host's IP is never swapped for a differently-named label of
+    the same machine."""
+    narrative = _default_machine_id(case_context)
+
+    # Only a bare IP literal can be a phantom; hostnames are left untouched.
+    if _extract_ips(narrative) != [narrative]:
+        return narrative
+
+    counts: Counter = Counter()
+    for item in items:
+        if item.get("evidence_type") not in _NETWORK_EVIDENCE_TYPES:
+            continue
+        lan_ips = {ip for ip in _extract_ips(str(item.get("value", ""))) if is_lan_ipv4(ip)}
+        counts.update(lan_ips)
+
+    if counts and counts.get(narrative, 0) == 0:
+        return counts.most_common(1)[0][0]
+    return narrative
+
+
 def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
     artifact_id = str(item.get("artifact_id", ""))
     source_tool = str(item.get("source_tool", ""))
@@ -539,7 +568,9 @@ def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
 
 
 def enrich_evidence_items(items: list[dict], case_context: dict) -> tuple[list[dict], dict[str, dict[str, Any]]]:
-    default_machine = _default_machine_id(case_context)
+    # Attribute non-network evidence to the real subject host, guarding against a
+    # phantom narrative IP that owns no connections (B-1).
+    default_machine = _resolve_subject_host(items, case_context)
     enriched_items = []
     signals_by_artifact = {}
 

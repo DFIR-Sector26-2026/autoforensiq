@@ -59,9 +59,14 @@ def test_sort_rule_match_outranks_heuristic_within_tier():
 
 
 def test_catalog_matches_wannacry_network_iocs():
-    """The IOC catalog must match the WannaCry killswitch / .onion C2 / BTC
-    ransom wallets so they get an ioc_match (→ become Key Findings) and are
-    escalated. Regression for 3.3-I (network IOCs were absent from the catalog).
+    """The IOC catalog must MATCH the WannaCry killswitch / .onion C2 / BTC
+    ransom wallets so they get an ioc_match (→ become Key Findings indicators).
+    Regression for 3.3-I (network IOCs were absent from the catalog).
+
+    Note (B-2): a string-only `suspicious_domain` keeps its match tag but is NOT
+    severity-boosted without network corroboration — see
+    test_string_domain_needs_network_corroboration_to_escalate. The BTC wallet is
+    a `suspicious_crypto` type (not a domain), so it is not gated and escalates.
     """
     from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
     cat = load_ioc_catalog()
@@ -79,24 +84,62 @@ def test_catalog_matches_wannacry_network_iocs():
     ]
     rescore_items(items, cat, {})
     by_id = {i["artifact_id"]: i for i in items}
-    # killswitch: gains a match and is escalated medium -> high
+    # killswitch: gains a match tag; stays medium (string-only, uncorroborated)
     assert by_id["dom_1"]["ioc_match"] == ["wannacry_killswitch"]
-    assert by_id["dom_1"]["severity"] == "high"
-    # any .onion matches the general Tor-hidden-service rule (high floor)
+    assert by_id["dom_1"]["severity"] == "medium"
+    # any .onion matches the general Tor-hidden-service rule; keeps its tag and
+    # its wrapper severity (uncorroborated, so not boosted further)
     assert by_id["onion_1"]["ioc_match"] == ["tor_hidden_service"]
     assert by_id["onion_1"]["severity"] == "high"
-    # BTC ransom wallet matches the curated named-intel rule and escalates
+    # BTC ransom wallet matches the curated named-intel rule and escalates (not a
+    # domain type, so the corroboration gate does not apply)
     assert by_id["btc_1"]["ioc_match"] == ["wannacry_ransom_wallet"]
     assert by_id["btc_1"]["severity"] == "critical"
 
     # The .onion rule is general, not a WannaCry enumeration: an arbitrary
-    # (non-WannaCry) hidden service must match too.
+    # (non-WannaCry) hidden service must still match (gain the tag).
     novel = [{"artifact_id": "onion_2", "evidence_type": "suspicious_domain",
               "value": "abcdef0123456789deadbeef.onion", "severity": "medium",
               "source_tool": "volatility3"}]
     rescore_items(novel, cat, {})
     assert novel[0]["ioc_match"] == ["tor_hidden_service"]
-    assert novel[0]["severity"] == "high"
+    assert novel[0]["severity"] == "medium"
+
+
+def test_string_domain_needs_network_corroboration_to_escalate():
+    """B-2: a string-only `suspicious_domain` (e.g. a ransomware domain scraped
+    from memory strings) keeps its ioc_match tag but is NOT severity-boosted
+    unless the host was actually contacted. This kills the dev01 false CRITICAL,
+    where an EDR threat-intel feed resident in memory surfaced six ransomware
+    families' domains no host ever talked to. The same domain, once corroborated
+    by a real DNS/connection item, escalates as a genuine finding.
+    """
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+
+    # Uncorroborated: memory string only → tag kept, severity unchanged.
+    uncorroborated = [
+        {"artifact_id": "dom_ks", "evidence_type": "suspicious_domain",
+         "value": "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+         "severity": "medium", "source_tool": "volatility3"},
+    ]
+    rescore_items(uncorroborated, cat, {})
+    assert uncorroborated[0]["ioc_match"] == ["wannacry_killswitch"]
+    assert uncorroborated[0]["severity"] == "medium"
+
+    # Corroborated: a DNS query to the same host is present → escalates.
+    corroborated = [
+        {"artifact_id": "dom_ks", "evidence_type": "suspicious_domain",
+         "value": "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+         "severity": "medium", "source_tool": "volatility3"},
+        {"artifact_id": "dns_ks", "evidence_type": "dns_query", "source_tool": "tshark",
+         "value": "DNS query from 10.0.0.5 -> iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+         "severity": "low"},
+    ]
+    rescore_items(corroborated, cat, {})
+    by_id = {i["artifact_id"]: i for i in corroborated}
+    assert by_id["dom_ks"]["ioc_match"] == ["wannacry_killswitch"]
+    assert by_id["dom_ks"]["severity"] == "high"
 
 
 def test_affected_system_ip_does_not_escalate_benign_traffic():
