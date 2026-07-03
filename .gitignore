@@ -10,7 +10,6 @@ output/
 *.json
 !src/data/ioc_patterns.json
 !src/data/tool_ontology.json
-!src/data/baseline_normal.json
 !data/baseline_normal.json
 !src/schemas/*.json
 !dashboard/package.json

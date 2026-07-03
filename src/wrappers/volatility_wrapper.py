@@ -2,12 +2,11 @@ import os
 import re
 import sys
 import json
-import uuid
 import hashlib
 import tempfile
 from pathlib import Path
 
-from .base_wrapper import BaseWrapper
+from .base_wrapper import BaseWrapper, stable_artifact_id
 from src.data.threat_intel import c2_port_severity, RANSOM_EXTENSIONS
 
 PLUGINS = [
@@ -1209,9 +1208,7 @@ class VolatilityWrapper(BaseWrapper):
 
                 items.append(
                     self.make_evidence_item(
-                        artifact_id=(
-                            f"dll_{str(uuid.uuid4())[:8]}"
-                        ),
+                        artifact_id=stable_artifact_id("dll", line.strip()),
                         evidence_type="suspicious_dll",
                         value=line.strip(),
                         severity="high",
@@ -1332,7 +1329,7 @@ class VolatilityWrapper(BaseWrapper):
                         seen.add(normalized)
                         items.append(
                             self.make_evidence_item(
-                                artifact_id=f"file_{str(uuid.uuid4())[:8]}",
+                                artifact_id=stable_artifact_id("file", candidate),
                                 evidence_type="file_artifact",
                                 value=candidate,
                                 severity="high",
@@ -1386,9 +1383,7 @@ class VolatilityWrapper(BaseWrapper):
 
                     items.append(
                         self.make_evidence_item(
-                            artifact_id=(
-                                f"file_{str(uuid.uuid4())[:8]}"
-                            ),
+                            artifact_id=stable_artifact_id("file", candidate),
                             evidence_type="file_artifact",
                             value=candidate,
                             severity=severity,
@@ -1467,7 +1462,7 @@ class VolatilityWrapper(BaseWrapper):
 
             items.append(
                 self.make_evidence_item(
-                    artifact_id=f"dumpfile_{str(uuid.uuid4())[:8]}",
+                    artifact_id=stable_artifact_id("dumpfile", file_name, result),
                     evidence_type="extracted_file",
                     value=f"{file_name} -> {result}",
                     severity="high",
@@ -1497,7 +1492,7 @@ class VolatilityWrapper(BaseWrapper):
 
             items.append(
                 self.make_evidence_item(
-                    artifact_id=f"yara_{str(uuid.uuid4())[:8]}",
+                    artifact_id=stable_artifact_id("yara", cleaned),
                     evidence_type="yara_match",
                     value=cleaned,
                     severity="high",
@@ -1582,7 +1577,7 @@ class VolatilityWrapper(BaseWrapper):
             seen.add(normalized)
             items.append(
                 self.make_evidence_item(
-                    artifact_id=f"{artifact_prefix}_{str(uuid.uuid4())[:8]}",
+                    artifact_id=stable_artifact_id(artifact_prefix, value),
                     evidence_type=evidence_type,
                     value=value,
                     severity=severity,

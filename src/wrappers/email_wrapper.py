@@ -1,6 +1,5 @@
 import os
-import uuid
-from src.wrappers.base_wrapper import BaseWrapper
+from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
 
 SUSPICIOUS_KEYWORDS = [
     "urgent", "verify", "password", "bank",
@@ -27,7 +26,7 @@ class EmailWrapper(BaseWrapper):
             for keyword in SUSPICIOUS_KEYWORDS:
                 if keyword in content:
                     items.append(self.make_evidence_item(
-                        artifact_id=f"email_{keyword}_{uuid.uuid4().hex[:6]}",
+                        artifact_id=stable_artifact_id("email", email_file, keyword),
                         evidence_type="phishing_email",
                         value=f"Keyword '{keyword}' found",
                         severity="high",

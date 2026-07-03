@@ -1,6 +1,5 @@
 import os
-import uuid
-from src.wrappers.base_wrapper import BaseWrapper
+from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
 
 SUSPICIOUS_DOMAINS = [
     "bit.ly", "tinyurl", "grabify",
@@ -27,7 +26,7 @@ class BrowserWrapper(BaseWrapper):
 
                     if any(domain in lower for domain in SUSPICIOUS_DOMAINS):
                         items.append(self.make_evidence_item(
-                            artifact_id=f"url_{uuid.uuid4().hex[:8]}",
+                            artifact_id=stable_artifact_id("url", line.strip()),
                             evidence_type="suspicious_url",
                             value=line.strip(),
                             severity="high",

@@ -1,5 +1,20 @@
+import hashlib
 import subprocess
 from src.utils.audit_log import log_action
+
+
+def stable_artifact_id(prefix: str, *parts: str) -> str:
+    """Deterministic, collision-resistant artifact_id built from the item's own
+    identifying content. Replaces uuid.uuid4(), which produced a different id
+    every run — so re-runs were not reproducible and the aggregator's
+    dedup-by-artifact_id never collapsed genuine duplicates. Mirrors
+    tsk_wrapper._path_id; a 64-bit md5 slice is stable across runs and, unlike
+    abs(hash()) % 99999, does not over-collide."""
+    digest = hashlib.md5(
+        "|".join(str(p) for p in parts).encode("utf-8", "replace")
+    ).hexdigest()
+    return f"{prefix}_{digest[:16]}"
+
 
 class BaseWrapper:
     # The evidence_files key this tool consumes (issue D2). Subclasses override.
