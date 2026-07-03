@@ -653,85 +653,76 @@ def test_extract_strings_validates_bech32_wallets():
 
 
 def test_extract_strings_domain_tld_recall_and_denoise():
-    # Regression for 3.3-E: country-code / .gov / .edu C2 domains must be
-    # recovered (the old tiny allowlist dropped them), while filename noise and
-    # TLD/extension collisions stay filtered.
+    # Anchored-only (D3/dev01): a memory-string domain is emitted only inside URL/
+    # network grammar. Valid country-code / .gov / .edu endpoints are recovered
+    # when anchored; tokens whose final label isn't a real TLD (.exe/.pdb), 1-char
+    # SLDs, and ambiguous script-ext ccTLDs are dropped even when anchored.
     wrapper = VolatilityWrapper()
     corpus = "\n".join([
-        "c2-panel.example.de",        # ccTLD domain -> recovered
-        "exfil.agency.gov",           # .gov -> recovered
-        "login.university.edu",       # .edu -> recovered
-        "ntoskrnl.exe",               # not a TLD -> dropped
-        "symbols.pdb",                # not a TLD -> dropped
-        "l3codecx.ax",                # DirectShow filter (ext==ccTLD) -> dropped
-        "main.py",                    # script ext == ccTLD, 2 labels -> dropped
-        "panel.c2.pl",                # ambiguous TLD but sub-domained -> recovered
-        "t.com",                      # 1-char SLD junk -> dropped
+        "GET http://c2-panel.example.de/gate",   # ccTLD, anchored -> recovered
+        "Host: exfil.agency.gov",                # .gov, header anchor -> recovered
+        "login.university.edu:8443 open",        # .edu, :port anchor -> recovered
+        "http://panel.c2.pl/x",                  # ambiguous ccTLD w/ sub-domain -> recovered
+        "http://ntoskrnl.exe/x",                 # .exe not a TLD -> dropped
+        "http://symbols.pdb/x",                  # .pdb not a TLD -> dropped
+        "http://t.com/x",                        # 1-char SLD junk -> dropped
+        "http://main.py/x",                      # ambiguous ccTLD, 2 labels -> dropped
     ])
     domains = {
         it["value"] for it in wrapper._extract_strings(corpus)
         if it["evidence_type"] == "suspicious_domain"
     }
 
-    assert "c2-panel.example.de" in domains
-    assert "exfil.agency.gov" in domains
-    assert "login.university.edu" in domains
-    assert "panel.c2.pl" in domains
-    for noise in ("ntoskrnl.exe", "symbols.pdb", "l3codecx.ax", "main.py", "t.com"):
-        assert noise not in domains
+    for keep in ("c2-panel.example.de", "exfil.agency.gov",
+                 "login.university.edu", "panel.c2.pl"):
+        assert keep in domains, keep
+    for noise in ("ntoskrnl.exe", "symbols.pdb", "t.com", "main.py"):
+        assert noise not in domains, noise
 
 
 def test_extract_strings_drops_short_cctld_fragments():
-    # Regression for 3.3-J: bare 2-label tokens on a 2-letter ccTLD with a < 4
-    # char SLD are string-fragment / public-suffix noise, not endpoints. They
-    # must drop when bare but survive when anchored in URL/network grammar, and
-    # genuine short domains (3-letter TLD, or SLD >= 4) must be kept.
+    # Anchored-only: a bare 2-label token is dropped whether it's public-suffix
+    # noise (ho.gn, gob.ve) or a genuine-looking short domain (ft.com, google.de)
+    # — without network grammar none of them are endpoints. The same token
+    # anchored in a URL is kept.
     wrapper = VolatilityWrapper()
     corpus = "\n".join([
-        "ho.gn", "gc.ie", "ht.ht", "exe.pt", "lp.sx",   # fragments -> dropped
-        "gob.ve", "asn.au", "pro.ae",                    # public-suffix labels -> dropped
-        "ft.com",                                        # 3-letter TLD -> kept
-        "google.de",                                     # SLD >= 4 -> kept
-        "evil-c2.io",                                    # SLD >= 4 ccTLD -> kept
-        "http://ai.bj/login",                            # anchored fragment -> kept
+        "ho.gn", "gc.ie", "gob.ve", "asn.au",   # public-suffix / fragment noise, bare
+        "ft.com", "google.de", "evil-c2.io",     # genuine-looking, but still bare
+        "http://ai.bj/login",                    # anchored -> kept
     ])
     domains = {
         it["value"] for it in wrapper._extract_strings(corpus)
         if it["evidence_type"] == "suspicious_domain"
     }
-    for frag in ("ho.gn", "gc.ie", "ht.ht", "exe.pt", "lp.sx", "gob.ve", "asn.au", "pro.ae"):
+    for frag in ("ho.gn", "gc.ie", "gob.ve", "asn.au",
+                 "ft.com", "google.de", "evil-c2.io"):
         assert frag not in domains, frag
-    for keep in ("ft.com", "google.de", "evil-c2.io", "ai.bj"):
-        assert keep in domains, keep
+    assert "ai.bj" in domains
 
 
 def test_extract_strings_drops_dos_exe_and_digit_fragments():
-    # Regression for 3.3-J residuals: DOS/console `.com` executables swept from a
-    # memory image (COMMAND.COM, MORE.COM, TREE.COM…) and digit/repeat ccTLD junk
-    # ("f0hht.ht", "htaht.ht", "dn5t.aw") are string fragments, not endpoints.
-    # They drop when bare but survive when anchored in URL grammar, and real
-    # domains that merely look short stay.
+    # Anchored-only: DOS/console `.com` executables (COMMAND.COM, MORE.COM…),
+    # digit/repeat ccTLD junk, AND ordinary bare domains (evilcorp.com,
+    # lonely-bare-c2.ru) all drop without network grammar. Only the anchored one
+    # survives — and it is kept even though the same token also appears bare.
     wrapper = VolatilityWrapper()
     corpus = "\n".join([
-        "command.com", "format.com", "more.com", "tree.com", "edit.com",  # DOS exes
-        "f0hht.ht", "ltchht8ht.ht", "dn5t.aw", "qv0uz.sx",                 # digit junk
-        "htaht.ht", "hteht.ht",                                           # repeat-suffix junk
-        "evilcorp.com",                                                  # real .com (non-DOS) -> kept
-        "taxonomy.ht",                                                   # SLD no digit/repeat -> kept
-        "audit.it",                                                      # word ending in ccTLD (one occurrence) -> kept
-        "lonely-bare-c2.ru",                                             # hyphenated digit C2 -> kept
-        "http://more.com/payload",                                       # anchored -> kept
+        "command.com", "format.com", "tree.com", "edit.com",  # DOS exes, bare
+        "f0hht.ht", "dn5t.aw", "qv0uz.sx", "htaht.ht",        # digit/repeat junk
+        "evilcorp.com", "taxonomy.ht", "lonely-bare-c2.ru",   # ordinary bare domains
+        "more.com",                                           # bare occurrence...
+        "http://more.com/payload",                            # ...and anchored -> kept
     ])
     domains = {
         it["value"] for it in wrapper._extract_strings(corpus)
         if it["evidence_type"] == "suspicious_domain"
     }
     for frag in ("command.com", "format.com", "tree.com", "edit.com",
-                 "f0hht.ht", "ltchht8ht.ht", "dn5t.aw", "qv0uz.sx",
-                 "htaht.ht", "hteht.ht"):
+                 "f0hht.ht", "dn5t.aw", "qv0uz.sx", "htaht.ht",
+                 "evilcorp.com", "taxonomy.ht", "lonely-bare-c2.ru"):
         assert frag not in domains, frag
-    for keep in ("evilcorp.com", "taxonomy.ht", "audit.it", "lonely-bare-c2.ru", "more.com"):
-        assert keep in domains, keep  # more.com kept because anchored once
+    assert "more.com" in domains  # kept because anchored at least once
 
 
 def test_extract_strings_denoises_prefetch_and_email():
@@ -886,11 +877,12 @@ def test_extract_strings_drops_benign_infrastructure_domains():
     assert domains == [], f"benign infra leaked: {[d['value'] for d in domains]}"
 
 
-def test_extract_strings_downgrades_generic_domains_to_low():
-    # D3: a bare domain from a string sweep is an indicator, not a finding — it
-    # is low severity until the reputation layer (4.2) elevates it. (Was medium.)
+def test_extract_strings_anchored_domain_is_low_severity():
+    # D3: an anchored memory-string domain is an indicator, not a finding — it is
+    # emitted at low severity until the reputation layer (4.2) elevates it, and
+    # only if network-corroborated (B-2).
     from src.wrappers.volatility_wrapper import VolatilityWrapper
-    items = VolatilityWrapper()._extract_strings("beacon to evil-c2-panel.xyz now")
+    items = VolatilityWrapper()._extract_strings("beacon GET http://evil-c2-panel.xyz/x now")
     doms = [i for i in items if i["evidence_type"] == "suspicious_domain"]
     assert len(doms) == 1
     assert doms[0]["value"] == "evil-c2-panel.xyz"
@@ -939,16 +931,17 @@ def test_extract_strings_registry_key_stops_at_pipe():
 # Domain confidence-tier regression (issue D3 — URL context, non-destructive)
 # ─────────────────────────────────────────────────────────────
 
-def test_extract_strings_anchored_domains_get_higher_confidence():
-    # A domain inside URL/network grammar (scheme, Host:, www., :port, path) is a
-    # likely real endpoint and ranks above a bare token — but BOTH are kept.
+def test_extract_strings_anchored_domains_emitted_bare_dropped():
+    # Anchored-only: a domain inside URL/network grammar (scheme, Host:, www.,
+    # :port, path) is emitted at 0.45; a bare token with no anchor is dropped
+    # entirely (it reaches the pipeline through its real connection/DNS artifact).
     from src.wrappers.volatility_wrapper import VolatilityWrapper
     corpus = "\n".join([
         "GET http://callback-host.xyz/gate.php",   # scheme + path
         "Host: beacon.example.to",                 # header anchor
         "www.tracked.io here",                     # www. prefix
         "endpoint api.svc.net:8443 ready",         # :port
-        "loose prose mentions across.com somewhere",  # bare
+        "loose prose mentions across.com somewhere",  # bare -> dropped
     ])
     conf = {i["value"]: i["confidence"] for i in VolatilityWrapper()._extract_strings(corpus)
             if i["evidence_type"] == "suspicious_domain"}
@@ -956,18 +949,17 @@ def test_extract_strings_anchored_domains_get_higher_confidence():
     assert conf.get("beacon.example.to") == 0.45
     assert conf.get("www.tracked.io") == 0.45
     assert conf.get("api.svc.net") == 0.45
-    assert conf.get("across.com") == 0.20          # bare token demoted, NOT dropped
+    assert "across.com" not in conf                # bare token dropped
 
 
-def test_extract_strings_bare_domain_is_kept_not_dropped():
-    # Non-destructive: a bare domain still appears in the evidence set (so the
-    # reputation layer can elevate it), just at the lower confidence tier.
+def test_extract_strings_bare_domain_is_dropped():
+    # Anchored-only: a lone bare domain with no URL/network grammar is dropped —
+    # a bare-but-real C2 still reaches the pipeline through its actual
+    # connection/DNS artifact, which is what the aggregator correlates on.
     from src.wrappers.volatility_wrapper import VolatilityWrapper
     items = VolatilityWrapper()._extract_strings("config c2 = lonely-bare-c2.ru ;")
     sd = [i for i in items if i["evidence_type"] == "suspicious_domain"]
-    assert [i["value"] for i in sd] == ["lonely-bare-c2.ru"]
-    assert sd[0]["confidence"] == 0.20
-    assert sd[0]["severity"] == "low"
+    assert sd == []
 
 
 def test_extract_strings_anchored_anywhere_wins():
