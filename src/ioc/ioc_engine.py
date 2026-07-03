@@ -10,9 +10,13 @@ def _slug(text):
     return s or "x"
 
 
+# Process names suspicious on their name alone. cmd.exe / powershell.exe are
+# deliberately NOT here (B-5): they are living-off-the-land binaries that run
+# constantly on a healthy host, so a bare-name match is a false positive (e.g.
+# the Kibana launcher cmd.exe). Their malicious use carries context this engine
+# already scores separately — the `powershell -enc` keyword and the
+# `explorer.exe -> powershell.exe` relation rule — so no detection is lost.
 SUSPICIOUS_PROCESSES = [
-    "powershell.exe",
-    "cmd.exe",
     "rundll32.exe",
     "wscript.exe",
     "cscript.exe",

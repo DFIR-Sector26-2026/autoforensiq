@@ -1201,6 +1201,14 @@ class VolatilityWrapper(BaseWrapper):
 
             lower = line.lower()
 
+            # ProgramData legitimately hosts Microsoft-signed platform DLLs —
+            # notably Windows Defender's own \Microsoft\Windows Defender\Platform\
+            # directory (MpOav.dll, MpClient.dll, ...), which many processes load.
+            # That is not an implant indicator (B-3), yet it trips the
+            # "programdata" marker below, so skip Defender's platform path.
+            if "\\microsoft\\windows defender\\" in lower:
+                continue
+
             if any(
                 s in lower
                 for s in suspicious_dlls
