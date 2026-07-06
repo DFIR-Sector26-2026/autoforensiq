@@ -889,15 +889,21 @@ def test_extract_strings_anchored_domain_is_low_severity():
     assert doms[0]["severity"] == "low"
 
 
-def test_extract_strings_keeps_onion_high():
-    # D3 must not weaken genuine indicators: .onion hidden services stay high.
+def test_extract_strings_onion_kept_as_low_indicator():
+    # A .onion is kept even when bare (it bypasses the anchored-only drop, since a
+    # memory-resident .onion rarely sits in URL grammar), but emitted at LOW — an
+    # indicator, not a finding. A host holding an in-memory threat-intel / EDR
+    # feed carries dozens of unrelated families' .onions it never contacted; at
+    # high these manufactured a false verdict. A genuine infection is carried by
+    # its other artifacts (ransom note, payload, process, wallet), and the
+    # rescorer still tags this as tor_hidden_service.
     from src.wrappers.volatility_wrapper import VolatilityWrapper
     items = VolatilityWrapper()._extract_strings(
         "ransom abcdef1234567890abcd.onion site"
     )
     onion = [i for i in items if i["value"].endswith(".onion")]
     assert len(onion) == 1
-    assert onion[0]["severity"] == "high"
+    assert onion[0]["severity"] == "low"
     assert onion[0]["evidence_type"] == "suspicious_domain"
 
 

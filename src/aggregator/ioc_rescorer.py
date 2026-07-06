@@ -65,6 +65,18 @@ _PORT_TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A Run/RunOnce/Winlogon key is persistence only when it points at a *suspicious*
+# target: a staging directory, a remote URL, or a non-.exe autostart (Run keys
+# normally launch a plain .exe, so a .dll/.bat/.ps1 there is the anomaly). A bare
+# key path, or a legit app autostarting its own .exe, is not a finding.
+_PERSISTENCE_TARGET_RE = re.compile(
+    r"\\(?:temp|appdata|programdata)\\"
+    r"|\\users\\public\\"
+    r"|https?://"
+    r"|\.(?:dll|bat|cmd|ps1|vbs|js|jar|scr|hta)\b",
+    re.IGNORECASE,
+)
+
 # A dotted-quad IPv4 token (matched whole, so a bad "1.2.3.4" never substring-
 # hits inside "11.2.3.40"). Octet-range validation is loose on purpose — the
 # reputation match is an equality test against the catalog list, not a parser.
@@ -80,6 +92,18 @@ _HOST_TOKEN_RE = re.compile(
 
 def _is_ip(token: str) -> bool:
     return bool(_IP_TOKEN_RE.fullmatch(token.strip()))
+
+
+def _persistence_actionable(item: dict, value: str) -> bool:
+    """True when a persistence_runkey match is a genuine finding, not a bare key
+    path. `schtasks`/`reg add` are persistence *actions* and stand alone; a
+    Run/Winlogon *key* reference qualifies only when it's a registry item that
+    points at a suspicious target (staging dir / URL / non-.exe autostart)."""
+    v = value.lower()
+    if "schtasks" in v or "reg add" in v:
+        return True
+    return (item.get("evidence_type") == "registry_key"
+            and bool(_PERSISTENCE_TARGET_RE.search(value)))
 
 
 def load_ioc_catalog(path: str | Path = _DEFAULT_CATALOG_PATH) -> dict[str, Any]:
@@ -286,7 +310,25 @@ def rescore_item(
         if not hit:
             continue
 
+        # The code_injection rule re-matches the malfind wrapper's OWN output
+        # ("rwx", "injected_code"), but the wrapper already graded those items with
+        # full context (RWX+PE -> critical, bare RWX -> high, JIT/AV -> medium,
+        # corroboration). Re-scoring them let the naive rule override that grading
+        # (it re-elevated Defender's down-ranked RWX back to high). Skip it for
+        # injected_code items — like process_tree, they're already scored on their
+        # own item. Genuine injections keep their wrapper severity (never
+        # downgraded) and the ioc_engine "Process injection detected" IOC; the rule
+        # stays active for non-injected_code items (a "process hollowing" /
+        # "reflective" mention in a commandline or string still elevates).
+        if rule.get("id") == "code_injection" and item.get("evidence_type") == "injected_code":
+            continue
+
         matched_ids.append(match_id)
+        # Persistence via a Run/RunOnce/Winlogon key elevates only when the key
+        # points at a suspicious target; a bare key path is on every Windows host.
+        # Keep the tag (above), skip the boost (fixes the bare-Run-key FP flood).
+        if rule.get("id") == "persistence_runkey" and not _persistence_actionable(item, value):
+            continue
         rank = SEVERITY_ORDER.get(rule.get("severity", "low"), 0)
         if rank > best_rank:
             best_rank = rank

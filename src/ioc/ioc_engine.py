@@ -109,7 +109,13 @@ def extract_iocs(evidence_items):
         # lineage (`process_relation` items). Scanning it re-derives the same
         # IOCs from one item, producing duplicate / colliding artifact_ids
         # (cf. issue 4.4 — process vs process_tree double-scoring).
-        if evidence_type == "process_tree":
+        #
+        # Also skip string-derived `suspicious_domain` items: the substring
+        # catalogs below match process names / keywords / DLL paths, none of which
+        # legitimately live inside a memory-scraped domain token — matching
+        # "mimikatz" in "invoke-mimikatz.ps1tinyurl.com" is a false positive.
+        # Domains are scored on the reputation/corroboration path (ioc_rescorer).
+        if evidence_type in ("process_tree", "suspicious_domain"):
             continue
 
         value = str(item.get("value", "")).lower()
@@ -117,6 +123,12 @@ def extract_iocs(evidence_items):
 
         # Substring catalogs (processes / keywords / dll paths).
         for prefix, terms, template, severity, confidence in _SUBSTRING_RULES:
+            # The DLL-path rule targets a DLL *sideloaded* from Temp/AppData, not
+            # every file that merely lives under those dirs. Without the .dll
+            # requirement, "temp"/"appdata" matched hundreds of benign files
+            # (caches, logs, configs) as a "suspicious DLL path".
+            if prefix == "ioc_dll" and ".dll" not in value:
+                continue
             for term in terms:
                 if term.lower() in value:
                     iocs.append(_emit(
@@ -125,11 +137,17 @@ def extract_iocs(evidence_items):
                         severity, confidence, artifact_id,
                     ))
 
-        # Injected code is an evidence-type signal, not a substring match.
+        # Injected code is an evidence-type signal, not a substring match. Inherit
+        # the wrapper's graded severity rather than stamping a blanket critical:
+        # malfind already distinguishes RWX+PE (critical) from bare RWX/RX (high)
+        # and down-ranks benign JIT/AV hosts. The old hardcoded critical overrode
+        # that, escalating Defender's benign RWX region to a critical injection.
         if evidence_type == "injected_code":
             iocs.append(_emit(
                 f"ioc_injection_{artifact_id}",
-                "Process injection detected", "critical", 0.97, artifact_id,
+                "Process injection detected",
+                str(item.get("severity", "high")).lower(),
+                float(item.get("confidence") or 0.9), artifact_id,
             ))
 
         # Suspicious parent->child lineage (two-part term, two-slug id).

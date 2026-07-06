@@ -129,36 +129,5 @@
         "exfiltration_findings": { "type": "integer" }
       }
     }
-    ,
-    "evidence_by_machine": {
-      "type": "object",
-      "description": "Evidence items grouped by machine id",
-      "additionalProperties": {
-        "type": "array",
-        "items": { "$ref": "evidence_item.json" }
-      }
-    },
-    "findings": {
-      "type": "array",
-      "description": "Correlation findings produced by the aggregator",
-      "items": {
-        "type": "object"
-      }
-    },
-    "exfiltration_findings": {
-      "type": "array",
-      "description": "Subset of findings specifically flagged as exfiltration",
-      "items": { "type": "object" }
-    },
-    "bulk_summary": {
-      "type": "object",
-      "description": "When run in bulk mode, a high-level summary across machines",
-      "properties": {
-        "machines_analyzed": { "type": "integer" },
-        "machine_ids": { "type": "array", "items": { "type": "string" } },
-        "findings_detected": { "type": "integer" },
-        "exfiltration_findings": { "type": "integer" }
-      }
-    }
   }
 }

@@ -1140,12 +1140,15 @@ class VolatilityWrapper(BaseWrapper):
                 reasons = ["Injected regions detected (no RWX/PE signature)"]
 
             # Processes where RWX/executable private memory is *commonly benign*
-            # — browsers and JIT/.NET hosts allocate RWX for generated code.
-            # These are the real false-positive sources, so injections here are
-            # down-ranked unless corroborated. Core system processes (csrss,
-            # winlogon, lsass, services, smss, wininit) are deliberately NOT in
-            # this set: they never legitimately host RWX/injected code, so a hit
-            # there is a strong signal and must keep its severity.
+            # — browsers and JIT/.NET hosts allocate RWX for generated code, and
+            # AV engines (Windows Defender's MsMpEng maps RWX for its scanning /
+            # emulation engine — a universal, well-documented malfind false
+            # positive, not host-specific). These are the real false-positive
+            # sources, so injections here are down-ranked unless corroborated.
+            # Core system processes (csrss, winlogon, lsass, services, smss,
+            # wininit) are deliberately NOT in this set: they never legitimately
+            # host RWX/injected code, so a hit there is a strong signal and must
+            # keep its severity.
             jit_allowlist = {
                 "explorer.exe",
                 "chrome.exe",
@@ -1157,6 +1160,7 @@ class VolatilityWrapper(BaseWrapper):
                 "svchost.exe",
                 "wmiprvse.exe",
                 "dllhost.exe",
+                "msmpeng.exe",
             }
 
             # Corroboration: either malfind itself saw RWX *and* a PE/shellcode
@@ -1326,6 +1330,14 @@ class VolatilityWrapper(BaseWrapper):
                         ext = ""
 
                     basename = normalized.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+
+                    # Ubiquitous benign system files live in nearly every folder
+                    # (desktop.ini controls folder view settings, thumbs.db caches
+                    # thumbnails), so they hit \appdata\ + \startup markers and got
+                    # flagged high alongside the genuine Startup .lnk persistence.
+                    # They are never artifacts; drop them regardless of path.
+                    if basename in ("desktop.ini", "thumbs.db"):
+                        continue
 
                     # Known ransomware extension or named payload — a strong
                     # signal on its own, so flag it high regardless of path
@@ -1705,23 +1717,38 @@ class VolatilityWrapper(BaseWrapper):
                 return False
             return True
 
+        # .onion addresses are kept even when bare (a memory-resident .onion
+        # rarely sits in URL grammar, so it would otherwise be dropped by the
+        # anchored-only gate below), but emitted at LOW — an indicator, not a
+        # finding. A host holding an in-memory threat-intel / EDR feed carries
+        # dozens of unrelated ransomware families' .onions that it never
+        # contacted; at HIGH these manufactured a false verdict. A genuine
+        # infection is still carried by its other artifacts (ransom note, payload,
+        # process, wallet), and the rescorer keeps tagging this tor_hidden_service.
         for match in re.finditer(r"[a-z0-9]{16,56}\.onion", corpus, flags=re.IGNORECASE):
 
-            _add_item(match.group(0).lower(), "suspicious_domain", "high", 0.95, "ioc")
+            _add_item(match.group(0).lower(), "suspicious_domain", "low", 0.6, "ioc")
 
+        # Checksum-valid BTC wallets recovered from memory strings are emitted at
+        # LOW — an indicator, not a finding. Like the .onion feed above, a host
+        # holding an in-memory ransom-note-template / threat-intel corpus carries
+        # many unrelated families' wallets it never transacted with; at HIGH these
+        # manufactured a false verdict. A wallet on the curated catalog (a known
+        # ransom wallet, e.g. wannacry_ransom_wallet) still escalates via the
+        # rescorer's catalog match; a bare, uncatalogued wallet stays low.
         for match in re.finditer(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b", corpus):
 
             candidate = match.group(0)
 
             if _is_valid_btc_address(candidate):
-                _add_item(candidate, "suspicious_crypto", "high", 0.93, "btc")
+                _add_item(candidate, "suspicious_crypto", "low", 0.6, "btc")
 
         for match in re.finditer(r"\bbc1[ac-hj-np-z02-9]{8,87}\b", corpus, flags=re.IGNORECASE):
 
             candidate = match.group(0)
 
             if _is_valid_bech32_btc_address(candidate):
-                _add_item(candidate.lower(), "suspicious_crypto", "high", 0.93, "btc")
+                _add_item(candidate.lower(), "suspicious_crypto", "low", 0.6, "btc")
 
         for match in re.finditer(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}", corpus):
 
