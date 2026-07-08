@@ -750,6 +750,47 @@ def test_process_tree_does_not_contaminate_correlations():
         assert len(entries) == len(set(entries)), f"duplicate on {item['artifact_id']}"
 
 
+def test_same_file_links_memory_and_disk_views_by_filename():
+    """A file seen by volatility filescan (root-relative \\Users\\... value —
+    which the old drive/UNC-only path regex didn't extract at all) and by
+    tsk_fls (unix-style path, different prefix) must group under same_file via
+    the shared filename key. os.path.basename never split the backslashed
+    paths on POSIX, so this cross-tool link silently never fired."""
+    items = [
+        {"artifact_id": "vol_file_1", "evidence_type": "file_artifact",
+         "source_tool": "volatility3", "severity": "high",
+         "value": "\\Users\\bob\\AppData\\Roaming\\payload_x.exe"},
+        {"artifact_id": "tsk_file_1", "evidence_type": "file_artifact",
+         "source_tool": "tsk_fls", "severity": "medium",
+         "value": "Staged file: /Users/bob/AppData/Roaming/payload_x.exe"},
+        # A dotless last segment is a directory / space-truncated fragment,
+        # not a filename — it must NOT become a grouping key (on dev01 the
+        # generic words "windows"/"user"/"edge" formed 20-70-item junk groups).
+        {"artifact_id": "vol_dir_1", "evidence_type": "file_artifact",
+         "source_tool": "volatility3", "severity": "low",
+         "value": "\\ProgramData\\Microsoft\\Windows"},
+        {"artifact_id": "tsk_dir_1", "evidence_type": "file_artifact",
+         "source_tool": "tsk_fls", "severity": "low",
+         "value": "Dir: /Users/x/Microsoft/Windows"},
+        # A registry key's backslashed tail is not a path (left boundary is
+        # alphanumeric), so "run" never becomes a file key.
+        {"artifact_id": "reg_1", "evidence_type": "registry_entry",
+         "source_tool": "regripper", "severity": "medium",
+         "value": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "X"})
+    annotated, findings = build_correlations(enriched, signals)
+
+    same_file = [f for f in findings if f["correlation_type"] == "same_file"]
+    payload = [f for f in same_file if f.get("signal") == "payload_x.exe"]
+    assert len(payload) == 1, "memory and disk views must link by filename"
+    assert set(payload[0]["artifacts"]) == {"vol_file_1", "tsk_file_1"}
+
+    assert "payload_x.exe" in signals["vol_file_1"]["file_keys"]
+    assert not any("windows" == f.get("signal") for f in same_file)
+    assert signals["reg_1"]["file_keys"] == []
+
+
 def test_domain_correlation_links_pcap_dns_to_memory_string():
     """Issue B1 / P4-DOMAIN: a memory-recovered `suspicious_domain` carries no
     IP/path/PID, so before the domain signal it had zero correlation keys and

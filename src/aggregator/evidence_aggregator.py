@@ -229,7 +229,22 @@ def build_indices(items: list[dict]) -> dict[str, dict]:
 # --- Normalisation / signal extraction helpers --------------------------------
 PID_RE = re.compile(r"\bpid[:\s#]*(\d+)\b", re.IGNORECASE)
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-WINDOWS_PATH_RE = re.compile(r"(?:[A-Za-z]:\\[^|<>\"\r\n\t]+|\\\\[^|<>\"\r\n\t]+)")
+# Three branches: drive-letter (C:\...), UNC (\\server\...), and root-relative
+# (\Users\..., \Device\HarddiskVolume2\... — what volatility filescan emits; the
+# old drive/UNC-only regex extracted ZERO paths from memory file artifacts, so
+# same_file never linked memory and disk views of a file). The root-relative
+# branch requires >= 2 segments and a non-alphanumeric left boundary so a
+# registry key's tail ("HKLM\Software\...") isn't mis-read as a path.
+# Windows paths may contain spaces ("Program Files"), so all branches run to a
+# delimiter (| < > ") rather than whitespace. Known limitation: prose glued
+# after a path on the same line ("...\evil.exe at 10:00") is captured into the
+# key, so such mentions don't group — accepted, since trimming heuristics could
+# fabricate keys for paths that don't exist.
+WINDOWS_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:\\[^|<>\"\r\n\t]+"
+    r"|\\\\[^|<>\"\r\n\t]+"
+    r"|(?<![A-Za-z0-9])\\[^\\|<>\"\r\n\t]+(?:\\[^|<>\"\r\n\t]+)+)"
+)
 UNIX_PATH_RE = re.compile(r"(?:/(?:[^\s\"'<>|]+))")
 BYTES_RE = re.compile(r"(\d[\d,]*)\s+bytes", re.IGNORECASE)
 DESTINATION_RE = re.compile(
@@ -534,8 +549,16 @@ def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
     for path in paths:
         normalized_path = _normalize_path(path)
         file_keys.append(normalized_path.lower())
-        file_name = os.path.basename(normalized_path)
-        if file_name:
+        # NOT os.path.basename: POSIX basename doesn't split backslashes, so
+        # the filename key silently never fired on Linux — and it's the only
+        # key that ties the memory view (\Device\HarddiskVolume2\...\x.exe)
+        # and the disk view (\Users\...\x.exe) of the same file together.
+        # Dot required: a dotless last segment is almost always a directory or
+        # a space-truncated fragment (UNIX_PATH_RE stops at spaces, so
+        # ".../Windows Defender/x" yields "windows"), and those generic words
+        # ("windows", "user", "edge") formed 20-70-item junk groups on dev01.
+        file_name = normalized_path.rsplit("\\", 1)[-1]
+        if "." in file_name:
             file_keys.append(file_name.lower())
     file_keys = sorted(set(file_keys))
 
