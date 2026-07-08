@@ -13,9 +13,7 @@ from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
 from src.ioc.ioc_engine import extract_iocs
 
 
-# ─────────────────────────────────────────────────────────────
 # WRAPPER MAP
-# ─────────────────────────────────────────────────────────────
 
 WRAPPER_MAP = {
 
@@ -37,10 +35,8 @@ WRAPPER_MAP = {
 }
 
 
-# Derived single source of truth for "which evidence type each tool consumes"
-# (issue D2). Built from each wrapper's `consumes` attribute, so autoforensiq's
-# pre-flight and the report's coverage table no longer keep their own (drifting)
-# copies of this mapping.
+# Single source of truth for "which evidence type each tool consumes" (D2), derived from each
+# wrapper's `consumes` — pre-flight and the report import it.
 TOOL_EVIDENCE_MAP = {
     name: cls.consumes
     for name, cls in WRAPPER_MAP.items()
@@ -48,9 +44,7 @@ TOOL_EVIDENCE_MAP = {
 }
 
 
-# ─────────────────────────────────────────────────────────────
 # MAIN ORCHESTRATOR
-# ─────────────────────────────────────────────────────────────
 
 def run_tools(execution_plan: dict, evidence_files: dict):
 
@@ -63,9 +57,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
     merged_items = []
 
-    # ─────────────────────────────────────────
     # EXECUTE TOOLS
-    # ─────────────────────────────────────────
 
     for tool_spec in tools:
 
@@ -75,9 +67,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
         print(f"  Running: {name}")
         print(f"{'=' * 50}")
 
-        # ─────────────────────────────────────────
         # UNKNOWN TOOL
-        # ─────────────────────────────────────────
 
         if name not in WRAPPER_MAP:
 
@@ -87,15 +77,12 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
         wrapper = WRAPPER_MAP[name]()
 
-        # Each wrapper declares the evidence_files key it consumes (issue D2),
-        # so the former per-tool if/elif ladder collapses to one lookup.
+        # Each wrapper declares the evidence key it consumes (D2) — one lookup instead of a per-tool
+        # if/elif ladder.
         evidence_path = evidence_files.get(wrapper.consumes)
 
-        # ─────────────────────────────────────────
-        # VALIDATE EVIDENCE PATH(S)
-        # ─────────────────────────────────────────
-        # A single evidence type may carry more than one artifact (e.g. two
-        # memory images), so normalise to a list and run the tool on each.
+        # VALIDATE EVIDENCE PATH(S) — one evidence type may carry several artifacts, so normalise to
+        # a list and run the tool on each.
 
         if not evidence_path:
 
@@ -113,9 +100,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             else [evidence_path]
         )
 
-        # ─────────────────────────────────────────
         # EXECUTE TOOL (once per supplied artifact)
-        # ─────────────────────────────────────────
 
         items = []
 
@@ -147,9 +132,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
         merged_items.extend(items)
 
-        # ─────────────────────────────────────────
         # SAVE RAW TOOL OUTPUT (combined across artifacts)
-        # ─────────────────────────────────────────
 
         os.makedirs(
             "output/raw",
@@ -175,9 +158,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             f"  [SAVED] {len(items)} items → {out_path}"
         )
 
-    # ─────────────────────────────────────────
     # IOC EXTRACTION
-    # ─────────────────────────────────────────
 
     print(f"\n{'=' * 50}")
     print("  IOC EXTRACTION")
@@ -195,9 +176,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
         ioc_items
     )
 
-    # ─────────────────────────────────────────
     # SAVE IOC RAW OUTPUT
-    # ─────────────────────────────────────────
 
     os.makedirs(
         "output/raw",
@@ -222,9 +201,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
         f"  [SAVED] {len(ioc_items)} IOC items → output/raw/ioc_output.json"
     )
 
-    # ─────────────────────────────────────────
     # SAVE UNIFIED EVIDENCE
-    # ─────────────────────────────────────────
 
     os.makedirs(
         "output",
@@ -249,9 +226,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
     return all_raw_outputs
 
 
-# ─────────────────────────────────────────────────────────────
 # STANDALONE TEST MODE
-# ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
 

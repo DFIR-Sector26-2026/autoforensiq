@@ -1,34 +1,12 @@
-"""
-AutoForensiq — Evidence ↔ Narrative Reconciler (issue 1.1)
-===========================================================
-The P1 intent classifier scores `case_type` and `classifier_confidence` purely
-from the incident-report narrative; it never sees the artifacts P3/P4 actually
-recover. This module runs *after* aggregation (P4) and reconciles that narrative
-classification against the real evidence, so a confident-but-unsupported
-classification is no longer carried downstream unchallenged.
+"""Evidence ↔ Narrative Reconciler (1.1): runs after P4 and checks whether the recovered evidence
+supports the narrative case_type. Lower-only — adds a separate reconciled_confidence
+(classifier_confidence stays untouched for the audit trail) and raises
+narrative_evidence_divergence when support is weak. Support = fraction of the case_type's
+corroborating evidence-type categories present in the unified evidence."""
 
-Design (per the issue's "at minimum, lower confidence" fix, and the chosen
-conservative direction):
-  - The classifier's self-reported `classifier_confidence` is left untouched
-    (audit trail). We add a separate `reconciled_confidence`.
-  - Reconciliation is **lower-only**: strong evidence support leaves confidence
-    unchanged; weak/absent support lowers it. It never inflates confidence.
-  - A `narrative_evidence_divergence` flag is raised when the evidence fails to
-    substantively support the narrative case_type (or points elsewhere).
-
-Heuristic, in keeping with the rest of the pipeline: each case_type maps to the
-evidence-type categories whose presence would corroborate it; the support score
-is the fraction of those categories present in the unified evidence.
-"""
-
-# Evidence-type categories whose presence corroborates each case_type. Keys are
-# the schema case_type enum; values are evidence_type values emitted by the P3
-# wrappers / IOC engine (see unified_evidence). Kept deliberately broad — this is
-# a corroboration signal, not a re-classifier.
-# NB the vocabulary is split: the memory-string extractor (volatility_wrapper)
-# emits registry_key / suspicious_crypto / suspicious_domain / email_address,
-# while regripper/email wrappers emit registry_entry / phishing_email. Signatures
-# list both spellings so reconciliation works regardless of the producing tool.
+# Evidence types whose presence corroborates each case_type — deliberately broad (a corroboration
+# signal, not a re-classifier). NB the tool vocabulary is split (volatility emits registry_key/…,
+# regripper/email emit registry_entry/ phishing_email), so signatures list both spellings.
 _CASE_TYPE_SIGNATURES = {
     "ransomware": {
         "suspicious_crypto", "file_artifact", "extracted_file",
@@ -56,14 +34,12 @@ _CASE_TYPE_SIGNATURES = {
     },
 }
 
-# At or above this fraction of corroborating categories present, the evidence is
-# judged to substantively support the narrative case_type: confidence is kept as
-# the classifier reported it. Below it, the divergence flag is raised and
-# confidence is lowered proportionally.
+# Support at/above this fraction keeps the classifier's confidence; below it the divergence flag is
+# raised and confidence is lowered proportionally.
 _DIVERGENCE_THRESHOLD = 0.5
 
-# When diverged, reconciled confidence interpolates over [floor, 1.0] of the
-# original as support runs 0 → threshold, so zero support halves confidence.
+# When diverged, reconciled confidence interpolates over [floor, 1.0] of the original as support
+# runs 0 → threshold, so zero support halves confidence.
 _NO_SUPPORT_FLOOR = 0.5
 
 
@@ -79,9 +55,8 @@ def _present_evidence_types(unified_evidence: dict) -> set:
             for item in evidence_items
             if item.get("evidence_type")
         }
-    # IOCs are carried as the `ioc_match` annotation on items, not as a distinct
-    # evidence_type, so the "ioc" category counts as present whenever any item is
-    # IOC-tagged (issue B5: it was always reported absent despite matches).
+    # "ioc" counts as present whenever any item is ioc_match-tagged — it's an annotation, not a
+    # distinct evidence_type (B5: was always reported absent).
     if any(item.get("ioc_match") for item in evidence_items):
         present.add("ioc")
     return present
@@ -169,9 +144,9 @@ def reconcile_evidence(case_context: dict, unified_evidence: dict) -> dict:
     block["supporting_evidence_types"] = supporting
     block["expected_but_absent"] = absent
 
-    # Informational: does the evidence corroborate some other case_type more
-    # strongly? We surface it but never overwrite case_type here (out of scope —
-    # that would re-route MITRE / recommendations).
+    # Informational: does the evidence corroborate some other case_type more strongly? We surface it
+    # but never overwrite case_type here (out of scope — that would re-route MITRE /
+    # recommendations).
     best_other, best_other_score = None, score
     for other_type in _CASE_TYPE_SIGNATURES:
         if other_type == case_type:

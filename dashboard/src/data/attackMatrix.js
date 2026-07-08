@@ -1,7 +1,5 @@
-// ATT&CK Enterprise matrix (tactics x top-level techniques), extracted from
-// mitre-attack/attack-stix-data enterprise-attack.json on 2026-06-26.
-// Static asset for Mitre.jsx: renders the full matrix with detected techniques
-// highlighted. Regenerate from the STIX bundle if ATT&CK updates.
+// ATT&CK Enterprise matrix (tactics × techniques) for Mitre.jsx, extracted from the
+// attack-stix-data bundle 2026-06-26; regenerate if ATT&CK updates.
 export default [
   {
     "tactic": "Reconnaissance",

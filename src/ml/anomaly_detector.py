@@ -1,24 +1,7 @@
-"""
-anomaly_detector.py
--------------------
-Trains an IsolationForest on baseline-normal data, then scores new evidence.
-
-Key design decisions
---------------------
-1.  contamination=0.01  – we tell the model the baseline is almost pure normal;
-    this pushes anomaly thresholds outward so real outliers score strongly.
-
-2.  n_estimators=200    – more trees → more stable anomaly scores, important
-    when the training set is small (5 records).
-
-3.  Rule-based score boost – adds a deterministic penalty for features that
-    are always anomalous regardless of the model (C2 ports, EXE in Temp, etc.).
-    This prevents the model from under-scoring obvious threats just because the
-    training set is tiny.
-
-4.  Calibrated confidence – maps the raw IF score (typically -1 to +0.5) to a
-    [0, 1] confidence band that is meaningful for an analyst.
-"""
+"""IsolationForest trained on baseline-normal data + a deterministic rule boost. Design:
+contamination=0.01 (baseline is nearly pure normal); n_estimators=200 (stabilises scores on the
+tiny 5-record baseline); rule penalties for always-anomalous features so obvious threats aren't
+under-scored; confidence calibrated from the raw score into [0,1]."""
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
@@ -88,8 +71,8 @@ class AnomalyDetector:
 
         is_anomaly = final_scores < ANOMALY_THRESHOLD
 
-        # Confidence: distance below threshold, clamped and normalised
-        # At threshold → 0.5; at threshold-0.5 → ~1.0; above threshold → < 0.5
+        # Confidence: distance below threshold, clamped and normalised. At threshold → 0.5; at
+        # threshold-0.5 → ~1.0; above threshold → < 0.5.
         confidence = np.clip(0.5 - final_scores, 0.0, 1.0)
 
         return {

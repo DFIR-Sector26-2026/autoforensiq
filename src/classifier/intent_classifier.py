@@ -1,17 +1,6 @@
-"""
-AutoForensiq — Intent Classifier Agent (P1)
-============================================
-Reads a plain-text incident report and returns a structured case_context.json
-consumed by the Dynamic Tool Selector (P2).
-
-Supports:
-  - Anthropic Claude  (set llm.provider: "anthropic" in config.yaml)
-  - OpenAI GPT-4o     (set llm.provider: "openai"    in config.yaml)
-  - Mock mode         (set llm.mock_mode: true — no API key needed)
-
-Usage (standalone):
-    python -m src.classifier.intent_classifier <path/to/incident_report.txt>
-"""
+"""AutoForensiq — Intent Classifier (P1): plain-text incident report → structured
+case_context.json for the Dynamic Tool Selector (P2). Providers: anthropic / openai / deepseek,
+or mock_mode (no API key). Standalone: python -m src.classifier.intent_classifier <report.txt>"""
 
 import os
 import re
@@ -101,10 +90,7 @@ _ARTIFACT_KEYWORDS = {
 }
 
 def _mock_classify(report_text: str) -> dict:
-    """
-    Keyword-based mock classifier. Returns a deterministic case_context dict
-    without calling any LLM. Useful for pipeline testing without an API key.
-    """
+    """Deterministic keyword-based classifier — no LLM/API key needed."""
     text_lower = report_text.lower()
 
     # Determine case_type by scoring each category
@@ -175,11 +161,9 @@ def _mock_classify(report_text: str) -> dict:
     # Extract affected systems (simple heuristic: look for hostnames/IPs)
     ip_pattern   = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', report_text)
     host_pattern = re.findall(r'\b[A-Z][A-Z0-9\-]{3,}\b', report_text)
-    # Require a hostname *shape* rather than an English word (issue B5): real
-    # machine names carry a digit or hyphen (WIN-VICTIM-22, DC01, WKSTN05) and
-    # fit the 15-char NetBIOS limit, whereas all-caps report headings (INCIDENT,
-    # REPORT, TIMELINE) and the dashed case id (SYN-2026-0615-RANSOM, 20 chars)
-    # do not — so the acronym stop-list no longer has to be exhaustive.
+    # Require a hostname *shape*, not an English word (B5): real machine names carry a digit/hyphen
+    # and fit the 15-char NetBIOS limit; all-caps report headings don't — so the acronym stop-list
+    # needn't be exhaustive.
     host_pattern = [
         h for h in host_pattern
         if len(h) <= 15
@@ -303,11 +287,7 @@ def _call_deepseek(report_text: str, cfg: dict) -> dict:
 
 
 def _parse_llm_json(raw: str) -> dict:
-    """
-    Strip markdown fences if present, parse JSON.
-    Raises ValueError if JSON is invalid.
-    """
-    # Strip ```json ... ``` or ``` ... ``` fences
+    """Strip markdown fences if present, parse JSON; ValueError on invalid."""
     raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
     raw = re.sub(r"\s*```$",          "", raw, flags=re.MULTILINE)
     raw = raw.strip()
@@ -319,8 +299,8 @@ def _parse_llm_json(raw: str) -> dict:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-# Canonical artifact_type ordering (matches the case_context schema enum). Used
-# to render a deterministic, narrowed artifact_types list (issue 1.2).
+# Canonical artifact_type ordering (matches the case_context schema enum). Used to render a
+# deterministic, narrowed artifact_types list (issue 1.2).
 _ARTIFACT_TYPE_ORDER = [
     "memory_dump", "disk_image", "pcap", "registry_hive",
     "log_files", "email_archive", "browser_history",
@@ -328,15 +308,9 @@ _ARTIFACT_TYPE_ORDER = [
 
 
 def _narrow_artifact_types(result: dict, provided_artifact_types) -> None:
-    """Issue 1.2 — replace the over-broad narrative artifact_types dump with the
-    evidence types actually provided to this run, preserving the narrative claim
-    under `artifact_types_claimed` for the divergence report.
-
-    `provided_artifact_types` is the set/list of artifact types (schema enum
-    values) backed by real evidence files. When it's empty/None the run doesn't
-    know what was supplied (e.g. standalone classify, GUI without files), so the
-    narrative list is left untouched for backward compatibility.
-    """
+    """Replace the narrative artifact_types with the evidence types actually provided (1.2),
+    keeping the claim under artifact_types_claimed. No-op when nothing was provided (standalone
+    classify / GUI without files)."""
     if not provided_artifact_types:
         return
 
@@ -350,26 +324,9 @@ def _narrow_artifact_types(result: dict, provided_artifact_types) -> None:
 
 def classify(report_text: str, config_override: dict = None,
              provided_artifact_types=None) -> dict:
-    """
-    Classify an incident report and return a validated case_context dict.
-
-    Args:
-        report_text:     Plain-text content of the incident report.
-        config_override: Optional dict to override config.yaml settings.
-        provided_artifact_types: Optional iterable of artifact types (schema enum
-                         values) backed by evidence files actually supplied. When
-                         given, artifact_types is narrowed to these and the
-                         narrative claim is preserved as artifact_types_claimed
-                         (issue 1.2).
-
-    Returns:
-        Validated case_context dict.
-
-    Raises:
-        jsonschema.ValidationError: If LLM output doesn't match the schema.
-        ValueError:                 If LLM returns unparseable JSON.
-        EnvironmentError:           If API key is missing in live mode.
-    """
+    """Classify an incident report → validated case_context dict. When provided_artifact_types is
+    given, artifact_types is narrowed to it (1.2). Raises on schema violation, unparseable LLM
+    JSON, or missing API key."""
     cfg = _load_config()
     if config_override:
         # Deep merge — only top-level keys for simplicity
@@ -403,8 +360,8 @@ def classify(report_text: str, config_override: dict = None,
     if "generated_at" not in result or not result["generated_at"]:
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
 
-    # Issue 1.2 — constrain the narrative artifact_types to what was actually
-    # supplied, so P2 doesn't select tools for evidence that was never provided.
+    # Issue 1.2 — constrain the narrative artifact_types to what was actually supplied, so P2
+    # doesn't select tools for evidence that was never provided.
     _narrow_artifact_types(result, provided_artifact_types)
 
     # Validate against schema — raises jsonschema.ValidationError on failure
@@ -420,17 +377,8 @@ def classify(report_text: str, config_override: dict = None,
 def classify_file(report_path: str, output_path: str = None,
                   config_override: dict = None,
                   provided_artifact_types=None) -> dict:
-    """
-    Classify an incident report from a file path and optionally write output.
-
-    Args:
-        report_path:     Path to the plain-text incident report.
-        output_path:     If provided, write case_context.json to this path.
-        config_override: Optional config overrides.
-
-    Returns:
-        Validated case_context dict.
-    """
+    """Classify a report file; optionally write case_context.json to output_path (defaults to
+    config.yaml's paths.case_context_output)."""
     report_path = Path(report_path)
     if not report_path.exists():
         raise FileNotFoundError(f"Incident report not found: {report_path}")

@@ -8,42 +8,27 @@ from src.data.threat_intel import RANSOM_EXTENSIONS, EXECUTABLE_EXTENSIONS
 
 
 def _path_id(prefix: str, *parts: str) -> str:
-    """Stable, collision-resistant artifact_id from the file path (+ optional
-    timestamp). The old `abs(hash(path)) % 99999` had only ~100k buckets AND used
-    Python's per-process-salted hash(), so on a real disk it (a) collided
-    thousands of distinct files onto shared ids — which the aggregator's
-    dedup-by-artifact_id then silently dropped (68,690 files -> 49,738 on dev01)
-    — and (b) produced different ids every run. A 64-bit md5 slice removes the
-    collision ceiling and is deterministic across runs."""
+    """Stable artifact_id from the file path (+ optional timestamp), md5 slice. The old
+    abs(hash())%99999 collided distinct files (silently dropped by the aggregator's dedup: 68,690
+    -> 49,738 on dev01) and changed every run."""
     digest = hashlib.md5("|".join(parts).encode("utf-8", "replace")).hexdigest()
     return f"{prefix}_{digest[:16]}"
 
 
-# EXECUTABLE_EXTENSIONS (executable/script files) are only notable when they sit
-# in a user-writable staging / execution directory (or are deleted): a
-# .dll/.exe/.js in Windows, Program Files, or an app's node_modules is ordinary
-# and must NOT be flagged — flagging on extension alone flooded a real OS disk
-# with tens of thousands of benign binaries (~37k node_modules .js + ~28k Windows
-# .dll on a dev host). RANSOM_EXTENSIONS (encrypted/ransomware files) are flagged
-# wherever they live. Both lists are centralised in threat_intel.
+# EXECUTABLE_EXTENSIONS are notable only inside a staging dir (or deleted) — extension alone flooded
+# a real disk with ~65k benign binaries. RANSOM_EXTENSIONS flag anywhere. Both centralised in
+# threat_intel.
 
-# User-writable staging / execution directories where a dropped executable is a
-# real signal. Matched as path segments against fls's forward-slash output (TSK
-# emits '/' even for NTFS). The surrounding slashes mean a file merely *named*
-# like a temp file (e.g. tmp.Cab) isn't flagged — only files that actually live
-# inside such a directory (issue B6).
+# User-writable staging dirs, matched as /-delimited path segments (TSK emits '/' even for NTFS) so
+# a file merely *named* like a temp file isn't flagged (B6).
 STAGING_DIRS = (
     "/temp/", "/tmp/", "/appdata/", "/downloads/", "/users/public/",
     "/programdata/", "/$recycle", "/perflogs/",
 )
 
 
-# OS-managed servicing dirs that contain "/temp/" path segments but are NOT
-# user-writable staging (violating the list's premise above): the .NET GAC
-# native-image cache (\Windows\assembly\temp\<random>\*.ni.dll — the random
-# subdir is ngen's doing, standard on every .NET box) and Windows component
-# servicing (\Windows\WinSxS\Temp\InFlight\...). On dev01 these two made up 140
-# of the 141 "Executable in staging directory" DLL flags (B-9c).
+# OS-managed servicing dirs whose "/temp/" segments are NOT user-writable staging (GAC ngen cache +
+# WinSxS servicing — 140 of 141 dev01 staging flags, B-9c).
 _OS_SERVICING_DIRS = ("/windows/assembly/", "/windows/winsxs/")
 
 
@@ -54,22 +39,19 @@ def _in_staging_dir(lower_path: str) -> bool:
 
 
 def _file_signal(filepath: str):
-    """Return (severity, label) if the path is a notable file artifact by
-    extension + location, else None. Payload/encrypted extensions count anywhere;
-    executable/script extensions count only inside a staging directory. Deleted-
-    file handling stays in the caller (it needs the fls deletion flag)."""
+    """Return (severity, label) if the path is a notable file artifact by extension + location,
+    else None. Payload/encrypted extensions count anywhere; executable/script extensions count
+    only inside a staging directory. Deleted- file handling stays in the caller (it needs the fls
+    deletion flag)."""
     lower = filepath.lower()
     base = lower.rsplit("/", 1)[-1]
     if base.endswith(RANSOM_EXTENSIONS):
         return "high", "Payload/encrypted file"
     if base.endswith(EXECUTABLE_EXTENSIONS) and _in_staging_dir(lower):
         return "medium", "Executable in staging directory"
-    # PowerShell transcripts (PowerShell_transcript.<HOST>.<id>.<ts>.txt) record
-    # what commands ran, but their mere existence is weak evidence — transcription
-    # is often enabled fleet-wide by GPO, so every legitimate user produces them.
-    # Deliberately LOW: this only makes them visible/correlatable (owner, PID,
-    # timestamp lift them if they tie to other findings); scoring by filename or
-    # "unusual location" would flood or overfit to one image (B-6/B-7, N5).
+    # PowerShell transcripts: deliberately LOW — GPO transcription is often fleet-wide, so existence
+    # alone is weak; correlation is the lift. Scoring by filename/location would flood or overfit to
+    # one image (B-6/B-7, N5).
     if base.startswith("powershell_transcript.") and base.endswith(".txt"):
         return "low", "PowerShell transcript"
     return None
@@ -92,15 +74,9 @@ class TSKWrapper(BaseWrapper):
         return all_items
 
     def _enumerate_fs_offsets(self, image_path: str) -> list:
-        """Return the sector offsets of candidate filesystems in a partitioned
-        image, via `mmls`. An empty list means there is no partition table
-        (a bare filesystem) — the caller then runs `fls` with no `-o`.
-
-        Without this, `fls -r -m /` is given a partitioned disk and reports
-        "Cannot determine file system type", yielding 0 items (issue D2). The
-        Windows Server E01 keeps its NTFS at sector 2048; only the Ubuntu casper
-        image is a bare filesystem at offset 0.
-        """
+        """Sector offsets of candidate filesystems via `mmls`; [] = no partition table, caller
+        runs fls with no -o. Without offsets, fls on a partitioned disk yields 0 items ("Cannot
+        determine file system type", D2)."""
         stdout, _, code = self.run_command(
             ["mmls", image_path],
             input_files=[image_path],
@@ -124,9 +100,9 @@ class TSKWrapper(BaseWrapper):
 
             slot, start, desc = m.group(1), m.group(2), m.group(3).strip().lower()
 
-            # Skip the partition-table meta row and unallocated gaps; everything
-            # else is a candidate (fls is tolerant — unreadable/foreign slots
-            # simply produce no output and are skipped below).
+            # Skip the partition-table meta row and unallocated gaps; everything else is a candidate
+            # (fls is tolerant — unreadable/foreign slots simply produce no output and are skipped
+            # below).
             if slot == "Meta" or "unallocated" in desc:
                 continue
 
@@ -143,11 +119,8 @@ class TSKWrapper(BaseWrapper):
                 continue
             try:
                 filepath = parts[1].strip() if len(parts) > 1 else line
-                # mactime body field 3 is the type/mode string ("r/rrwxrwxrwx"
-                # for files, "d/drwxrwxrwx" for directories). Skip directory
-                # nodes (issue B3): a staging directory itself isn't a file
-                # artifact — the malware is the files *inside* it, which are
-                # flagged on their own rows.
+                # Field 3 is the type/mode string; skip directory nodes ("d/...") — the signal is
+                # the files inside, on their own rows (B3).
                 mode = parts[3].strip() if len(parts) > 3 else ""
                 if mode.startswith("d/"):
                     continue
@@ -252,9 +225,9 @@ class TSKWrapper(BaseWrapper):
 
                 signal = _file_signal(filepath)
                 if signal:
-                    # Timeline events for high/medium file signals stay medium
-                    # (historical behavior); a low signal (transcripts) must not
-                    # be elevated by appearing in the timeline.
+                    # Timeline events for high/medium file signals stay medium (historical
+                    # behavior); a low signal (transcripts) must not be elevated by appearing in the
+                    # timeline.
                     items.append(self.make_evidence_item(
                         artifact_id=_path_id("timeline", filepath, timestamp),
                         evidence_type="timeline_event",

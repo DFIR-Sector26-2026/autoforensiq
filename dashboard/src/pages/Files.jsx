@@ -22,8 +22,8 @@ export default function Files() {
 
   const { evidence, sources, byTool, loading } = useEvidence();
 
-  // Highest severity of evidence produced by each tool — used to badge the
-  // source file the tool read.
+  // Highest severity of evidence produced by each tool — used to badge the source file the tool
+  // read.
   const toolSeverity = useMemo(() => {
     const map = {};
     evidence.forEach((e) => {
@@ -33,8 +33,8 @@ export default function Files() {
     return map;
   }, [evidence]);
 
-  // The input artifacts submitted to the investigation (the pcap, disk images,
-  // …), deduplicated across tools, with how many findings each produced.
+  // The input artifacts submitted to the investigation (the pcap, disk images, …), deduplicated
+  // across tools, with how many findings each produced.
   const evidenceFiles = useMemo(() => {
     const map = {};
     Object.entries(sources || {}).forEach(([tool, files]) => {

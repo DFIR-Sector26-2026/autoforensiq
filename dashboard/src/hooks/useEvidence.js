@@ -12,10 +12,8 @@ export default function useEvidence() {
 
   useEffect(() => {
 
-    // Each fetch falls back to an empty default on a missing/404 file (e.g.
-    // opening the dashboard before the first run, or a stale published dir) so
-    // one absent artifact can't reject the whole hook and blank the UI — render
-    // whatever data is available.
+    // Each fetch falls back to an empty default on a missing file, so one absent artifact can't
+    // blank the whole UI — render whatever's available.
     Promise.all([
       fetch("/data/unified_evidence.json")
         .then((res) => (res.ok ? res.json() : []))

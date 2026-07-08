@@ -9,12 +9,8 @@ from src.wrappers.base_wrapper import BaseWrapper
 from src.utils.audit_log import log_action
 
 
-# Process names that are part of a normal Windows session. Their mere presence
-# in the process list is unremarkable, so they stay at low severity rather than
-# being escalated. NOTE: name-only, hence masquerade-blind (issue 3.1-D, accepted
-# by design) — a malicious binary *named* `svchost.exe` stays low here; the
-# pipeline elevates it only via corroborating signals (injection, suspicious
-# parent/cmdline) emitted by the other wrappers.
+# Normal Windows session processes — stay low. Name-only, hence masquerade- blind (3.1-D, accepted):
+# a malicious "svchost.exe" is elevated only via corroborating signals from the other wrappers.
 _BENIGN_SYSTEM_PROCESSES = {
     "system", "registry", "memory compression", "secure system",
     "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe", "services.exe",
@@ -26,8 +22,8 @@ _BENIGN_SYSTEM_PROCESSES = {
     "smartscreen.exe", "shellexperiencehost.exe", "wudfhost.exe",
 }
 
-# Strong malware / ransomware indicators in a process *name*. A hit is suspicious
-# on its own (no corroboration needed) and escalates to high.
+# Strong malware / ransomware indicators in a process *name*. A hit is suspicious on its own (no
+# corroboration needed) and escalates to high.
 _MALICIOUS_NAME_TOKENS = (
     "tasksche", "wanadecrypt", "wannacry", "wncry", "wcry", "mssecsvc",
     "@wana", "decrypt0r", "ransom", "locker", "cryptor", "mimikatz",
@@ -36,10 +32,8 @@ _MALICIOUS_NAME_TOKENS = (
 
 
 def _looks_like_random_name(name):
-    """Heuristic for a randomly generated / hash-like executable name — a common
-    malware trait (`a9f3c1b2.exe`, `xkzqwvbn.exe`). Operates on the stem (name
-    minus a single trailing extension) and stays conservative to avoid flagging
-    ordinary product names."""
+    """Random / hash-like executable name heuristic (`a9f3c1b2.exe`) — conservative, operates on
+    the stem only."""
     stem = name.rsplit(".", 1)[0] if "." in name else name
     stem = stem.strip().lower()
     # only judge plausible single tokens; real product names carry separators
@@ -57,17 +51,9 @@ def _looks_like_random_name(name):
 
 
 def _classify_process(name):
-    """Classify a MemProcFS-enumerated process by *name* into a severity tier
-    (issue 3.5-C). Without this filter every process landed at medium/0.80, which
-    floods the medium tier on a MemProcFS-supported image (potentially hundreds).
-
-    Returns ``(severity, confidence, note)``:
-      * known malware/ransomware name   → high   / 0.85
-      * random / hash-like name         → medium / 0.70
-      * common Windows system process   → low    / 0.50
-      * unidentified                    → low    / 0.50
-      * anything else (ordinary app)    → low    / 0.55
-    """
+    """Tier a process by *name* (3.5-C — everything at medium/0.80 flooded the medium tier).
+    Returns (severity, confidence, note): known-malicious name → high/0.85; random/hash-like →
+    medium/0.70; system/unknown → low/0.50; ordinary app → low/0.55."""
     lowered = (name or "").strip().lower()
 
     if not lowered or lowered == "unknown":
@@ -87,8 +73,8 @@ def _classify_process(name):
 
 
 def _read_mount_file(path):
-    """First line of a MemProcFS virtual file (e.g. a process's `name`/`ppid`),
-    stripped. Returns "" on any read error — these are FUSE-backed files."""
+    """First line of a MemProcFS virtual file (e.g. a process's `name`/`ppid`), stripped. Returns
+    "" on any read error — these are FUSE-backed files."""
     try:
         with open(path, "r", errors="replace") as fh:
             return fh.readline().strip()
@@ -97,15 +83,9 @@ def _read_mount_file(path):
 
 
 def _enumerate_mounted_processes(mount_dir):
-    """Read the process list from a MemProcFS mount.
-
-    MemProcFS exposes processes under ``<mount>/pid/<pid>/`` (the canonical
-    per-PID view), each directory carrying a ``name``/``ppid`` virtual file. The
-    old code scanned ``<mount>/forensic/processes``, which is not part of the
-    mount layout, so even a successful mount enumerated nothing (issue 3.5-B).
-
-    Returns a list of ``{"pid", "name", "ppid"}`` dicts (ppid may be "").
-    """
+    """Read processes from <mount>/pid/<pid>/{pid,name,ppid} — the canonical view; the old code
+    scanned a nonexistent path and enumerated nothing (3.5-B). Returns [{"pid","name","ppid"}]
+    (ppid may be "")."""
     procs = []
     pid_root = Path(mount_dir) / "pid"
     if not pid_root.is_dir():
@@ -115,8 +95,8 @@ def _enumerate_mounted_processes(mount_dir):
         proc_dir = pid_root / entry
         if not proc_dir.is_dir():
             continue
-        # The directory name under /pid/ is the numeric PID; prefer the `pid`
-        # virtual file when present, falling back to the directory name.
+        # The directory name under /pid/ is the numeric PID; prefer the `pid` virtual file when
+        # present, falling back to the directory name.
         pid = _read_mount_file(proc_dir / "pid") or entry.strip()
         name = _read_mount_file(proc_dir / "name") or "unknown"
         ppid = _read_mount_file(proc_dir / "ppid")
@@ -134,8 +114,8 @@ class MemProcFSWrapper(BaseWrapper):
         super().__init__("memprocfs")
 
     def run(self, image_path):
-        # Prefer the pip-installed Python API. Only fall back to the
-        # external binary if the `memprocfs` package isn't installed.
+        # Prefer the pip-installed Python API. Only fall back to the external binary if the
+        # `memprocfs` package isn't installed.
         try:
             import memprocfs 
         except ImportError:
@@ -147,7 +127,7 @@ class MemProcFSWrapper(BaseWrapper):
 
         return self._run_api(image_path)
 
-    # API path (preferred on Linux: no FUSE, no mount) 
+    # API path (preferred on Linux: no FUSE, no mount)
     def _run_api(self, image_path):
 
         import memprocfs
@@ -173,10 +153,8 @@ class MemProcFSWrapper(BaseWrapper):
 
             print(f"[MemProcFS] API initial parse failed: {exc}")
 
-            # A raw dump often fails to initialise when paged-out memory can't
-            # be reconstructed. MemProcFS can use a pagefile for this, but the
-            # option is `-pagefile0 <path>` and needs a real file — a bare
-            # `-pagefile` is rejected, so only retry when we actually have one.
+            # Raw dumps often need a pagefile to reconstruct paged-out memory;
+            # -pagefile0 requires a real file, so only retry when we have one.
             pagefile = self._find_pagefile(image_path)
 
             if not pagefile:
@@ -242,10 +220,10 @@ class MemProcFSWrapper(BaseWrapper):
         return items
 
     def _find_pagefile(self, image_path):
-        """Locate a pagefile to aid reconstruction of paged-out memory: an
-        explicit MEMPROCFS_PAGEFILE env var, else a `pagefile.sys` sitting
-        beside the image. Returns the path, or None when none is available — in
-        which case retrying the API with `-pagefile0` would be pointless."""
+        """Locate a pagefile to aid reconstruction of paged-out memory: an explicit
+        MEMPROCFS_PAGEFILE env var, else a `pagefile.sys` sitting beside the image. Returns the
+        path, or None when none is available — in which case retrying the API with `-pagefile0`
+        would be pointless."""
 
         env_pagefile = os.environ.get("MEMPROCFS_PAGEFILE")
         if env_pagefile and Path(env_pagefile).is_file():
@@ -359,7 +337,7 @@ class MemProcFSWrapper(BaseWrapper):
 
         return items
 
-    # shared evidence items 
+    # shared evidence items
     def _failure_item(self):
 
         return self.make_evidence_item(

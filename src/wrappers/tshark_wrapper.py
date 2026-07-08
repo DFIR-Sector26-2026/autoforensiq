@@ -10,18 +10,16 @@ from src.data.threat_intel import (
 import hashlib
 SUSPICIOUS_PROTOS = ["dns", "http", "smb", "ftp"]
 
-# Non-browser HTTP User-Agents typical of malware droppers and C2 clients. A
-# scripted UA on outbound web traffic is a strong signal (issue B2: the macOS
-# stealer beaconed with curl/8.7.1). Matched case-insensitively as substrings.
+# Non-browser HTTP User-Agents typical of malware droppers and C2 clients. A scripted UA on outbound
+# web traffic is a strong signal (issue B2: the macOS stealer beaconed with curl/8.7.1). Matched
+# case-insensitively as substrings.
 SUSPICIOUS_USER_AGENTS = (
     "curl/", "wget/", "python-requests", "python-urllib", "go-http-client",
     "libwww-perl", "powershell", "okhttp", "java/", "axios/", "winhttp",
 )
 
-# HTTP-body inspection (issue B3). Only text bodies are read — binary/multipart
-# (e.g. the exfil upload) is skipped — and reads are size-capped. A body is only
-# surfaced when it carries an embedded URL or a long hex token (bot/campaign id),
-# so heartbeats and host fingerprints don't add noise.
+# HTTP-body inspection (B3): text bodies only, size-capped, surfaced only when carrying an embedded
+# URL or long hex token — heartbeats don't add noise.
 BODY_TEXT_CONTENT_TYPES = ("json", "text", "urlencoded", "xml", "javascript")
 BODY_MAX_BYTES = 8192
 _BODY_URL_RE = re.compile(r"https?://[^\s\"'<>]+")
@@ -29,16 +27,15 @@ _BODY_HEXID_RE = re.compile(r"\b[0-9a-f]{32,64}\b")
 
 
 
-# DNS_ALLOWLIST / DNS_ALLOWLIST_SUFFIXES now live in src.data.threat_intel so the
-# aggregator's B1 co-occurrence pass shares the same benign-infra definition.
+# DNS_ALLOWLIST / DNS_ALLOWLIST_SUFFIXES now live in src.data.threat_intel so the aggregator's B1
+# co-occurrence pass shares the same benign-infra definition.
 
 # A domain is only "high" when its longest label is BOTH long AND high-entropy.
 DNS_SUSPICIOUS_MIN_LABEL_LEN = 12
 DNS_SUSPICIOUS_ENTROPY = 3.8
 
-# DNS query-type codes → record names (issue 4.3-r). Including the qry.type in
-# the artifact_id keeps an A (1) and an HTTPS/SVCB (65) lookup for the same
-# domain in the same frame-instant from collapsing onto one id.
+# DNS qtype codes → record names (4.3-r): qry.type in the artifact_id keeps A and HTTPS lookups for
+# the same domain/instant from collapsing onto one id.
 DNS_QTYPE_NAMES = {
     "1": "A", "2": "NS", "5": "CNAME", "6": "SOA", "12": "PTR", "15": "MX",
     "16": "TXT", "28": "AAAA", "33": "SRV", "43": "DS", "48": "DNSKEY",
@@ -106,8 +103,8 @@ class TsharkWrapper(BaseWrapper):
         for (src, dst, dport), agg in aggregates.items():
             try:
                 port = int(dport) if dport.isdigit() else 0
-                # Tiered C2-port severity (issue D1): high-confidence -> high,
-                # dual-use watch port -> medium, otherwise low.
+                # Tiered C2-port severity (issue D1): high-confidence -> high, dual-use watch port
+                # -> medium, otherwise low.
                 severity = c2_port_severity(port) or "low"
                 ts = str(agg["first_ts"]) if agg.get("first_ts") is not None else ""
                 items.append(self.make_evidence_item(
@@ -152,15 +149,13 @@ class TsharkWrapper(BaseWrapper):
             timestamp, src, domain = parts[0], parts[1], parts[2].lower()
             if not domain:
                 continue
-            # qry.type disambiguates A vs AAAA vs HTTPS lookups for the same
-            # domain at the same instant (4.3-r). tshark joins multi-question
-            # packets with commas; take the first code for the id/label.
+            # qry.type disambiguates A vs AAAA vs HTTPS lookups for the same domain at the same
+            # instant (4.3-r). tshark joins multi-question packets with commas; take the first code
+            # for the id/label.
             qtype = parts[3].split(",")[0].strip() if len(parts) > 3 else ""
             qtype_name = DNS_QTYPE_NAMES.get(qtype, qtype or "?")
-            # Score the most-significant label (not the whole string), and only
-            # flag "high" when it's long AND high-entropy AND not known-good
-            # infrastructure. The allowlist is a suppressor on the high path
-            # only — everything else is already "low".
+            # High only when the longest label is long AND high-entropy AND not allowlisted;
+            # everything else is low.
             label = self._dns_longest_label(domain)
             entropy = self._string_entropy(label)
             looks_random = (
@@ -212,8 +207,8 @@ class TsharkWrapper(BaseWrapper):
             uri  = parts[3] if len(parts) > 3 else ""
             user_agent = parts[4] if len(parts) > 4 else ""
 
-            # A non-browser UA on outbound HTTP is a strong automation/malware
-            # signal — surface it in the value and raise severity (issue B2).
+            # A non-browser UA on outbound HTTP is a strong automation/malware signal — surface it
+            # in the value and raise severity (issue B2).
             suspicious_ua = any(
                 tok in user_agent.lower() for tok in SUSPICIOUS_USER_AGENTS
             )
@@ -239,11 +234,8 @@ class TsharkWrapper(BaseWrapper):
         return items
 
     def _get_http_bodies(self, pcap_path: str) -> list:
-        """Inspect text HTTP bodies (requests and responses) for embedded C2
-        indicators. The stealer's task command carries its bot id and a C2 URL
-        in the response body — invisible to header-only parsing (issue B3).
-        Binary/multipart bodies (e.g. the exfil upload) and oversized reads are
-        skipped."""
+        """Inspect text HTTP bodies for embedded C2 indicators (bot ids / C2 URLs live in bodies,
+        invisible to header-only parsing — B3)."""
         print("  [TSHARK] Inspecting HTTP bodies...")
         stdout, _, code = self.run_command([
             "tshark", "-r", pcap_path,
@@ -307,8 +299,8 @@ class TsharkWrapper(BaseWrapper):
         return items
 
     def _get_host_identities(self, pcap_path: str) -> list:
-        """Map internal (RFC1918) hosts to their MAC address, so the victim's
-        hardware identity is surfaced alongside its IP (issue B4)."""
+        """Map internal (RFC1918) hosts to their MAC address, so the victim's hardware identity
+        is surfaced alongside its IP (issue B4)."""
         print("  [TSHARK] Extracting host identities (IP → MAC)...")
         stdout, _, code = self.run_command([
             "tshark", "-r", pcap_path,
@@ -329,8 +321,8 @@ class TsharkWrapper(BaseWrapper):
             if len(parts) < 3:
                 continue
             timestamp = parts[0]
-            # tshark may emit multiple ip.src values (comma-joined); take the
-            # first LAN address. eth.src is a single source MAC.
+            # tshark may emit multiple ip.src values (comma-joined); take the first LAN address.
+            # eth.src is a single source MAC.
             ip = next((t for t in parts[1].split(",") if is_lan_ipv4(t)), "")
             mac = parts[2].split(",")[0]
             if not ip or not mac or ip in macs:

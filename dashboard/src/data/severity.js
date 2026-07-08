@@ -1,5 +1,5 @@
-// Shared severity palettes so the pages don't each redefine them (Overview,
-// Reports, Threats and Network all used near-identical local copies).
+// Shared severity palettes so the pages don't each redefine them (Overview, Reports, Threats and
+// Network all used near-identical local copies).
 
 export const SEVERITY_TEXT = {
   critical: "text-red-400",

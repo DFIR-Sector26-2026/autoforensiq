@@ -1,19 +1,7 @@
-"""
-IOC Re-scorer — post-aggregation severity correction (P4 helper)
-
-Wrappers assign severity once, using only their own narrow heuristics, so known
-malware indicators (e.g. tasksche.exe, @WanaDecryptor@) can slip through as
-`low`. This module re-scores each evidence item against:
-
-  * a static IOC catalog (src/data/ioc_patterns.json), and
-  * case-specific IOCs derived from case_context (affected_systems IPs, etc.)
-
-Severity is only ever BOOSTED, never downgraded — a wrapper that already flagged
-something critical keeps that rating. Matches are recorded on the item under a
-new optional `ioc_match` field.
-
-Used by evidence_aggregator.aggregate_evidence() between dedup and sort.
-"""
+"""IOC Re-scorer (P4 helper, runs between dedup and sort): re-scores each item against the static
+IOC catalog (src/data/ioc_patterns.json) + per-case IOCs, so known malware indicators the
+wrappers under-rated get lifted. Severity is only ever BOOSTED, never downgraded; matches are
+recorded under `ioc_match`."""
 
 from __future__ import annotations
 
@@ -30,45 +18,33 @@ _DEFAULT_CATALOG_PATH = ROOT_DIR / "src" / "data" / "ioc_patterns.json"
 # Shared severity ranking (mirrors evidence_aggregator.SEVERITY_ORDER).
 SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 
-# Structural-summary evidence types: derived roll-ups whose value embeds items
-# that are ALSO emitted (and scored) individually. `process_tree` embeds the
-# whole process list as text — the same processes are emitted as `process` items
-# and suspicious lineages as `process_relation` items. Re-scoring the tree's text
-# against the catalog would match those embedded names again and double-count the
-# malware as a second critical finding (issue 4.4), so these types are excluded
-# from IOC matching and keep the structural severity the wrapper assigned.
+# Structural roll-ups whose text embeds items already emitted/scored on their own (process_tree
+# embeds every process) — re-scoring would double-count the malware as a second critical finding
+# (4.4).
 _STRUCTURAL_SUMMARY_TYPES = {"process_tree"}
 
-# String-derived domain evidence (e.g. a `suspicious_domain` scraped from memory
-# strings) is only a *finding* if the host was actually contacted. Without a
-# matching network/DNS/HTTP item it stays a visible indicator (keeps its
-# `ioc_match` tag) but is NOT severity-boosted, so an EDR / threat-intel feed
-# resident in memory can't manufacture a CRITICAL verdict from ransomware
-# families no host ever talked to (B-2).
+# String-scraped domains are findings only if the host was actually contacted (B-2): uncorroborated
+# ones keep the ioc_match tag but are NOT boosted, so a threat-intel feed resident in memory can't
+# manufacture a CRITICAL verdict.
 _CORROBORATION_REQUIRED_TYPES = {"suspicious_domain"}
 
-# Evidence types that prove the subject actually contacted a host — the
-# corroboration source for the gate above.
+# Evidence types that prove the subject actually contacted a host — the corroboration source for the
+# gate above.
 _NETWORK_CONTACT_TYPES = {
     "network_connection", "dns_query", "http_request", "http_body",
 }
 
-# Candidate ports, extracted only from genuine port grammar (issue 4.1-r). A bare
-# 2–5 digit token is NOT a port — a byte count ("442 bytes"), packet count, or PID
-# would otherwise read as a critical C2 port. We accept a number only when it sits
-# after a host/IP colon (`…215.18:4444`) or an explicit port keyword
-# (`port 4444`, `dport=4444`, `dst port 4444`). The colon is anchored to a
-# preceding address character so a literal ":4444" still works but a bare number
-# never matches.
+# Ports only from genuine port grammar (4.1-r): after a host/IP colon or a port keyword — a bare
+# number (byte count, PID) must never read as a C2 port.
 _PORT_TOKEN_RE = re.compile(
     r"(?:(?<=[\w.]):|\b(?:dst\s+)?d?port\b[\s:=]{0,3})(\d{2,5})\b",
     re.IGNORECASE,
 )
 
-# A Run/RunOnce/Winlogon key is persistence only when it points at a *suspicious*
-# target: a staging directory, a remote URL, or a non-.exe autostart (Run keys
-# normally launch a plain .exe, so a .dll/.bat/.ps1 there is the anomaly). A bare
-# key path, or a legit app autostarting its own .exe, is not a finding.
+# A Run/RunOnce/Winlogon key is persistence only when it points at a *suspicious* target: a staging
+# directory, a remote URL, or a non-.exe autostart (Run keys normally launch a plain .exe, so a
+# .dll/.bat/.ps1 there is the anomaly). A bare key path, or a legit app autostarting its own .exe,
+# is not a finding.
 _PERSISTENCE_TARGET_RE = re.compile(
     r"\\(?:temp|appdata|programdata)\\"
     r"|\\users\\public\\"
@@ -77,14 +53,14 @@ _PERSISTENCE_TARGET_RE = re.compile(
     re.IGNORECASE,
 )
 
-# A dotted-quad IPv4 token (matched whole, so a bad "1.2.3.4" never substring-
-# hits inside "11.2.3.40"). Octet-range validation is loose on purpose — the
-# reputation match is an equality test against the catalog list, not a parser.
+# A dotted-quad IPv4 token (matched whole, so a bad "1.2.3.4" never substring- hits inside
+# "11.2.3.40"). Octet-range validation is loose on purpose — the reputation match is an equality
+# test against the catalog list, not a parser.
 _IP_TOKEN_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
 
-# A hostname / domain token: one or more dot-separated labels ending in an
-# alphabetic TLD (≥2). The alphabetic-TLD requirement means an IPv4 literal is
-# never mis-extracted as a host. Used for reputation matching (issue 4.2).
+# A hostname / domain token: one or more dot-separated labels ending in an alphabetic TLD (≥2). The
+# alphabetic-TLD requirement means an IPv4 literal is never mis-extracted as a host. Used for
+# reputation matching (issue 4.2).
 _HOST_TOKEN_RE = re.compile(
     r"\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\b", re.IGNORECASE
 )
@@ -95,21 +71,17 @@ def _is_ip(token: str) -> bool:
 
 
 def _has_remote_peer(value: str) -> bool:
-    """True when a connection value names two distinct real endpoints — i.e. an
-    actual session with a remote peer, not a listening socket. Listeners read
-    `0.0.0.0:3389 -> 0.0.0.0:0` / `:::5985 -> :::0` (at most one real IP), while
-    an established pair carries both hosts (`172.16.4.9:3389 -> 172.16.5.26:...`).
-    Gate for the lateral-movement port tier (B-6): every Windows host listens on
-    RDP/WinRM itself, so the bare listener must not match."""
+    """True when the value names two distinct real IPs — an actual session, not a listening
+    socket (B-6 gate: every host listens on RDP/WinRM itself)."""
     ips = {ip for ip in _IP_TOKEN_RE.findall(value) if ip != "0.0.0.0"}
     return len(ips) >= 2
 
 
 def _persistence_actionable(item: dict, value: str) -> bool:
-    """True when a persistence_runkey match is a genuine finding, not a bare key
-    path. `schtasks`/`reg add` are persistence *actions* and stand alone; a
-    Run/Winlogon *key* reference qualifies only when it's a registry item that
-    points at a suspicious target (staging dir / URL / non-.exe autostart)."""
+    """True when a persistence_runkey match is a genuine finding, not a bare key path.
+    `schtasks`/`reg add` are persistence *actions* and stand alone; a Run/Winlogon *key*
+    reference qualifies only when it's a registry item that points at a suspicious target
+    (staging dir / URL / non-.exe autostart)."""
     v = value.lower()
     if "schtasks" in v or "reg add" in v:
         return True
@@ -189,19 +161,16 @@ def _match_reputation(rule: dict, hosts: set[str], ips: set[str]) -> str | None:
 
 
 def _build_indicator_list(catalog: dict, case_context: dict) -> list[dict]:
-    """Combine static catalog indicators + port/keyword groups + case IOCs into
-    a single flat list of {id, match, severity, category} rules."""
+    """Combine static catalog indicators + port/keyword groups + case IOCs into a single flat
+    list of {id, match, severity, category} rules."""
     indicators: list[dict] = list(catalog.get("indicators", []))
 
     reputation = _build_reputation_rule(catalog, case_context)
     if reputation:
         indicators.append(reputation)
 
-    # C2 ports come from the shared catalog (issue D1), tiered: high-confidence
-    # ports floor at critical; dual-use watch ports (IRC/8888/9999/old trojans)
-    # only at medium, so a Jupyter or IRC connection isn't escalated to a
-    # critical C2 finding. Keeping the high-tier id "c2_port" preserves the
-    # existing match label.
+    # Shared C2 ports (D1), tiered: high-confidence → critical floor; dual-use watch ports → medium
+    # so an IRC/Jupyter connection isn't a critical C2 hit.
     if C2_PORTS_HIGH:
         indicators.append({
             "id": "c2_port",
@@ -216,10 +185,8 @@ def _build_indicator_list(catalog: dict, case_context: dict) -> list[dict]:
             "severity": "medium",
             "category": "c2_channel",
         })
-    # Remote-interactive admin channels (WinRM/RDP/VNC) — the lateral-movement
-    # backbone of an internal LOTL intrusion (B-6). Medium watch signal, and only
-    # for a session with a real remote peer: every Windows host listens on
-    # 3389/5985 itself, so a bare listening socket must not match.
+    # Lateral-movement ports (B-6): medium watch signal, and only for sessions with a real remote
+    # peer (listeners must not match).
     if LATERAL_MOVEMENT_PORTS:
         indicators.append({
             "id": "lateral_movement_port",
@@ -238,27 +205,23 @@ def _build_indicator_list(catalog: dict, case_context: dict) -> list[dict]:
             "category": "exfiltration",
         })
 
-    # NOTE (issue B2): the affected-system IPs from case_context are the *victim*
-    # hosts, not threat indicators — they appear in essentially every artifact, so
-    # treating them as a high-severity IOC wrongly escalated benign victim traffic
-    # (e.g. the invoice DNS lookup and the :445 lateral-probe both jumped to high).
-    # Victim-host correlation is already handled by the aggregator's `same_ip`
-    # signal, so case-IPs are intentionally NOT added to the IOC indicator list.
+    # Case-context affected-system IPs are the *victims*, not indicators — adding them escalated
+    # benign victim traffic (B2). Victim correlation is the aggregator's same_ip signal, so they're
+    # deliberately NOT added here.
     return indicators
 
 
 def _norm_host(host: str) -> str:
-    """Lowercase, strip a trailing dot and a leading `www.` so the `www.`-prefixed
-    memory copy of a host and the bare form seen in a pcap collapse to one key
-    (mirrors evidence_aggregator._normalize_host)."""
+    """Lowercase, strip a trailing dot and a leading `www.` so the `www.`-prefixed memory copy of
+    a host and the bare form seen in a pcap collapse to one key (mirrors
+    evidence_aggregator._normalize_host)."""
     host = host.strip().rstrip(".").lower()
     return host[len("www."):] if host.startswith("www.") else host
 
 
 def _corroborated_hosts(items: list[dict]) -> set[str]:
-    """Hosts (domains + IP literals) the subject actually contacted, harvested
-    from network/DNS/HTTP items. A string-only domain IOC is a finding only if it
-    appears here (B-2)."""
+    """Hosts (domains + IP literals) the subject actually contacted, harvested from
+    network/DNS/HTTP items. A string-only domain IOC is a finding only if it appears here (B-2)."""
     hosts: set[str] = set()
     for item in items:
         if not isinstance(item, dict) or item.get("evidence_type") not in _NETWORK_CONTACT_TYPES:
@@ -270,9 +233,9 @@ def _corroborated_hosts(items: list[dict]) -> set[str]:
 
 
 def _domain_corroborated(value: str, corroborated: set[str]) -> bool:
-    """True if any domain in `value` was contacted — exact host or subdomain of a
-    contacted host (`host == c` or `host.endswith("." + c)`), matching the
-    reputation rule's host-aware semantics."""
+    """True if any domain in `value` was contacted — exact host or subdomain of a contacted host
+    (`host == c` or `host.endswith("." + c)`), matching the reputation rule's host-aware
+    semantics."""
     for raw in _HOST_TOKEN_RE.findall(value):
         h = _norm_host(raw)
         if any(h == c or h.endswith("." + c) for c in corroborated):
@@ -296,16 +259,16 @@ def rescore_item(
     if not isinstance(item, dict):
         return item, []
 
-    # Structural roll-ups (process_tree) embed indicators already scored on their
-    # own items; don't re-score them or the malware double-counts (issue 4.4).
+    # Structural roll-ups (process_tree) embed indicators already scored on their own items; don't
+    # re-score them or the malware double-counts (issue 4.4).
     if item.get("evidence_type") in _STRUCTURAL_SUMMARY_TYPES:
         return item, []
 
     value = str(item.get("value", ""))
     haystack = f"{value} {item.get('evidence_type', '')}".lower()
     ports_in_value = {int(t) for t in _PORT_TOKEN_RE.findall(haystack)}
-    # Host / IP literals are extracted lazily — only when a reputation rule is
-    # present — since most catalogs/items never need them.
+    # Host / IP literals are extracted lazily — only when a reputation rule is present — since most
+    # catalogs/items never need them.
     hosts_in_value: set[str] | None = None
     ips_in_value: set[str] | None = None
 
@@ -335,23 +298,16 @@ def rescore_item(
         if not hit:
             continue
 
-        # The code_injection rule re-matches the malfind wrapper's OWN output
-        # ("rwx", "injected_code"), but the wrapper already graded those items with
-        # full context (RWX+PE -> critical, bare RWX -> high, JIT/AV -> medium,
-        # corroboration). Re-scoring them let the naive rule override that grading
-        # (it re-elevated Defender's down-ranked RWX back to high). Skip it for
-        # injected_code items — like process_tree, they're already scored on their
-        # own item. Genuine injections keep their wrapper severity (never
-        # downgraded) and the ioc_engine "Process injection detected" IOC; the rule
-        # stays active for non-injected_code items (a "process hollowing" /
-        # "reflective" mention in a commandline or string still elevates).
+        # Skip the code_injection rule for injected_code items: malfind already graded them with
+        # full context, and the naive rule re-elevated down-ranked Defender/JIT RWX. The rule stays
+        # active elsewhere (a "process hollowing" mention in a commandline still elevates).
         if rule.get("id") == "code_injection" and item.get("evidence_type") == "injected_code":
             continue
 
         matched_ids.append(match_id)
-        # Persistence via a Run/RunOnce/Winlogon key elevates only when the key
-        # points at a suspicious target; a bare key path is on every Windows host.
-        # Keep the tag (above), skip the boost (fixes the bare-Run-key FP flood).
+        # Persistence via a Run/RunOnce/Winlogon key elevates only when the key points at a
+        # suspicious target; a bare key path is on every Windows host. Keep the tag (above), skip
+        # the boost (fixes the bare-Run-key FP flood).
         if rule.get("id") == "persistence_runkey" and not _persistence_actionable(item, value):
             continue
         rank = SEVERITY_ORDER.get(rule.get("severity", "low"), 0)
@@ -362,10 +318,8 @@ def rescore_item(
     if not matched_ids:
         return item, []
 
-    # B-2: an uncorroborated string-derived domain keeps its match tag (below)
-    # but must not drive the verdict, so skip the severity boost. A corroborated
-    # one — the same domain also seen in a real connection/DNS — escalates
-    # normally, becoming a genuine finding.
+    # B-2: an uncorroborated string-derived domain keeps its tag but must not drive the verdict; a
+    # corroborated one escalates normally.
     boost_allowed = not (
         corroborated_hosts is not None
         and item.get("evidence_type") in _CORROBORATION_REQUIRED_TYPES

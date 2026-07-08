@@ -2,20 +2,15 @@ import re
 
 
 def _slug(text):
-    """Stable, filename-safe token from a matched indicator, used to keep
-    emitted IOC artifact_ids unique. A single source item (e.g. a process_tree
-    text) can match several indicators; without the token suffix every match
-    would collapse onto the same `ioc_<kind>_<artifact_id>` id."""
+    """Filename-safe token from a matched indicator — one source item can match several
+    indicators, and without the suffix their ids would collide."""
     s = re.sub(r"[^a-z0-9]+", "_", str(text).lower()).strip("_")
     return s or "x"
 
 
-# Process names suspicious on their name alone. cmd.exe / powershell.exe are
-# deliberately NOT here (B-5): they are living-off-the-land binaries that run
-# constantly on a healthy host, so a bare-name match is a false positive (e.g.
-# the Kibana launcher cmd.exe). Their malicious use carries context this engine
-# already scores separately — the `powershell -enc` keyword and the
-# `explorer.exe -> powershell.exe` relation rule — so no detection is lost.
+# Process names suspicious on their name alone. cmd.exe / powershell.exe are deliberately NOT here
+# (B-5): bare LOLBin names FP on healthy hosts; their malicious use is covered by the `powershell
+# -enc` keyword + relation rule.
 SUSPICIOUS_PROCESSES = [
     "rundll32.exe",
     "wscript.exe",
@@ -46,15 +41,9 @@ SUSPICIOUS_RELATIONS = [
 
 
 def _dedupe_iocs(iocs):
-    """Collapse IOC items reporting the same indicator at the same severity into
-    a single item, unioning their `linked_artifacts` (IOC-redundancy).
-
-    The engine emits one item per (source item, matched indicator), so an
-    indicator seen in N source items (e.g. `tasksche.exe` ×5, `@WanaDecryptor@`
-    ×5) produced N near-identical items differing only by `linked_artifacts`.
-    Downstream consumers want one indicator carrying all its source links, so we
-    keep the first item per (value, severity) and merge the rest's links into it.
-    """
+    """Collapse items with the same (value, severity) into one, unioning their linked_artifacts —
+    the engine emits one item per (source, indicator), so an indicator seen N times produced N
+    near-identical items."""
     merged = {}
     order = []
     for ioc in iocs:
@@ -86,15 +75,15 @@ def _emit(artifact_id, value, severity, confidence, source_id):
     }
 
 
-# Substring-match indicator rules: scan an item's (lowercased) value for any
-# catalog term, emitting one IOC per match. Adding an indicator class is a
-# one-line table edit. (id_prefix, terms, message_template, severity, confidence)
+# Substring-match indicator rules: scan an item's (lowercased) value for any catalog term, emitting
+# one IOC per match. Adding an indicator class is a one-line table edit. (id_prefix, terms,
+# message_template, severity, confidence)
 _SUBSTRING_RULES = [
     ("ioc_proc",    SUSPICIOUS_PROCESSES,  "Suspicious process detected: {term}", "high",     0.90),
     ("ioc_keyword", SUSPICIOUS_KEYWORDS,   "Malware indicator detected: {term}",  "critical", 0.95),
-    # medium, not high (B-9c): a DLL under temp/appdata is a lead, not a finding —
-    # browsers and updaters legitimately keep DLLs there (Edge components under
-    # AppData\Local). Catalog-named malware still escalates via the rescorer.
+    # medium, not high (B-9c): a DLL under temp/appdata is a lead, not a finding — browsers and
+    # updaters legitimately keep DLLs there (Edge components under AppData\Local). Catalog-named
+    # malware still escalates via the rescorer.
     ("ioc_dll",     SUSPICIOUS_DLL_PATHS,  "Suspicious DLL path detected: {term}", "medium",   0.85),
 ]
 
@@ -107,17 +96,10 @@ def extract_iocs(evidence_items):
 
         evidence_type = item.get("evidence_type", "")
 
-        # Skip the process_tree aggregate: it's a summary blob of processes that
-        # are already scored individually (per-PID `process` items) and as
-        # lineage (`process_relation` items). Scanning it re-derives the same
-        # IOCs from one item, producing duplicate / colliding artifact_ids
-        # (cf. issue 4.4 — process vs process_tree double-scoring).
-        #
-        # Also skip string-derived `suspicious_domain` items: the substring
-        # catalogs below match process names / keywords / DLL paths, none of which
-        # legitimately live inside a memory-scraped domain token — matching
-        # "mimikatz" in "invoke-mimikatz.ps1tinyurl.com" is a false positive.
-        # Domains are scored on the reputation/corroboration path (ioc_rescorer).
+        # Skip process_tree (its processes are already scored per-PID and as relations — rescanning
+        # duplicates ids, 4.4) and suspicious_domain (the catalogs FP inside memory-scraped domain
+        # blobs, e.g. "mimikatz" in "invoke-mimikatz.ps1tinyurl.com"; domains are scored by the
+        # rescorer).
         if evidence_type in ("process_tree", "suspicious_domain"):
             continue
 
@@ -126,10 +108,8 @@ def extract_iocs(evidence_items):
 
         # Substring catalogs (processes / keywords / dll paths).
         for prefix, terms, template, severity, confidence in _SUBSTRING_RULES:
-            # The DLL-path rule targets a DLL *sideloaded* from Temp/AppData, not
-            # every file that merely lives under those dirs. Without the .dll
-            # requirement, "temp"/"appdata" matched hundreds of benign files
-            # (caches, logs, configs) as a "suspicious DLL path".
+            # The DLL rule needs an actual .dll — without it, "temp"/"appdata" matched hundreds of
+            # benign caches/logs/configs.
             if prefix == "ioc_dll" and ".dll" not in value:
                 continue
             for term in terms:
@@ -140,11 +120,9 @@ def extract_iocs(evidence_items):
                         severity, confidence, artifact_id,
                     ))
 
-        # Injected code is an evidence-type signal, not a substring match. Inherit
-        # the wrapper's graded severity rather than stamping a blanket critical:
-        # malfind already distinguishes RWX+PE (critical) from bare RWX/RX (high)
-        # and down-ranks benign JIT/AV hosts. The old hardcoded critical overrode
-        # that, escalating Defender's benign RWX region to a critical injection.
+        # Injected code inherits the wrapper's graded severity — malfind already distinguishes
+        # RWX+PE from bare RWX and down-ranks JIT/AV hosts; a blanket critical re-escalated
+        # Defender's benign RWX region.
         if evidence_type == "injected_code":
             iocs.append(_emit(
                 f"ioc_injection_{artifact_id}",

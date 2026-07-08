@@ -11,12 +11,8 @@ from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
 def _resolve_cmd(preferred: str, fallback: str) -> str:
     """Resolve a plaso console script (log2timeline.py / psort.py).
 
-    Under the documented `venv/bin/python autoforensiq.py` invocation, venv/bin
-    is NOT on PATH, so shutil.which() misses a plaso installed via
-    `venv/bin/pip install plaso` (its scripts land in venv/bin). This is the same
-    root cause as the volatility D1 fix, so check the interpreter's own bin dir
-    first, then PATH, then fall back to the bare name (which fails loudly if the
-    binary genuinely isn't installed)."""
+    venv/bin isn't on PATH under `venv/bin/python autoforensiq.py` (D1), so check
+    the interpreter's own bin dir first, then PATH, then the bare name."""
     venv_bin = os.path.dirname(sys.executable)
     for name in (preferred, fallback):
         candidate = os.path.join(venv_bin, name)
@@ -40,9 +36,8 @@ SUSPICIOUS_SOURCES = [
 ]
 
 class PlasoWrapper(BaseWrapper):
-    # The orchestrator feeds plaso the disk image (the ontology lists
-    # disk_image/evidence_directory). The display layers previously called it
-    # log_files, which contradicted what actually runs (issue D2).
+    # The orchestrator feeds plaso the disk image; display layers formerly mislabelled it log_files
+    # (D2).
     consumes = "disk_image"
 
     def __init__(self):
@@ -53,22 +48,15 @@ class PlasoWrapper(BaseWrapper):
             print(f"  [ERROR] Source path not found: {source_path}")
             return []
 
-        # NOT tempfile.gettempdir(): /tmp is tmpfs (RAM-backed) on Fedora/most
-        # systemd distros, and the storage dump alone measured 1.9 GB on the 11 GB
-        # dev01 E01 — staging it in RAM competes with the plaso workers for the
-        # same memory budget (B-4's original OOM pressure). /var/tmp is the
-        # disk-backed temp location.
+        # NOT /tmp: it's tmpfs (RAM) on most systemd distros and the dump alone measured 1.9 GB —
+        # staging it in RAM starves the plaso workers (B-4).
         temp_dir = Path("/var/tmp") if os.path.isdir("/var/tmp") else Path(tempfile.gettempdir())
         plaso_dump = temp_dir / "autoforensiq_plaso.dump"
         csv_output = temp_dir / "autoforensiq_timeline.csv"
 
-        # These fixed-path temp files are only cleaned up on the success path, so
-        # a run killed mid-write (timeout/OOM) leaves a PARTIAL sqlite dump behind
-        # — and log2timeline RESUMES into an existing storage file, crashing
-        # instantly with "sqlite3.DatabaseError: database disk image is malformed"
-        # (B-4: every dev01 run after the first timed-out one produced 0 items
-        # this way). psort likewise refuses to overwrite an existing CSV. Always
-        # start from a clean slate.
+        # A timeout-killed run leaves a partial dump; log2timeline RESUMES into it and crashes
+        # ("database disk image is malformed"), and psort refuses to overwrite an existing CSV
+        # (B-4). Always start clean.
         for stale in (plaso_dump, csv_output):
             stale.unlink(missing_ok=True)
 
@@ -79,62 +67,31 @@ class PlasoWrapper(BaseWrapper):
             [
                 LOG2TIMELINE,
                 "--status_view", "none",
-                # A bare `log2timeline <image>` runs EVERY parser and MD5-hashes
-                # every file on the disk. On an 11 GB E01 that never finished
-                # inside the 600s timeout below, so the stage was killed and
-                # returned zero events. Restrict to the artifacts _parse_csv
-                # actually keeps (SUSPICIOUS_SOURCES: run keys, scheduled tasks,
-                # powershell/cmd, downloads) so it completes in minutes:
-                #   win7      -> winreg (run keys/autorun), winjob + winevtx
-                #                (scheduled tasks, powershell/cmd command lines),
-                #                webhist (downloads), powershell transcripts.
-                #                Despite the name, "win7" is plaso's preset for
-                #                Windows 7 AND LATER — the same evtx/registry/
-                #                prefetch/NTFS formats cover 8/10/11 and Server
-                #                2008-2022 (verified on the dev01 Server 2022 E01).
-                #   winxp     -> the pre-Win7 formats (.evt event logs, INFO2
-                #                recyclers). Near-free on a modern image (its
-                #                XP-only parsers just find nothing) but makes the
-                #                stage version-agnostic across all Windows.
-                #   prefetch  -> execution evidence (cmd.exe/powershell .pf)
-                # These presets also drag in two parsers whose output the
-                # SUSPICIOUS_SOURCES filter throws away but which dominate cost,
-                # so exclude them (a full super-timeline is wasted here — the
-                # pipeline only keeps events matching a handful of keywords):
-                #   !filestat -> one event per file (millions on a full disk);
-                #                ballooned the run to 300 MB+ and duplicates the
-                #                tsk_fls wrapper's per-file timeline.
-                #   !pe       -> parses every executable on disk (heavy I/O);
-                #                its PE compile-time events never match the
-                #                filter keywords.
+                # Scoped to what _parse_csv's SUSPICIOUS_SOURCES filter keeps — a bare invocation
+                # runs every parser + hashes every file and never finished in 600s. "win7" covers
+                # Win7 AND later (verified on the dev01 Server 2022 E01); winxp adds pre-Win7
+                # formats near-free; prefetch = execution evidence. !filestat (one event per file,
+                # duplicates tsk_fls) and !pe (heavy, never matches the filter) dominate cost and
+                # are excluded.
                 "--parsers", "win7,winxp,prefetch,!filestat,!pe",
-                # Nothing downstream uses plaso hashes, and hashing every file
-                # was the single biggest time sink.
+                # Nothing downstream uses plaso hashes; hashing was the biggest time sink.
                 "--hashers", "none",
-                # Process all partitions non-interactively; a multi-partition
-                # image would otherwise prompt for a selection with no TTY.
+                # Non-interactive: multi-partition images prompt with no TTY.
                 "--partitions", "all",
-                # Same reason for shadow copies: an image with VSS snapshots
-                # (like the dev01 E01) prompts "VSS identifier(s):" and blocks
-                # forever with no TTY. "none" = current volume only, no prompt
-                # (processing every snapshot would also multiply runtime).
+                # VSS images prompt "VSS identifier(s):" and block forever with no TTY; "none" =
+                # current volume only.
                 "--vss_stores", "none",
-                # The default spawns one worker per core (15 on this box), which
-                # under a 14 GB budget drove the machine into memory pressure and
-                # the 600s timeout (B-4). Four workers is the sweet spot: bounded
-                # memory, and the run is I/O-bound anyway.
+                # Default = one worker per core (15 here) → memory pressure and the 600s timeout
+                # (B-4); the run is I/O-bound anyway.
                 "--workers", "4",
                 "--storage_file", str(plaso_dump),
                 source_path
             ],
             input_files=[source_path],
             output_files=[str(plaso_dump)],
-            # Deliberately kept at 600s (accepted limitation): a measured run on
-            # an 11 GB E01 needed ~18 min here plus ~46 min in psort — raising
-            # the timeouts would buy a ~65-minute stage whose keyword filter
-            # mostly re-corroborates what the memory/disk wrappers already
-            # surface. GB-scale images therefore time out and plaso contributes
-            # nothing; small images complete fine.
+            # Deliberately 600s (accepted, B-4): the 11 GB E01 measured ~65 min total and mostly
+            # re-corroborates the memory/disk wrappers, so GB-scale images time out; small images
+            # complete fine.
             timeout=600
         )
 
@@ -192,10 +149,8 @@ class PlasoWrapper(BaseWrapper):
 
         items = []
 
-        # Real psort output contains fields beyond csv's 128 KB default limit
-        # (evtx "Strings" blobs) — the resulting csv.Error escapes the row loop
-        # and silently truncates the timeline (the dev01 CSV died at row ~360k
-        # of 633k).
+        # evtx "Strings" blobs exceed csv's 128 KB field limit; the csv.Error silently truncated the
+        # dev01 CSV at ~row 360k of 633k.
         csv.field_size_limit(sys.maxsize)
 
         try:
@@ -206,13 +161,9 @@ class PlasoWrapper(BaseWrapper):
 
                 for row in reader:
                     try:
-                        # l2tcsv columns (B-12): the format has no "datetime" or
-                        # "description" — the header is date,time,timezone,MACB,
-                        # source,sourcetype,...,desc,...,filename,... Reading the
-                        # wrong keys made every row look empty, so the keyword
-                        # filter matched nothing and a *successful* plaso run
-                        # still produced 0 items. "sourcetype" is the readable
-                        # label ("Registry Key"); "source" is a short code (REG).
+                        # l2tcsv has no datetime/description columns — the real keys are
+                        # date,time,desc,sourcetype (B-12: wrong keys made even a successful run
+                        # parse 0 items).
                         timestamp = f'{row.get("date", "")} {row.get("time", "")}'.strip()
                         source = row.get("sourcetype", "")
                         desc = row.get("desc", "")
@@ -232,14 +183,9 @@ class PlasoWrapper(BaseWrapper):
                                     artifact_id=stable_artifact_id("plaso", timestamp, desc),
                                     evidence_type="timeline_event",
                                     value=f"[{timestamp}] [{source}] {desc} | File: {filename}",
-                                    # medium, not high: the bare-substring filter
-                                    # is a lead generator, not a detector — on the
-                                    # dev01 CSV it kept 7,734 rows, almost all
-                                    # benign (Start-Menu powershell .lnk files,
-                                    # WinSxS "Deployments" keys matching
-                                    # "startup"). Blanket high would flood Key
-                                    # Findings; genuinely bad events still
-                                    # escalate via the ioc_rescorer catalogs.
+                                    # medium, not high: the substring filter is a lead generator
+                                    # (~7.7k mostly-benign keeps on dev01); bad events escalate via
+                                    # ioc_rescorer.
                                     severity="medium",
                                     confidence=0.72,
                                     timestamp=timestamp

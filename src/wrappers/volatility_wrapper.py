@@ -18,10 +18,8 @@ PLUGINS = [
     "windows.filescan",
     "windows.dlllist"
 ]
-# NB: windows.strings is intentionally NOT in PLUGINS. It requires a
-# --strings-file argument, so running it in the main loop (which can't pass one)
-# just triggers a slow, failing vol pass. It is run separately, correctly, in the
-# dedicated strings block in run() with a generated --strings-file.
+# windows.strings is NOT here: it needs --strings-file, so it runs separately in run() with a
+# generated strings file (in the loop it just fails slowly).
 
 
 class ProcessNode:
@@ -65,9 +63,9 @@ def summarise_tree(node, depth=0, max_depth=5):
 
 
 def tree_to_dict(node, depth=0, max_depth=5):
-    """Structured process-tree for downstream consumers (issue 4.5): the same
-    lineage as summarise_tree but as nested dicts instead of indented text, so
-    the report/UI doesn't have to re-parse the text blob."""
+    """Structured process-tree for downstream consumers (issue 4.5): the same lineage as
+    summarise_tree but as nested dicts instead of indented text, so the report/UI doesn't have to
+    re-parse the text blob."""
 
     if not node or depth > max_depth:
         return None
@@ -86,9 +84,9 @@ def tree_to_dict(node, depth=0, max_depth=5):
 
 
 def tree_lineage(node, max_depth=5):
-    """Concise one-line root→leaf lineage(s), e.g.
-    `explorer.exe(1636) → tasksche.exe(1940) → @WanaDecryptor@(740)` (issue 4.5).
-    One line per leaf path; a single linear chain collapses to one line."""
+    """Concise one-line root→leaf lineage(s), e.g. `explorer.exe(1636) → tasksche.exe(1940) →
+    @WanaDecryptor@(740)` (issue 4.5). One line per leaf path; a single linear chain collapses to
+    one line."""
 
     paths = []
 
@@ -106,12 +104,9 @@ def tree_lineage(node, max_depth=5):
     return "\n".join(paths)
 
 
-# Despite the name, this list's only consumer is _parse_pslist's OWN-NAME
-# severity heuristic (parent->child lineage is scored by SUSPICIOUS_RELATIONSHIPS
-# below). cmd.exe / powershell.exe are deliberately NOT here (B-5/B-9a): they run
-# constantly on a healthy host, so a bare-name match flagged e.g. the benign
-# Kibana launcher cmd.exe HIGH. Their malicious use is still scored with context —
-# the SUSPICIOUS_RELATIONSHIPS pairs and the ioc_engine `powershell -enc` keyword.
+# Despite the name, only consumed by _parse_pslist's OWN-NAME severity (lineage is
+# SUSPICIOUS_RELATIONSHIPS below). cmd.exe/powershell.exe deliberately absent (B-5/B-9a): bare
+# LOLBin names FP; context rules still score their misuse.
 SUSPICIOUS_PARENTS = [
     "wscript.exe",
     "cscript.exe",
@@ -128,14 +123,9 @@ SUSPICIOUS_RELATIONSHIPS = {
     ("explorer.exe", "powershell.exe"),
 }
 
-# Benign infrastructure domains (issue D3). A raw memory dump is saturated with
-# OS / browser / CDN / certificate / telemetry hostnames; emitting each one as a
-# `suspicious_domain` floods the evidence set (a Windows dump produced ~22k of
-# them) and is the input that made P5 SHAP unscalable. Any extracted host that
-# equals one of these registrable bases — or is a sub-domain of it — is dropped
-# at the source. This is curated benign infrastructure, NOT a way to whitelist
-# real C2: the host-aware reputation layer (ioc_rescorer, issue 4.2) still runs
-# on whatever survives, so a curated bad host is never suppressed here.
+# Benign infrastructure dropped at source (D3): a dump carries ~22k OS/CDN/CA hostnames that flooded
+# the evidence set and P5. Exact-or-subdomain match only (lookalike-safe); the reputation layer
+# still runs on whatever survives.
 BENIGN_DOMAIN_SUFFIXES = {
     # Microsoft / Windows OS + telemetry + update + cloud
     "microsoft.com", "windows.com", "windowsupdate.com", "msftncsi.com",
@@ -172,8 +162,8 @@ BENIGN_DOMAIN_SUFFIXES = {
 
 def _is_benign_domain(host: str) -> bool:
     """True when `host` is benign infrastructure (issue D3): it equals one of
-    BENIGN_DOMAIN_SUFFIXES or is a sub-domain of one. Host-aware, so a lookalike
-    like "microsoft.com.evil.tld" is NOT treated as benign."""
+    BENIGN_DOMAIN_SUFFIXES or is a sub-domain of one. Host-aware, so a lookalike like
+    "microsoft.com.evil.tld" is NOT treated as benign."""
     host = host.lower().rstrip(".")
     for base in BENIGN_DOMAIN_SUFFIXES:
         if host == base or host.endswith("." + base):
@@ -181,23 +171,18 @@ def _is_benign_domain(host: str) -> bool:
     return False
 
 
-# URL / network-context anchors (issue D3). A domain recovered from a flat string
-# sweep is treated as a real network endpoint only when it sits inside URL grammar
-# — a scheme, an HTTP header, a www. prefix, or a trailing path/port/query. This
-# is the GATE for string-derived domains (see _extract_strings): an anchored
-# domain is emitted; a bare token adrift in prose or binary is dropped as noise,
-# since a bare-but-real C2 still reaches the pipeline through its actual
-# connection/DNS artifact. The anchor set is fixed from URL grammar, not tuned to
-# any one image, so it generalises.
+# URL/network-context anchors — THE GATE for string-swept domains (D3): only domains sitting in URL
+# grammar are emitted; bare tokens are noise (a real C2 still arrives via its actual connection/DNS
+# artifact). Grammar-fixed, not image-tuned.
 _URL_SCHEME_RE = re.compile(r"(?:https?|ftp|wss?)://$", re.IGNORECASE)
 _HEADER_ANCHORS = ("host:", "referer:", "referrer:", "location:", "origin:",
                    "url=", "uri=")
 
 
 def _has_network_context(corpus: str, start: int, end: int, value: str) -> bool:
-    """True when the domain at corpus[start:end] sits inside URL/network grammar:
-    a www. prefix, a preceding scheme (`http://`) or protocol-relative `//`, an
-    HTTP header anchor (`Host:`, `Referer:`, …), or a trailing path/port/query."""
+    """True when the domain at corpus[start:end] sits inside URL/network grammar: a www. prefix,
+    a preceding scheme (`http://`) or protocol-relative `//`, an HTTP header anchor (`Host:`,
+    `Referer:`, …), or a trailing path/port/query."""
     if value.startswith("www."):
         return True
     pre = corpus[max(0, start - 10):start]
@@ -224,16 +209,9 @@ class VolatilityWrapper(BaseWrapper):
 
     @staticmethod
     def _volatility_command_candidates() -> list:
-        """Ordered ways to invoke Volatility3, most-specific first.
-
-        The pipeline is launched as `venv/bin/python autoforensiq.py ...`, so the
-        venv is NOT on PATH; a bare `vol` / `python3 -m volatility3` then fails and
-        the wrapper silently returns 0 items while pre-flight (which probes
-        `./venv/bin/vol`) reports OK (issue D1). We therefore try the venv's own
-        `vol` console script first — resolved from the running interpreter's
-        directory so it works regardless of CWD — then the CWD-relative path
-        pre-flight verifies, before falling back to whatever is on PATH.
-        """
+        """Ordered ways to invoke Volatility3, most-specific first: the venv's own `vol` (venv
+        isn't on PATH under `venv/bin/python autoforensiq.py`, D1), then the CWD-relative path
+        pre-flight probes, then PATH."""
         candidates = []
 
         venv_vol = os.path.join(os.path.dirname(sys.executable), "vol")
@@ -293,8 +271,8 @@ class VolatilityWrapper(BaseWrapper):
 
         combined_output = ""
 
-        # malfind is parsed after the loop so cross-plugin corroboration is
-        # available (see below). Stash its raw output here when encountered.
+        # malfind is parsed after the loop so cross-plugin corroboration is available (see below).
+        # Stash its raw output here when encountered.
         malfind_output = None
 
         for plugin in PLUGINS:
@@ -312,9 +290,9 @@ class VolatilityWrapper(BaseWrapper):
                 timeout=180
             )
 
-            # Per-plugin return code + 1000-char stdout/stderr dumps are noisy on
-            # a normal run (the GUI streams all of it), so gate them behind
-            # VOL_DEBUG — same opt-in style as VOL_ENABLE_DUMPFILES below.
+            # Per-plugin return code + 1000-char stdout/stderr dumps are noisy on a normal run (the
+            # GUI streams all of it), so gate them behind VOL_DEBUG — same opt-in style as
+            # VOL_ENABLE_DUMPFILES below.
             if os.getenv("VOL_DEBUG", "").lower() in {"1", "true", "yes"}:
 
                 print(f"\n  [DEBUG] Return code: {code}")
@@ -353,9 +331,9 @@ class VolatilityWrapper(BaseWrapper):
                 continue
 
             if plugin == "windows.malfind":
-                # Defer parsing until after the loop so behavioral IOCs from the
-                # other plugins (suspicious cmdline / C2 connection) can be used
-                # to corroborate — and thus not down-rank — JIT-process hits.
+                # Defer parsing until after the loop so behavioral IOCs from the other plugins
+                # (suspicious cmdline / C2 connection) can be used to corroborate — and thus not
+                # down-rank — JIT-process hits.
                 malfind_output = stdout
                 continue
 
@@ -372,8 +350,8 @@ class VolatilityWrapper(BaseWrapper):
 
             all_items.extend(items)
 
-        # Parse the deferred malfind output now that the other plugins' evidence
-        # is available for cross-IOC corroboration.
+        # Parse the deferred malfind output now that the other plugins' evidence is available for
+        # cross-IOC corroboration.
         if malfind_output is not None:
             corroborated_pids = self._collect_corroborated_pids(all_items)
             try:
@@ -394,8 +372,8 @@ class VolatilityWrapper(BaseWrapper):
             except Exception as exc:
                 print(f"  [SKIP] windows.malfind parse failed: {exc}")
 
-        # Optional plugin: dumpfiles can write many files to CWD when unfiltered,
-        # so keep it opt-in for controlled investigations.
+        # Optional plugin: dumpfiles can write many files to CWD when unfiltered, so keep it opt-in
+        # for controlled investigations.
         if os.getenv("VOL_ENABLE_DUMPFILES", "").lower() in {"1", "true", "yes"}:
             plugin = "windows.dumpfiles"
             print(f"\n  [VOL] Running {plugin} (opt-in)...")
@@ -445,9 +423,9 @@ class VolatilityWrapper(BaseWrapper):
                     except Exception as exc:
                         print(f"  [SKIP] {plugin} parse failed: {exc}")
 
-        # Feed windows.strings with a real strings file generated from the
-        # image when possible. This avoids volatility's internal strings
-        # collector returning empty results when no strings source is set.
+        # Feed windows.strings with a real strings file generated from the image when possible. This
+        # avoids volatility's internal strings collector returning empty results when no strings
+        # source is set.
         strings_path = None
         strings_cleanup = None
         try:
@@ -469,12 +447,9 @@ class VolatilityWrapper(BaseWrapper):
                     except Exception as exc:
                         print(f"  [SKIP] {plugin} parse failed: {exc}")
 
-                # windows.strings only emits strings it can attribute to a
-                # mapped process, so memory-resident IOCs sitting in unattributed
-                # pool/heap (killswitch domain, .onion C2, BTC wallets, registry
-                # keys) never reach it. Run the IOC sweep directly over the raw
-                # strings file too so those are recovered; the final de-dupe
-                # collapses any overlap with the attributed output.
+                # windows.strings only emits process-attributed strings; IOCs in unattributed
+                # pool/heap never reach it. Sweep the raw strings file too — the final de-dupe
+                # collapses any overlap.
                 try:
                     with open(strings_path, "r", errors="ignore") as sf:
                         raw_strings = sf.read()
@@ -503,11 +478,8 @@ class VolatilityWrapper(BaseWrapper):
         except Exception as exc:
             print(f"  [VOL] string extraction failed: {exc}")
 
-        # The string sweep runs over both `combined_output` and the separate
-        # windows.strings output, so the same IOC (onion / domain / wallet) can
-        # be emitted twice. Collapse identical (type, value) items, keeping the
-        # strongest, so downstream stages and the P7 findings cap aren't fed
-        # duplicates.
+        # The sweep runs over combined_output AND the strings file, so the same IOC can be emitted
+        # twice — collapse, keeping the strongest.
         before = len(all_items)
         all_items = self._dedupe_items(all_items)
         if len(all_items) != before:
@@ -516,14 +488,9 @@ class VolatilityWrapper(BaseWrapper):
         return all_items
 
     def _dedupe_items(self, items: list) -> list:
-        """Collapse evidence items that share the same (evidence_type, value,
-        linked_artifacts), keeping the one with the highest severity then
-        confidence. Original ordering of the first occurrence is preserved.
-
-        `linked_artifacts` is part of the key so items whose value omits the PID
-        (e.g. process_relation, "parent.name -> child.name") are not merged
-        across distinct PID pairs; string IOCs have no links, so they still
-        de-duplicate as intended (issue 3.3-F)."""
+        """Collapse items sharing (evidence_type, value, linked_artifacts), keeping highest
+        severity then confidence, first-seen order (3.3-F). linked_artifacts in the key keeps
+        PID-less values (process_relation) from merging across distinct PID pairs."""
 
         severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 
@@ -562,9 +529,8 @@ class VolatilityWrapper(BaseWrapper):
             if l.strip()
         ]
 
-        # Plugin -> parser lookup (issue D6), replacing the if/elif chain. The
-        # three yarascan plugin names share one parser; an unknown plugin yields
-        # no items.
+        # Plugin -> parser lookup (issue D6), replacing the if/elif chain. The three yarascan plugin
+        # names share one parser; an unknown plugin yields no items.
         dispatch = {
             "windows.pslist": self._parse_pslist,
             "windows.pstree": self._parse_pstree,
@@ -584,13 +550,8 @@ class VolatilityWrapper(BaseWrapper):
         return parser(lines) if parser else []
 
     def _build_strings_file(self, image_path: str):
-        """
-        Run the system `strings` utility against the raw image to produce a
-        temporary strings file suitable for feeding to volatility's
-        `windows.strings --strings-file` option. Returns (path, cleanup)
-        where cleanup is an object with a `cleanup()` method that removes
-        the tempfile. Returns (None, None) on failure.
-        """
+        """Run system `strings` over the image into a tempfile for windows.strings
+        --strings-file. Returns (path, cleanup-object) or (None, None) on failure."""
 
         try:
             stdout, stderr, code = self.run_command(
@@ -779,8 +740,8 @@ class VolatilityWrapper(BaseWrapper):
                 confidence=0.95,
                 linked_artifacts=[]
             )
-            # 4.5: expose the tree as structured data and a one-line lineage so
-            # downstream consumers don't have to re-parse the indented `value`.
+            # 4.5: expose the tree as structured data and a one-line lineage so downstream consumers
+            # don't have to re-parse the indented `value`.
             tree_item["process_tree_json"] = tree_to_dict(root)
             tree_item["lineage"] = tree_lineage(root)
             tree_items.append(tree_item)
@@ -854,10 +815,8 @@ class VolatilityWrapper(BaseWrapper):
             if len(parts) > 2:
                 cmdline = line.split(process_name, 1)[1].strip()
             else:
-                # Exactly PID + process name, zero arguments (issue 3.4-r): the
-                # command line is just the executable. Store the process name, not
-                # the raw "PID<tab>Process" row (the PID is already in artifact_id),
-                # so the value matches the args-bearing case.
+                # PID + name, zero args (3.4-r): store the process name, not the raw row, so the
+                # value matches the args-bearing case.
                 cmdline = process_name
 
             severity = (
@@ -929,10 +888,8 @@ class VolatilityWrapper(BaseWrapper):
                     else 0
                 )
 
-                # C2-port severity is tiered (issue D1): a high-confidence port
-                # (4444/4445/1337/31337) -> high; a dual-use watch port
-                # (IRC/8888/9999/...) -> medium; neither -> low. Take the
-                # stronger of the local/remote port verdicts.
+                # Tiered C2-port severity (D1): high-confidence → high, watch → medium, neither →
+                # low; stronger of local/remote wins.
                 port_sevs = [
                     s for s in (c2_port_severity(local_p), c2_port_severity(remote_p))
                     if s
@@ -971,14 +928,9 @@ class VolatilityWrapper(BaseWrapper):
 
         return items
     def _collect_corroborated_pids(self, items: list) -> set:
-        """PIDs independently flagged by a *behavioral* IOC — a suspicious
-        command line or a C2/external network connection at high/critical
-        severity. Used as the spec's "corroborated by another IOC" escape so a
-        malfind injection in a JIT-capable process (chrome/svchost/...) stays
-        elevated instead of being down-ranked. Deliberately excludes name-based
-        heuristics (e.g. pslist's suspicious-parent flag) to keep corroboration
-        independent of the same allowlist logic malfind already applies.
-        """
+        """PIDs flagged by a *behavioral* IOC (high/critical commandline or network connection) —
+        the "corroborated by another IOC" escape from the malfind JIT down-rank. Name-based
+        heuristics deliberately excluded to keep corroboration independent."""
         import re
 
         corroborating_types = {"commandline", "network_connection"}
@@ -1004,9 +956,7 @@ class VolatilityWrapper(BaseWrapper):
 
         items = []
 
-        # PIDs independently flagged by another IOC (e.g. a suspicious cmdline,
-        # a C2 netstat connection, a recovered payload). Used as the spec's
-        # "corroborated by another IOC" escape from the system-process down-rank.
+        # PIDs another IOC flagged — the escape from the JIT down-rank below.
         corroborated_pids = {str(p) for p in (corroborated_pids or set())}
 
         grouped_regions = {}
@@ -1046,10 +996,10 @@ class VolatilityWrapper(BaseWrapper):
             if len(parts) < 2:
                 continue
 
-            # A real malfind table row starts with a PID and always carries a
-            # PAGE_* protection column. Hexdump continuation lines also start
-            # with all-decimal bytes (e.g. "08 00 ..."), so isdigit() alone
-            # misparses them as phantom PID rows — require the protection token.
+            # A real malfind table row starts with a PID and always carries a PAGE_* protection
+            # column. Hexdump continuation lines also start with all-decimal bytes (e.g. "08 00
+            # ..."), so isdigit() alone misparses them as phantom PID rows — require the protection
+            # token.
             is_pid_row = (
                 parts[0].isdigit() and
                 "page_" in stripped.lower()
@@ -1072,11 +1022,8 @@ class VolatilityWrapper(BaseWrapper):
                             "has_pe": False
                         }
 
-                    # malfind only emits suspicious VADs, so any executable
-                    # private region is notable. Track a truly writable+
-                    # executable region (classic RWX shellcode home) separately
-                    # from an execute-only RX region, so the reason text below
-                    # doesn't claim "RWX" for a PAGE_EXECUTE_READ region (3.1-B).
+                    # Track writable+executable (RWX) separately from execute-only (RX) so the
+                    # reason text is accurate (3.1-B).
                     if (
                         "rwx" in flags or
                         "rw-x" in flags or
@@ -1096,8 +1043,8 @@ class VolatilityWrapper(BaseWrapper):
                     ):
                         grouped_regions[pid]["has_wx"] = True
 
-                    # `flags` is the space-joined protection columns; match "mz"/
-                    # "pe" as standalone tokens, not loose substrings (3.1-C).
+                    # `flags` is the space-joined protection columns; match "mz"/ "pe" as standalone
+                    # tokens, not loose substrings (3.1-C).
                     flag_tokens = set(flags.split())
                     if (
                         _has_pe_signature(stripped) or
@@ -1124,8 +1071,8 @@ class VolatilityWrapper(BaseWrapper):
             has_pe = info.get("has_pe", False)
             corroborated = has_exec and has_pe
 
-            # Only call it "RWX" when the region is actually writable+executable;
-            # an execute-only region is RX, so labelling it RWX is inaccurate (3.1-B).
+            # Only call it "RWX" when the region is actually writable+executable; an execute-only
+            # region is RX, so labelling it RWX is inaccurate (3.1-B).
             exec_label = "RWX region" if has_wx else "Executable (RX) region"
 
             if has_exec and has_pe:
@@ -1143,16 +1090,9 @@ class VolatilityWrapper(BaseWrapper):
                 confidence = 0.70
                 reasons = ["Injected regions detected (no RWX/PE signature)"]
 
-            # Processes where RWX/executable private memory is *commonly benign*
-            # — browsers and JIT/.NET hosts allocate RWX for generated code, and
-            # AV engines (Windows Defender's MsMpEng maps RWX for its scanning /
-            # emulation engine — a universal, well-documented malfind false
-            # positive, not host-specific). These are the real false-positive
-            # sources, so injections here are down-ranked unless corroborated.
-            # Core system processes (csrss, winlogon, lsass, services, smss,
-            # wininit) are deliberately NOT in this set: they never legitimately
-            # host RWX/injected code, so a hit there is a strong signal and must
-            # keep its severity.
+            # Processes where RWX is commonly benign (browser/JIT/.NET hosts; Defender's MsMpEng — a
+            # universal malfind FP): down-ranked unless corroborated. Core system processes
+            # (csrss/lsass/…) deliberately NOT here — RWX there is a strong signal.
             jit_allowlist = {
                 "explorer.exe",
                 "chrome.exe",
@@ -1167,8 +1107,8 @@ class VolatilityWrapper(BaseWrapper):
                 "msmpeng.exe",
             }
 
-            # Corroboration: either malfind itself saw RWX *and* a PE/shellcode
-            # signature, or another tool independently flagged this PID.
+            # Corroboration: either malfind itself saw RWX *and* a PE/shellcode signature, or
+            # another tool independently flagged this PID.
             is_corroborated = corroborated or (str(pid) in corroborated_pids)
 
             if name.lower() in jit_allowlist and not is_corroborated and severity in {"critical", "high"}:
@@ -1200,9 +1140,9 @@ class VolatilityWrapper(BaseWrapper):
 
         suspicious_dlls = [
             "unknown",
-            # Path segment, not a bare token: "temp" as a substring matched inside
-            # ordinary DLL names (DevDispI-temp-rovider.dll flagged HIGH, B-9d).
-            # The filescan/dumpfiles marker lists already use the \temp\ form.
+            # Path segment, not a bare token: "temp" as a substring matched inside ordinary DLL
+            # names (DevDispI-temp-rovider.dll flagged HIGH, B-9d). The filescan/dumpfiles marker
+            # lists already use the \temp\ form.
             "\\temp\\",
             "appdata\\roaming",
             "programdata"
@@ -1212,11 +1152,8 @@ class VolatilityWrapper(BaseWrapper):
 
             lower = line.lower()
 
-            # ProgramData legitimately hosts Microsoft-signed platform DLLs —
-            # notably Windows Defender's own \Microsoft\Windows Defender\Platform\
-            # directory (MpOav.dll, MpClient.dll, ...), which many processes load.
-            # That is not an implant indicator (B-3), yet it trips the
-            # "programdata" marker below, so skip Defender's platform path.
+            # Defender's platform dir under ProgramData (MpOav.dll etc.) trips the "programdata"
+            # marker but isn't an implant indicator (B-3).
             if "\\microsoft\\windows defender\\" in lower:
                 continue
 
@@ -1244,13 +1181,9 @@ class VolatilityWrapper(BaseWrapper):
         items = []
         seen = set()
 
-        # Markers that indicate staging/execution locations or payloads. The two
-        # classes are scored differently (B-9b): location markers count AT MOST
-        # ONCE — a file sits in one place, and Windows nests these dir names
-        # (\AppData\Local\Temp\, \AppData\Roaming\...\Startup\), so two location
-        # hits are usually one location, not two independent signals. Before the
-        # cap, every file in AppData\Local\Temp scored HIGH (MpCmdRun.log). A
-        # payload marker on top of a location still reaches high (\temp\evil.ps1).
+        # Two marker classes, scored differently (B-9b): location markers count AT MOST ONCE
+        # (Windows nests these dir names — two hits are usually one location); a payload marker on
+        # top still reaches high.
         location_markers = [
             "\\appdata\\",
             "\\temp\\",
@@ -1271,11 +1204,8 @@ class VolatilityWrapper(BaseWrapper):
             ".cmd"
         ]
 
-        # Parents that don't normally host random-named subfolders, so a
-        # gibberish child under one is a malware-staging hallmark (e.g. WannaCry's
-        # \Intel\<random>\ and \ProgramData\<random>\). Deliberately excludes
-        # \Temp\, \AppData\, \Public\: those legitimately hold random/hash-named
-        # dirs (browser caches, installer temp), which would be false positives.
+        # Parents that don't normally host random-named subfolders (WannaCry's \Intel\<random>\).
+        # \Temp\/\AppData\/\Public\ excluded — they hold legit hash-named dirs (browser caches).
         staging_parents = {"intel", "programdata"}
 
         def _has_suspicious_staging_path(path: str) -> bool:
@@ -1297,26 +1227,19 @@ class VolatilityWrapper(BaseWrapper):
 
             return False
 
-        # Extensions that are common system binaries; only consider them
-        # suspicious when they appear in staging/execution paths above.
+        # Extensions that are common system binaries; only consider them suspicious when they appear
+        # in staging/execution paths above.
         binary_exts = {".dll", ".exe"}
 
-        # Ransomware / payload signals that are suspicious on their own,
-        # independent of where the file sits. The staging-path gate otherwise
-        # drops these (e.g. WannaCry *.WNCRY encrypted victim files in a
-        # Pictures folder, or a named dropper outside \Intel\).
-        # Ransomware / encrypted-payload extensions come from the shared
-        # threat-intel list (RANSOM_EXTENSIONS) so tsk and volatility agree.
+        # Payload signals suspicious anywhere (the staging gate would otherwise drop *.WNCRY in a
+        # Pictures folder); extensions come from the shared RANSOM_EXTENSIONS list.
         malware_filename_markers = [
             "@wanadecryptor@", "wanadecryptor", "wannadecryptor",
             "tasksche", "taskdl", "taskse", "mssecsvc",
             "wannacry", "wanacry", "@please_read_me@",
         ]
-        # Boundary-aware: a marker must not sit inside a longer word, or ordinary
-        # system files match — "tasksche" is a substring of "TaskScheduler", which
-        # flagged WPTaskScheduler.dll and the TaskScheduler .evtx logs as named
-        # WannaCry payloads (B-9b). Letters on either side disqualify the hit;
-        # "tasksche.exe" (dot boundary) still matches.
+        # Boundary-aware: "tasksche" inside "TaskScheduler" flagged system files as WannaCry (B-9b);
+        # letters on either side disqualify the hit.
         malware_name_re = re.compile(
             "|".join(f"(?<![a-z]){re.escape(tok)}(?![a-z])"
                      for tok in malware_filename_markers)
@@ -1327,12 +1250,8 @@ class VolatilityWrapper(BaseWrapper):
             # crude heuristic: look for absolute paths (Windows backslash or Unix slash)
             if "\\" in line or "/" in line:
 
-                # filescan rows are "Offset<TAB>Name". The Name is a path that
-                # can contain single spaces (e.g. "Documents and Settings",
-                # "Users\Public\My Tools"). Splitting on every space truncates
-                # the path and loses the staging-path marker, dropping the file.
-                # Split only on tabs / runs of 2+ spaces, then take the last
-                # field that still looks like a path.
+                # Paths contain single spaces ("Documents and Settings") — split only on tabs / 2+
+                # spaces, take the last path-looking field.
                 fields = re.split(r"\t+| {2,}", line.strip())
                 candidate = ""
                 for field in reversed(fields):
@@ -1355,23 +1274,16 @@ class VolatilityWrapper(BaseWrapper):
 
                     basename = normalized.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
 
-                    # Ubiquitous benign system files live in nearly every folder
-                    # (desktop.ini controls folder view settings, thumbs.db caches
-                    # thumbnails), so they hit \appdata\ + \startup markers and got
-                    # flagged high alongside the genuine Startup .lnk persistence.
-                    # They are never artifacts; drop them regardless of path.
-                    # startswith, not equality: raw-strings scraping glues garbage
-                    # onto basenames (e.g. "Desktop.ini4e6-…}.tmp" — a partial GUID
-                    # + .tmp from an adjacent memory string). Don't skip if the
-                    # suffix forms an executable name (desktop.ini.exe is a
-                    # masquerade, not scrape noise).
+                    # desktop.ini/thumbs.db are ubiquitous benign files that hit the location
+                    # markers — drop regardless of path. startswith, not equality (raw-strings
+                    # scraping glues garbage onto basenames); a masquerading desktop.ini.exe is NOT
+                    # skipped.
                     if basename.startswith(("desktop.ini", "thumbs.db")) and \
                             not basename.endswith(EXECUTABLE_EXTENSIONS):
                         continue
 
-                    # Known ransomware extension or named payload — a strong
-                    # signal on its own, so flag it high regardless of path
-                    # (bypasses the staging-marker / system-binary gates below).
+                    # Ransomware extension / named payload: high regardless of path, bypassing the
+                    # gates below.
                     if (
                         ext in RANSOM_EXTENSIONS or
                         malware_name_re.search(basename)
@@ -1388,9 +1300,9 @@ class VolatilityWrapper(BaseWrapper):
                         )
                         continue
 
-                    # relevance gate to avoid flooding with low-signal paths.
-                    # ".js" as a substring also matches ".json", so count it
-                    # only when it's the real file extension (3.3-D).
+                    # relevance gate to avoid flooding with low-signal paths. ".js" as a substring
+                    # also matches ".json", so count it only when it's the real file extension
+                    # (3.3-D).
                     location_hits = sum(1 for m in location_markers if m in normalized)
                     payload_hits = 0
                     for marker in payload_markers:
@@ -1402,10 +1314,8 @@ class VolatilityWrapper(BaseWrapper):
                     # Location capped at 1 (see the marker-class note above).
                     marker_hits = min(location_hits, 1) + payload_hits
 
-                    # Autostart persistence (T1547.001): an executable / script /
-                    # shortcut file INSIDE a Startup folder is a finding on its
-                    # own — the classic .lnk-in-Startup pattern (dev01 N6,
-                    # setwallpaper.lnk) — independent of the location cap above.
+                    # Autostart persistence (T1547.001): executable/script/.lnk inside \Startup\ is
+                    # a finding on its own (dev01 N6).
                     in_autostart = (
                         "\\startup\\" in normalized
                         and (basename.endswith(EXECUTABLE_EXTENSIONS)
@@ -1413,18 +1323,12 @@ class VolatilityWrapper(BaseWrapper):
                     )
 
                     in_random_staging = _has_suspicious_staging_path(normalized)
-                    # Ensure a random-named staging path still clears the
-                    # relevance gate below. Redundant for normal filescan output
-                    # (its parents, intel/programdata, are also markers, so
-                    # marker_hits is already >= 1) but kept as a safety net for
-                    # path forms where the parent isn't substring-matched as a
-                    # `\parent\` marker (e.g. no leading separator).
+                    # Safety net: random-named staging clears the gate even when the parent isn't
+                    # substring-matched as a \parent\ marker.
                     if marker_hits == 0 and in_random_staging:
                         marker_hits = 1
 
-                    # If this looks like a plain system binary (dll/exe) but is
-                    # not located in a staging/execution path, skip it to avoid
-                    # mass noise from benign system files.
+                    # dll/exe outside any staging path = benign mass noise; skip.
                     if ext in binary_exts and marker_hits == 0:
                         continue
 
@@ -1433,11 +1337,8 @@ class VolatilityWrapper(BaseWrapper):
 
                     seen.add(normalized)
 
-                    # A randomly-named staging directory is a malware hallmark and
-                    # ranks high on its own (3.3-C), as does location+payload
-                    # (\temp\evil.ps1) and autostart persistence. A single generic
-                    # location marker (\temp\, \appdata\) stays medium — too noisy
-                    # to call high on its own.
+                    # Random-named staging (3.3-C), location+payload, or autostart → high; a single
+                    # generic location marker stays medium (too noisy on its own).
                     if marker_hits >= 2 or in_random_staging or in_autostart:
                         severity = "high"
                         confidence = 0.90
@@ -1583,10 +1484,8 @@ class VolatilityWrapper(BaseWrapper):
 
         seen = set()
 
-        # A domain's final label must be a *registered* TLD. This filters
-        # filename noise (ntdll.dll, ntoskrnl.exe, *.pdb/.sys — none are TLDs)
-        # while still recovering C2 on country-code / .gov / .edu domains that
-        # a tiny allowlist would silently drop.
+        # Final label must be a registered TLD — filters filename noise while keeping
+        # ccTLD/.gov/.edu C2 a tiny allowlist would drop.
         valid_tlds = {
             # common / generic + frequently-abused gTLDs
             "com", "net", "org", "info", "biz", "gov", "edu", "mil", "int",
@@ -1617,20 +1516,14 @@ class VolatilityWrapper(BaseWrapper):
             "tg", "th", "tj", "tl", "tn", "tr", "tt", "tw", "tz", "ua", "ug",
             "uk", "us", "uy", "uz", "va", "vc", "ve", "vg", "vi", "vn", "vu",
             "wf", "ye", "yt", "za", "zm", "zw", "ru", "to",
-            # ccTLDs that also double as script/binary extensions (kept valid
-            # here; the ambiguous-TLD guard below requires a sub-domain).
+            # ccTLDs that also double as script/binary extensions (kept valid here; the
+            # ambiguous-TLD guard below requires a sub-domain).
             "pl", "py", "pm", "sh", "so", "rs", "md", "ax",
         }
 
-        # Valid ccTLDs that are ALSO common source/script extensions. In a
-        # memory-image string sweep these are overwhelmingly files (main.py,
-        # lib.so, mod.rs, run.sh) rather than 2-label domains, so for these we
-        # require a sub-domain (3+ labels) before treating them as a domain.
-        # "ax" = Åland ccTLD, but also the Windows DirectShow filter extension
-        # (l3codecx.ax, divxdec.ax). "nc" (New Caledonia) is gibberish-prone in
-        # raw strings — both overwhelmingly noise as 2-label "domains".
-        # (".pf" — French Polynesia — is dropped from valid_tlds entirely above:
-        # it's the Prefetch file extension, e.g. TASKDL.EXE-01687054.pf.)
+        # ccTLDs that double as script/binary extensions (main.py, lib.so, l3codecx.ax) — require a
+        # sub-domain (3+ labels) before treating as a domain. (.pf is dropped from valid_tlds
+        # entirely: Prefetch extension.)
         ambiguous_code_tlds = {"py", "pl", "sh", "so", "rs", "md", "pm", "ax", "nc"}
 
         def _add_item(value: str, evidence_type: str, severity: str, confidence: float, artifact_prefix: str):
@@ -1761,25 +1654,15 @@ class VolatilityWrapper(BaseWrapper):
                 return False
             return True
 
-        # .onion addresses are kept even when bare (a memory-resident .onion
-        # rarely sits in URL grammar, so it would otherwise be dropped by the
-        # anchored-only gate below), but emitted at LOW — an indicator, not a
-        # finding. A host holding an in-memory threat-intel / EDR feed carries
-        # dozens of unrelated ransomware families' .onions that it never
-        # contacted; at HIGH these manufactured a false verdict. A genuine
-        # infection is still carried by its other artifacts (ransom note, payload,
-        # process, wallet), and the rescorer keeps tagging this tor_hidden_service.
+        # .onion kept even bare (rarely sits in URL grammar) but at LOW — an in-memory threat-intel
+        # feed carries dozens of uncontacted families' .onions, which at HIGH manufactured a false
+        # verdict (B-8).
         for match in re.finditer(r"[a-z0-9]{16,56}\.onion", corpus, flags=re.IGNORECASE):
 
             _add_item(match.group(0).lower(), "suspicious_domain", "low", 0.6, "ioc")
 
-        # Checksum-valid BTC wallets recovered from memory strings are emitted at
-        # LOW — an indicator, not a finding. Like the .onion feed above, a host
-        # holding an in-memory ransom-note-template / threat-intel corpus carries
-        # many unrelated families' wallets it never transacted with; at HIGH these
-        # manufactured a false verdict. A wallet on the curated catalog (a known
-        # ransom wallet, e.g. wannacry_ransom_wallet) still escalates via the
-        # rescorer's catalog match; a bare, uncatalogued wallet stays low.
+        # Checksum-valid BTC wallets at LOW, same rationale as .onion above; a catalog-known ransom
+        # wallet still escalates via the rescorer.
         for match in re.finditer(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b", corpus):
 
             candidate = match.group(0)
@@ -1801,11 +1684,8 @@ class VolatilityWrapper(BaseWrapper):
             labels = domain.split(".")
             tld = labels[-1].lower()
 
-            # Require a well-formed local part and domain with a real TLD.
-            # Rejects filename / binary noise the loose regex otherwise matches,
-            # e.g. "WANADECRYPTOR@.EXE-06F053F5.pf" (empty leading label),
-            # "5@0.FF" (bogus TLD), "J.@L.IN" (1-char SLD / trailing-dot local),
-            # "15090.61304@aaa.zzz.org" (digits-only local).
+            # Require a well-formed local part + real TLD — rejects the filename / binary noise the
+            # loose regex matches ("5@0.FF", digits-only).
             if (
                 len(labels) < 2 or
                 len(labels[-2]) < 2 or
@@ -1822,13 +1702,8 @@ class VolatilityWrapper(BaseWrapper):
 
             _add_item(addr, "email_address", "medium", 0.85, "email")
 
-        # The path char class excludes the pipe: `|` is not a legal character in
-        # a Windows registry key path, so a `|` means the string sweep has run
-        # past the real key into adjacent memory (e.g.
-        # "...\CurrentControlSet\Services|BatteryLife"). Stopping at the pipe both
-        # keeps the key clean and stops that stray `|` from corrupting the
-        # markdown report table (it was read as a column delimiter, shifting
-        # every later column one to the right).
+        # `|` is illegal in a registry path — it means the sweep ran into adjacent memory; stopping
+        # there also keeps stray pipes from corrupting the markdown report table.
         registry_patterns = [
             r"(?:HKLM|HKEY_LOCAL_MACHINE|HKCU|HKEY_CURRENT_USER|HKCR|HKEY_CLASSES_ROOT|HKU|HKEY_USERS)\\[^\s\"'|]+",
             r"\\Registry\\Machine\\[^\s\"'|]+",
@@ -1846,17 +1721,10 @@ class VolatilityWrapper(BaseWrapper):
             flags=re.IGNORECASE,
         )
 
-        # Emit a memory-string domain ONLY when it is anchored in URL / DNS /
-        # connection grammar at least once (see _has_network_context). A bare
-        # domain fragment — a naked token adrift in prose or binary — carries no
-        # network evidence and is overwhelmingly noise: a memory sweep yields tens
-        # of thousands of them (25k of 36k on the dev01 image, e.g.
-        # "conticrypt.ph/.pa/.pe" smeared across ccTLDs), which flooded
-        # unified_evidence (27 MB) and stalled the P5 ML stage. A genuinely
-        # malicious host reaches the pipeline through its real network artifact
-        # (a connection / DNS query / URL), which is anchored and kept here; the
-        # reputation rescorer then elevates it. .onion hosts are emitted above at
-        # high severity regardless.
+        # Emit a domain ONLY when anchored in URL/network grammar (_has_network_context): bare
+        # fragments were 25k of 36k items on dev01 and stalled P5. A real C2 arrives via its
+        # anchored network artifact and the rescorer elevates it. .onion is handled above
+        # regardless.
         ANCHORED_CONF = 0.45
         seen_domains = set()
         anchored_domains = []
@@ -1877,19 +1745,16 @@ class VolatilityWrapper(BaseWrapper):
             if len(labels[-2]) < 2:
                 continue
 
-            # Disambiguate ccTLDs that double as script extensions: only accept
-            # them with a sub-domain (e.g. "panel.c2.pl"), not a bare "script.py".
+            # Disambiguate ccTLDs that double as script extensions: only accept them with a
+            # sub-domain (e.g. "panel.c2.pl"), not a bare "script.py".
             if tld in ambiguous_code_tlds and len(labels) < 3:
                 continue
 
-            # Drop benign OS / browser / CDN / CA / telemetry infrastructure —
-            # these dominate a memory dump and are pure noise.
+            # Benign OS/CDN/CA infrastructure dominates a dump — drop.
             if _is_benign_domain(value):
                 continue
 
-            # The gate: keep only domains seen in real URL/network grammar. Bare
-            # string fragments (short ccTLD junk, DOS `.com` names, digit/repeat
-            # noise) are all dropped here — no per-class bare filters needed.
+            # THE GATE: only domains in real URL/network grammar survive.
             if not _has_network_context(corpus, match.start(), match.end(), value):
                 continue
 

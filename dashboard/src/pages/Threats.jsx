@@ -25,10 +25,8 @@ function Section({ severity, items, sources }) {
 
       <div className="overflow-x-auto">
 
-        {/* table-fixed + shared column widths: each severity section is its own
-            table, so auto layout would size columns per-section and the sections
-            wouldn't line up. Detail has no width — it takes the remainder and
-            wraps (break-all). */}
+        {/* table-fixed + shared widths: each section is its own table, so auto
+            layout wouldn't align them. Detail is unsized — takes the remainder. */}
         <table className="w-full text-sm table-fixed">
 
           <thead>
@@ -95,8 +93,8 @@ function Section({ severity, items, sources }) {
   );
 }
 
-// Dropdown of evidence types with checkboxes for multi-select. `selected` is
-// the list of active types; all-selected is shown as "All types".
+// Dropdown of evidence types with checkboxes for multi-select. `selected` is the list of active
+// types; all-selected is shown as "All types".
 function TypeFilter({ types, selected, allSelected, onToggle, onToggleAll }) {
 
   const [open, setOpen] = useState(false);

@@ -1,17 +1,6 @@
-"""
-xai_explainer.py
-
-Converts a feature vector + raw record into a human-readable, analyst-grade
-explanation.  No LLM required – rule-driven prose that mirrors how a SOC
-analyst would write a finding.
-
-Design
-
-*  Each active feature contributes a specific "indicator" sentence.
-*  Indicators are ranked by severity so the most critical finding leads.
-*  The final reason is assembled as a coherent paragraph, not a bullet dump.
-*  Severity is derived from both the explicit field AND the active features.
-"""
+"""Feature vector + record → analyst-grade explanation, rule-driven (no LLM). Each active feature
+contributes a ranked indicator sentence; the reason is assembled as a paragraph; severity derives
+from the explicit field AND the active features."""
 
 from typing import Dict, Any, List, Optional
 
@@ -24,8 +13,8 @@ except ImportError:
 
 from src.ml.feature_engineering import FEATURE_NAMES
 
-# SHAP background cost scales with the number of background rows. A small,
-# summarized background is the SHAP-recommended practice, so cap it (issue D3).
+# SHAP background cost scales with the number of background rows. A small, summarized background is
+# the SHAP-recommended practice, so cap it (issue D3).
 _MAX_SHAP_BACKGROUND = 64
 
 
@@ -185,8 +174,8 @@ def compute_shap_explanations(
         # shap not installed — fall back to empty top_factors; rule-based reason still works
         return [[] for _ in range(len(X_evidence))]
 
-    # Cap the background deterministically (issue D3): PermutationExplainer cost
-    # scales with background size, so a large baseline makes every eval slow.
+    # Cap the background deterministically (issue D3): PermutationExplainer cost scales with
+    # background size, so a large baseline makes every eval slow.
     if len(X_baseline) > _MAX_SHAP_BACKGROUND:
         rng = np.random.default_rng(0)
         sampled = rng.choice(len(X_baseline), size=_MAX_SHAP_BACKGROUND, replace=False)
@@ -194,15 +183,12 @@ def compute_shap_explanations(
     else:
         background = X_baseline
 
-    # The feature space is a handful of discrete features, so thousands of
-    # evidence rows collapse to a few dozen DISTINCT vectors. A SHAP attribution
-    # is a pure function of (row, background, model), so compute it once per
-    # unique row and scatter the result back to every row that shares it. This is
-    # exact — identical SHAP values — but turns one explainer eval per item
-    # (~23k on win10ctf, ~1.5h) into one per unique vector (issue D3).
+    # SHAP is a pure function of (row, background, model) and the discrete feature space collapses
+    # thousands of rows to a few dozen distinct vectors — compute once per unique row and scatter
+    # back (exact; ~23k evals → a few dozen, D3).
     unique_rows, inverse = np.unique(X_evidence, axis=0, return_inverse=True)
-    # numpy has returned `inverse` with varying shapes across versions; flatten
-    # so it is always a 1-D row→unique-index map.
+    # numpy has returned `inverse` with varying shapes across versions; flatten so it is always a
+    # 1-D row→unique-index map.
     inverse = np.asarray(inverse).reshape(-1)
 
     explainer = shap.PermutationExplainer(score_fn, background, max_evals=100)
@@ -248,9 +234,7 @@ def compute_baseline_comparisons(
     X_evidence,
     max_features=5,
 ) -> List[List[Dict[str, Any]]]:
-    """
-    Compare each evidence vector against the average normal baseline.
-    """
+    """Compare each evidence vector against the average normal baseline."""
     if len(X_evidence) == 0:
         return []
 
@@ -313,9 +297,7 @@ def build_structured_explanation(
     exfiltration_findings: Optional[List[Dict[str, Any]]] = None,
     bulk_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Build report-ready explanation fields from SHAP-ranked factors.
-    """
+    """Build report-ready explanation fields from SHAP-ranked factors."""
     artifact_id = record.get("artifact_id", "?")
     evidence_type = str(record.get("evidence_type", "artifact")).lower()
     machine_id = str(record.get("machine_id", "")).strip()
@@ -660,8 +642,8 @@ def _build_explain_instance(
 
 
 def _severity_from_score(score: float, explicit_severity: str) -> str:
-    """Derive a final severity label from both the anomaly score and the
-    explicit severity field in the record."""
+    """Derive a final severity label from both the anomaly score and the explicit severity field
+    in the record."""
     explicit = explicit_severity.strip().capitalize()
     if explicit in ("Critical", "High", "Medium", "Low"):
         # If the model also flags it, trust whichever is higher

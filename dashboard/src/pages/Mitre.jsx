@@ -8,8 +8,8 @@ export default function Mitre() {
 
   const { mitre, loading } = useEvidence();
 
-  // Detected technique ids (e.g. "T1486") -> their detection basis, for the
-  // cell tooltip. Matrix cells highlight when their id is in this map.
+  // Detected technique ids (e.g. "T1486") -> their detection basis, for the cell tooltip. Matrix
+  // cells highlight when their id is in this map.
   const detected = useMemo(() => {
     const map = {};
     (mitre || []).forEach((m) => { map[m.id] = m; });

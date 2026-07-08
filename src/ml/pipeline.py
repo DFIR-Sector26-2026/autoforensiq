@@ -1,24 +1,6 @@
-"""
-pipeline.py
------------
-Stage 5 of the AutoForensiq pipeline: ML-based anomaly detection.
-
-Called by autoforensiq.py as:
-
-    shap_explanations = run_ml_pipeline(input_path, output_path, baseline_path)
-
-Contract
---------
-* ALWAYS returns a dict (never None)
-* ALWAYS writes that same dict to output_path as shap_explanations.json
-* Output dict shape:
-    {
-        "explanations": { "<artifact_id>": { is_anomaly, score,
-                                             confidence, severity, reason } },
-        "summary":      { total_items, anomalies_detected, normal_items },
-        "generated_at": "<ISO-8601 timestamp>"
-    }
-"""
+"""Stage 5 (P5): ML anomaly detection. Contract: ALWAYS returns a dict (never None) and writes it
+to output_path as shap_explanations.json — shape: {"explanations": {artifact_id: {is_anomaly,
+score, confidence, severity, reason, ...}}, "summary": {...}, "generated_at": iso-ts}."""
 
 import json
 import logging
@@ -39,9 +21,7 @@ log = logging.getLogger(__name__)
 
 
 def _model_scope(record: Dict[str, Any]) -> str:
-    """
-    Collapse wrapper-specific evidence types into ML model families.
-    """
+    """Collapse wrapper-specific evidence types into ML model families."""
     evidence_type = str(record.get("evidence_type", "")).lower()
     source_tool = str(record.get("source_tool", "")).lower()
     value = str(record.get("value", "")).lower()
@@ -112,10 +92,9 @@ def _group_records(records):
 
 
 def _build_machine_index(evidence_records):
-    # Build machine_id -> [full item] straight from evidence_records. The
-    # unified_evidence `evidence_by_machine` index now holds artifact_id
-    # references rather than full objects (to keep the file small), so rebuild
-    # the grouping here from the authoritative item list.
+    # Build machine_id -> [full item] straight from evidence_records. The unified_evidence
+    # `evidence_by_machine` index now holds artifact_id references rather than full objects (to keep
+    # the file small), so rebuild the grouping here from the authoritative item list.
     machine_index = {}
     for record in evidence_records:
         machine_id = str(record.get("machine_id", "")).strip()
@@ -170,23 +149,8 @@ def run_ml_pipeline(
     output_path:   str,
     baseline_path: str,
 ) -> Dict[str, Any]:
-    """
-    Parameters
-    ----------
-    input_path    : path to unified_evidence.json   (Stage 4 output)
-    output_path   : destination for shap_explanations.json
-    baseline_path : path to baseline_normal.json
-
-    Returns
-    -------
-    dict — always; never None.
-    {
-        "explanations": { artifact_id: { is_anomaly, score, confidence,
-                                         severity, reason } },
-        "summary":      { total_items, anomalies_detected, normal_items },
-        "generated_at": "<ISO timestamp>"
-    }
-    """
+    """unified_evidence.json + baseline_normal.json → shap_explanations.json. Always returns the
+    output dict (see module docstring for the shape)."""
 
     # ── 1. Load data ──────────────────────────────────────────────────────────
     log.info("[P5] Loading baseline from %s", baseline_path)

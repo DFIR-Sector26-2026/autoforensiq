@@ -121,10 +121,7 @@ class AutoForensiqGUI(ctk.CTk):
     # ── Shared card helper ────────────────────────────────────────────────────
 
     def _card(self, title: str):
-        """
-        Create a labelled section card.
-        Returns (card, body_frame, header_frame).
-        """
+        """Create a labelled section card. Returns (card, body_frame, header_frame)."""
         card = ctk.CTkFrame(
             self._scroll,
             fg_color=CARD_BG,

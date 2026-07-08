@@ -1,7 +1,4 @@
-"""
-feature_engineering.py
------------------------
-Converts both baseline_normal.json and mock_unified_evidence.json into a
+"""Converts both baseline_normal.json and unified_evidence.json records into a
 COMMON, fixed-width numeric feature vector.
 
 Feature vector layout (14 dimensions):
@@ -24,8 +21,8 @@ Feature vector layout (14 dimensions):
 import re
 from typing import Dict, Any, List
 
-# Known C2 ports come from the shared catalog (issue D1) so the ML "known C2
-# port" feature can never drift from what the wrappers/rescorer flag.
+# Known C2 ports come from the shared catalog (issue D1) so the ML "known C2 port" feature can never
+# drift from what the wrappers/rescorer flag.
 from src.data.threat_intel import C2_PORTS_ALL as KNOWN_C2_PORTS
 
 # ── Threat intelligence lists ─────────────────────────────────────────────────
@@ -108,10 +105,8 @@ def _canonical_evidence_type(evidence_type: str) -> str:
 
 
 def _record_value(record: Dict[str, Any]) -> str:
-    """
-    Prefer P4's normalized text for ML features, then fall back to display/raw
-    values for older evidence items.
-    """
+    """Prefer P4's normalized text for ML features, then fall back to display/raw values for
+    older evidence items."""
     return str(
         record.get("normalized_value")
         or record.get("value")
@@ -123,10 +118,8 @@ def _record_value(record: Dict[str, Any]) -> str:
 # ── Core extractor ────────────────────────────────────────────────────────────
 
 def extract_features(record: Dict[str, Any]) -> List[float]:
-    """
-    Accept either a baseline record or a unified-evidence record.
-    Always returns a 14-element list of floats in [0, 1].
-    """
+    """Accept either a baseline record or a unified-evidence record. Always returns a 14-element
+    list of floats in [0, 1]."""
 
     # ── Pull raw fields, tolerating missing keys ──────────────────────────────
     evidence_type = _canonical_evidence_type(

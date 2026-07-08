@@ -1,10 +1,7 @@
 import useEvidence from "../hooks/useEvidence";
 
-// The process_tree_json only carries `suspicious` for a few generic lineages,
-// so most runs flag nothing. Correlate node names against the run's critical/
-// high evidence (commandline, file paths, ioc_match) so processes the rest of
-// the pipeline already flagged (e.g. tasksche.exe, @WanaDecryptor@, injected
-// csrss.exe) light up here too.
+// process_tree_json's own `suspicious` flag covers few lineages — cross-check node names against
+// the run's critical/high evidence so already-flagged processes light up here too.
 function suspiciousNamesFrom(evidence, trees) {
 
   const hot = [];

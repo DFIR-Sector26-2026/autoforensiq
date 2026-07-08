@@ -4,12 +4,9 @@ from src.utils.audit_log import log_action
 
 
 def stable_artifact_id(prefix: str, *parts: str) -> str:
-    """Deterministic, collision-resistant artifact_id built from the item's own
-    identifying content. Replaces uuid.uuid4(), which produced a different id
-    every run — so re-runs were not reproducible and the aggregator's
-    dedup-by-artifact_id never collapsed genuine duplicates. Mirrors
-    tsk_wrapper._path_id; a 64-bit md5 slice is stable across runs and, unlike
-    abs(hash()) % 99999, does not over-collide."""
+    """Deterministic artifact_id from the item's identifying content (md5 slice). Replaced
+    uuid4/abs(hash())%99999: ids must be stable across runs and not over-collide, or the
+    aggregator's dedup-by-artifact_id misbehaves."""
     digest = hashlib.md5(
         "|".join(str(p) for p in parts).encode("utf-8", "replace")
     ).hexdigest()
@@ -17,9 +14,8 @@ def stable_artifact_id(prefix: str, *parts: str) -> str:
 
 
 class BaseWrapper:
-    # The evidence_files key this tool consumes (issue D2). Subclasses override.
-    # The orchestrator reads this to pick the artifact for a tool, replacing the
-    # old per-tool if/elif ladder; None means the tool maps to no evidence type.
+    # The evidence_files key this tool consumes (D2); the orchestrator reads it to pick the tool's
+    # artifact. Subclasses override; None = no evidence type.
     consumes = None
 
     def __init__(self, tool_name: str):
@@ -27,11 +23,8 @@ class BaseWrapper:
 
     def run_command(self, command: list, input_files: list = None,
                     output_files: list = None, timeout: int = 300) -> tuple:
-        """
-        Runs a shell command.
-        Returns (stdout, stderr, returncode).
-        Logs to audit log automatically.
-        """
+        """Runs a shell command. Returns (stdout, stderr, returncode). Logs to audit log
+        automatically."""
         input_files = input_files or []
         output_files = output_files or []
         print(f"  [RUNNING] {' '.join(map(str,command))}")
@@ -68,10 +61,8 @@ class BaseWrapper:
                            confidence: float = 0.7,
                            timestamp: str = "",
                            linked_artifacts: list = None) -> dict:
-        """
-        Returns a dict matching the agreed evidence_item schema exactly.
-        Every wrapper uses this to produce output.
-        """
+        """Returns a dict matching the agreed evidence_item schema exactly. Every wrapper uses
+        this to produce output."""
         return {
             "artifact_id": artifact_id,
             "source_tool": self.tool_name,

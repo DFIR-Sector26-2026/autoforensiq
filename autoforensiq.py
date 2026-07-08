@@ -1,6 +1,4 @@
-"""
-AutoForensiq — Main CLI Entry Point
-"""
+"""AutoForensiq — Main CLI Entry Point"""
 
 import argparse
 import json
@@ -11,15 +9,13 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
 
-# Ensure the project root is importable for the `src` package, once, at import
-# time — the per-stage functions below used to repeat this insert individually.
+# Ensure the project root is importable for the `src` package, once, at import time — the per-stage
+# functions below used to repeat this insert individually.
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 
-# ─────────────────────────────────────────────────────────────
 # Helpers
-# ─────────────────────────────────────────────────────────────
 
 def _stage(num: int, name: str):
     print(f"\n{'=' * 60}")
@@ -54,8 +50,8 @@ def _clear_stale_outputs():
 
 
 def _publish_to_dashboard():
-    """Copy the artifacts the web dashboard reads into dashboard/public/data/
-    so `npm run dev` serves the latest run at /data/*."""
+    """Copy the artifacts the web dashboard reads into dashboard/public/data/ so `npm run dev`
+    serves the latest run at /data/*."""
     data_dir = ROOT_DIR / "dashboard" / "public" / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     for name in ("unified_evidence.json", "dashboard.json", "final_report.md",
@@ -66,9 +62,7 @@ def _publish_to_dashboard():
     print(f"  [DASHBOARD] Published run → {data_dir}")
 
 
-# ─────────────────────────────────────────────────────────────
 # STAGE 1 — CLASSIFIER
-# ─────────────────────────────────────────────────────────────
 
 def run_classifier(report_path: str, config_override: dict = None,
                    provided_artifact_types=None):
@@ -91,9 +85,7 @@ def run_classifier(report_path: str, config_override: dict = None,
                          provided_artifact_types=provided_artifact_types)
 
 
-# ─────────────────────────────────────────────────────────────
 # STAGE 2 — TOOL SELECTOR
-# ─────────────────────────────────────────────────────────────
 
 def run_tool_selector(case_context: dict):
 
@@ -143,9 +135,7 @@ def run_tool_selector(case_context: dict):
         return stub_plan
 
 
-# ─────────────────────────────────────────────────────────────
 # STAGE 3 — ORCHESTRATOR
-# ─────────────────────────────────────────────────────────────
 
 def run_orchestrator(execution_plan: dict, evidence_files: dict):
 
@@ -175,9 +165,7 @@ def run_orchestrator(execution_plan: dict, evidence_files: dict):
         return {}
 
 
-# ─────────────────────────────────────────────────────────────
 # STAGE 4 — AGGREGATOR
-# ─────────────────────────────────────────────────────────────
 
 def run_aggregator(case_context: dict):
 
@@ -301,9 +289,7 @@ def run_bulk_aggregation(manifest_path: str):
         }
 
 
-# ─────────────────────────────────────────────────────────────
 # STAGE 5/6 — ML + XAI
-# ─────────────────────────────────────────────────────────────
 
 def run_ml_pipeline():
 
@@ -340,9 +326,7 @@ def run_ml_pipeline():
         }
 
 
-# ─────────────────────────────────────────────────────────────
 # STAGE 7 — REPORT GENERATOR
-# ─────────────────────────────────────────────────────────────
 
 def run_report_generator(
     unified_evidence: dict,
@@ -375,9 +359,7 @@ def run_report_generator(
         return ""
 
 
-# ─────────────────────────────────────────────────────────────
 # ARGUMENTS
-# ─────────────────────────────────────────────────────────────
 
 def parse_args():
 
@@ -462,15 +444,12 @@ def parse_args():
     return parser.parse_args()
 
 
-# ─────────────────────────────────────────────────────────────
 # EVIDENCE MAPPING
-# ─────────────────────────────────────────────────────────────
 
 def _map_evidence_files(paths: list):
 
-    # Each evidence type maps to a *list* of paths so that supplying more than
-    # one artifact of the same kind (e.g. two memory images) analyses all of
-    # them rather than silently keeping only the last one.
+    # Each evidence type maps to a *list* of paths — two memory images should both be analysed, not
+    # silently keep only the last one.
     mapping = {}
 
     def _add(key, path):
@@ -506,11 +485,8 @@ def _map_evidence_files(paths: list):
         ):
             _add("registry_hive", path)
 
-        # EMAIL  (issue D4: a .csv mailbox/spam export was previously dropped.
-        # .csv is ambiguous — route it to the email analyzer only when the
-        # filename signals mail, so a bare data.csv isn't keyword-scanned as a
-        # phishing archive. The email wrapper is text-based, so it parses any of
-        # these formats.)
+        # EMAIL (D4): .csv is ambiguous — route to the email analyzer only when the filename signals
+        # mail, so a bare data.csv isn't keyword-scanned.
         elif ext in [".eml", ".msg"] or (
             ext == ".csv"
             and any(h in lower for h in ("email", "mail", "inbox", "phish", "spam"))
@@ -528,14 +504,10 @@ def _map_evidence_files(paths: list):
     return mapping
 
 
-# ─────────────────────────────────────────────────────────────
 # PRE-FLIGHT CHECK
-# ─────────────────────────────────────────────────────────────
 
-# Maps the evidence keys produced by _map_evidence_files() → the artifact_type
-# enum values used by the classifier / case_context schema. Most keys already
-# match; only the email/browser shorthands differ. Used to narrow the
-# narrative artifact_types to what was actually provided (issue 1.2).
+# Evidence keys → classifier artifact_type enum values (1.2). Only the email/browser shorthands
+# differ; other keys pass through unchanged.
 _EVIDENCE_KEY_TO_ARTIFACT_TYPE = {
     "email":   "email_archive",
     "browser": "browser_history",
@@ -550,10 +522,8 @@ def _provided_artifact_types(evidence_files: dict) -> list:
     })
 
 
-# Maps each forensic tool name → the evidence key it requires. Single source of
-# truth derived from each wrapper's `consumes` attribute (issue D2) — previously
-# re-typed here and in the orchestrator/report, which let plaso drift
-# (disk_image vs log_files).
+# Tool → required evidence key; single source of truth from each wrapper's `consumes` (D2 — re-typed
+# copies previously let plaso drift).
 from src.orchestrator import TOOL_EVIDENCE_MAP as _TOOL_EVIDENCE_MAP
 
 _TOOL_DISPLAY = {
@@ -578,13 +548,8 @@ _ACQUIRE_HINT = {
 
 
 def preflight_check(evidence_files: dict, execution_plan: dict):
-    """
-    Print a pre-flight summary of which tools will run and which will be
-    skipped based on the evidence files that were supplied.
-
-    For each skipped tool a one-line acquisition hint is printed so the
-    investigator knows exactly what to collect to enable full coverage.
-    """
+    """Print which planned tools WILL run vs be SKIPPED for the supplied evidence, with an
+    acquisition hint per skipped tool."""
     print("\n" + "─" * 60)
     print("  PRE-FLIGHT CHECK")
     print("─" * 60)
@@ -618,9 +583,7 @@ def preflight_check(evidence_files: dict, execution_plan: dict):
     print("─" * 60)
 
 
-# ─────────────────────────────────────────────────────────────
 # MAIN
-# ─────────────────────────────────────────────────────────────
 
 def main(args=None):
 
@@ -641,9 +604,7 @@ def main(args=None):
 
     _ensure_output_dir()
 
-    # If a bulk manifest is provided, run bulk aggregation and exit early. Use
-    # the validated run_bulk_aggregation() path (manifest normalization +
-    # per-machine entry validation) instead of an inline weaker copy.
+    # Bulk manifest → run the validated bulk-aggregation path and exit early.
     if args.bulk_manifest:
         run_bulk_aggregation(args.bulk_manifest)
         return
@@ -664,9 +625,8 @@ def main(args=None):
                 llm_override[model_key] = args.model
         config_override = {"llm": llm_override}
 
-    # Map the supplied evidence files up-front so the classifier can narrow its
-    # narrative artifact_types to what was actually provided (issue 1.2) before
-    # P2 selects tools from them.
+    # Map evidence up-front so the classifier can narrow its narrative artifact_types to what was
+    # actually provided (1.2).
     evidence_files = _map_evidence_files(args.evidence)
     provided_artifact_types = _provided_artifact_types(evidence_files)
 
@@ -699,10 +659,8 @@ def main(args=None):
         priority_list = [f"#{i + 1} {k}" for i, k in enumerate(evidence_files)]
         print(f"  [PRIORITY] {' -> '.join(priority_list)}")
 
-    # Record which evidence file each tool drew from so the report can attribute
-    # findings to their source artifact. Keyed by tool because each tool reads a
-    # single evidence type — avoids threading a source_file field through every
-    # wrapper and the evidence_item schema.
+    # Tool → source filename(s), so the report can attribute findings without threading a
+    # source_file field through every wrapper and the item schema.
     case_context["evidence_sources"] = {
         tool: ", ".join(Path(p).name for p in evidence_files[ev_key])
         for tool, ev_key in _TOOL_EVIDENCE_MAP.items()
@@ -711,16 +669,16 @@ def main(args=None):
 
     preflight_check(evidence_files, execution_plan)
 
-    # Side effects only: writes output/raw/<tool>_output.json, which Stage 4
-    # re-reads from disk. The returned dict is intentionally not used here.
+    # Side effects only: writes output/raw/<tool>_output.json, which Stage 4 re-reads from disk. The
+    # returned dict is intentionally not used here.
     run_orchestrator(execution_plan, evidence_files)
 
     # STAGE 4
     unified_evidence = run_aggregator(case_context)
 
-    # Issue 1.1 — reconcile the narrative classification against the evidence
-    # actually recovered. Leaves classifier_confidence untouched; attaches a
-    # reconciled_confidence + divergence flag for the report and audit trail.
+    # Issue 1.1 — reconcile the narrative classification against the evidence actually recovered.
+    # Leaves classifier_confidence untouched; attaches a reconciled_confidence + divergence flag for
+    # the report and audit trail.
     try:
         from src.classifier.evidence_reconciler import reconcile_evidence
         reconciliation = reconcile_evidence(case_context, unified_evidence)

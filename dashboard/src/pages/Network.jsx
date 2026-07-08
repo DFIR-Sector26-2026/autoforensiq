@@ -19,20 +19,17 @@ const NET_TYPES = [
 const rankToSev = (rank) =>
   rank >= 4 ? "critical" : rank >= 3 ? "high" : rank >= 2 ? "medium" : "low";
 
-// The internal subject is the LAN (RFC1918) endpoint — not "whatever is on the
-// left of the arrow", since reply-direction connections put an external C2 on
-// the left. Only true for a dotted-quad; domains are always external.
+// The internal subject is the LAN (RFC1918) endpoint — not "whatever is on the left of the arrow",
+// since reply-direction connections put an external C2 on the left. Only true for a dotted-quad;
+// domains are always external.
 const isLan = (id) =>
   id.startsWith("10.") ||
   id.startsWith("192.168.") ||
   /^172\.(1[6-9]|2\d|3[01])\./.test(id);
 
-// The network items carry their endpoints as free text ("... src → dst ...").
-// Split on the arrow, take the host token on each side, and strip any :port or
-// /path so a single endpoint (e.g. the C2 IP) collapses to one node. Each node
-// is classified by its WORST connecting severity, so a host reached by both a
-// critical and a high finding shows once (as critical), not in both filters
-// (issue U2). Source (internal) endpoints are the subject, drawn in cyan.
+// Endpoints parsed from the free-text "src → dst" values (strip :port and /path so one host = one
+// node). A node takes its WORST connecting severity so a host shows once, not per filter (U2);
+// internal endpoints draw cyan.
 function buildGraph(evidence) {
 
   const nodes = {};
@@ -77,15 +74,15 @@ export default function Network() {
 
   const { evidence, loading } = useEvidence();
   const graphRef = useRef(null);
-  // Auto-fit only once, on initial layout. Refitting on every engine stop reset
-  // the user's zoom on drag (issue U1) and on each filter change (issue U2).
+  // Auto-fit only once, on initial layout. Refitting on every engine stop reset the user's zoom on
+  // drag (issue U1) and on each filter change (issue U2).
   const didFit = useRef(false);
 
   // Multi-select severity filter for which nodes to draw (issue U2).
   const [sevFilter, setSevFilter] = useState(SEV_LEVELS);
 
-  // Build the full graph once; filtering then selects a subset of the SAME node
-  // objects, so positions persist across filter changes (no layout jump).
+  // Build the full graph once; filtering then selects a subset of the SAME node objects, so
+  // positions persist across filter changes (no layout jump).
   const fullGraph = useMemo(() => buildGraph(evidence), [evidence]);
 
   const graphData = useMemo(() => {
@@ -107,9 +104,8 @@ export default function Network() {
         : [...prev, value]
     );
 
-  // Apply the spacing forces the moment the graph instance exists (via the
-  // callback ref) so the warmup ticks lay the nodes out spread-apart *before*
-  // the first paint — no visible settling.
+  // Apply the spacing forces the moment the graph instance exists (via the callback ref) so the
+  // warmup ticks lay the nodes out spread-apart *before* the first paint — no visible settling.
   const configure = useCallback((fg) => {
     graphRef.current = fg;
     if (!fg) return;
@@ -117,9 +113,9 @@ export default function Network() {
     fg.d3Force("link")?.distance(110);
   }, []);
 
-  // Frame the graph once, on the first settled layout (duration 0 so it appears
-  // already fitted). Later engine stops — from dragging a node or changing the
-  // filter — must NOT refit, or they'd reset the user's zoom/pan (issues U1/U2).
+  // Frame the graph once, on the first settled layout (duration 0 so it appears already fitted).
+  // Later engine stops — from dragging a node or changing the filter — must NOT refit, or they'd
+  // reset the user's zoom/pan (issues U1/U2).
   const handleEngineStop = useCallback(() => {
     if (didFit.current) return;
     didFit.current = true;
@@ -227,10 +223,8 @@ export default function Network() {
               );
             }}
 
-            // Define the draggable/hover hit-area to match the drawn node
-            // (issue U1). Without this, custom-rendered nodes fall back to a tiny
-            // default area that misaligns at other zoom levels, so nodes can't be
-            // grabbed. Painting the same radius keeps them draggable at any zoom.
+            // Match the hit-area to the drawn node (U1) — custom-rendered nodes otherwise get a
+            // tiny default area and can't be grabbed.
             nodePointerAreaPaint={(node, color, ctx) => {
               ctx.fillStyle = color;
               ctx.beginPath();

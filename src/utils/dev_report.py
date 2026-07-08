@@ -27,9 +27,9 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
-# Expected artifacts in pipeline order: (relative path or glob, stage, label).
-# Globs (containing "*") expand to every match; a non-glob path that is absent
-# becomes a "not generated" entry (shown disabled in the tab list).
+# Expected artifacts in pipeline order: (relative path or glob, stage, label). Globs (containing
+# "*") expand to every match; a non-glob path that is absent becomes a "not generated" entry (shown
+# disabled in the tab list).
 _MANIFEST: list[tuple[str, str, str]] = [
     ("case_context.json",       "P1", "Intent Classifier"),
     ("execution_plan.json",     "P2", "Tool Selector"),
@@ -62,14 +62,12 @@ def _inline(text: str) -> str:
     for i in range(1, len(segs), 2):
         segs[i] = f"<strong>{segs[i]}</strong>"
     out = "".join(segs)
-    # _italic_ — only at word boundaries, so intraword underscores (e.g.
-    # wannacry_dropper, ioc_report.md inside a code span) are left alone, matching
-    # GitHub's emphasis rules.
+    # _italic_ — only at word boundaries, so intraword underscores (e.g. wannacry_dropper,
+    # ioc_report.md inside a code span) are left alone, matching GitHub's emphasis rules.
     out = re.sub(r"(?<!\w)_(?=\S)(.+?)(?<=\S)_(?!\w)", r"<em>\1</em>", out)
-    # Honour an explicit <br> line break (e.g. the IOC badge on its own line in
-    # a table cell) — the only raw-HTML tag allowed; it arrives as &lt;br&gt;
-    # after escaping. Also restore &nbsp; (used to indent the badge), which
-    # html.escape turned into &amp;nbsp;.
+    # Honour an explicit <br> line break (e.g. the IOC badge on its own line in a table cell) — the
+    # only raw-HTML tag allowed; it arrives as &lt;br&gt; after escaping. Also restore &nbsp; (used
+    # to indent the badge), which html.escape turned into &amp;nbsp;.
     out = re.sub(r"&lt;br\s*/?&gt;", "<br>", out)
     return out.replace("&amp;nbsp;", "&nbsp;")
 

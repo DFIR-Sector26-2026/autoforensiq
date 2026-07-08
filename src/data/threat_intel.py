@@ -1,24 +1,9 @@
-"""Single source of truth for threat-intelligence indicators (issue D1).
+"""Single source of truth for threat-intel indicators (D1) — the C2 port list
+previously drifted across four hardcoded copies (wrappers, rescorer, ML).
 
-The C2 port list used to be hardcoded — and drifted — across four places: the
-Volatility and Tshark wrappers (severity), the IOC catalog (rescorer boost), and
-the ML feature extractor. A connection to 4445 was "suspicious" to the wrappers
-but invisible to the model; 2222/3333/4000 were anomalies to the model but
-flagged by nothing else. Centralising the ports here fixes that drift and makes
-"add a C2 port" a one-line edit.
-
-Ports are split into two confidence tiers, because they are not equivalent:
-
-  * HIGH  — overwhelmingly malicious, rarely legitimate (Metasploit handlers,
-            backdoor/elite ports). A match drives severity "high" in the
-            wrappers and a critical floor in the rescorer.
-  * WATCH — dual-use: historically abused for C2 but also legitimate (IRC
-            6666-6669, alt-HTTP 8888/9999, old NetBus/BO trojans 12345/54321).
-            Surfaced at "medium" so the pipeline notes them without screaming
-            "high C2" at a Jupyter or IRC connection.
-
-Predominantly-legitimate ports (2222 alt-SSH, 3333, 4000, 5555 ADB, 7777 game
-servers) are deliberately excluded from both tiers — too noisy to flag.
+Two port tiers: HIGH = overwhelmingly malicious (Metasploit/backdoor ports);
+WATCH = dual-use (IRC, alt-HTTP, old trojans) surfaced at medium. Predominantly
+legitimate ports (2222/3333/4000/5555/7777) are deliberately excluded as noise.
 """
 
 # Overwhelmingly malicious, rarely legitimate -> severity "high".
@@ -27,26 +12,19 @@ C2_PORTS_HIGH = frozenset({4444, 4445, 1337, 31337})
 # Dual-use (legitimate too) -> severity "medium", still surfaced.
 C2_PORTS_WATCH = frozenset({6666, 6667, 6668, 6669, 8888, 9999, 12345, 54321})
 
-# Every port worth flagging at all (both tiers). Used as the ML "known C2 port"
-# feature, where a port is one signal among fourteen rather than a verdict.
+# Every port worth flagging at all (both tiers). Used as the ML "known C2 port" feature, where a
+# port is one signal among fourteen rather than a verdict.
 C2_PORTS_ALL = C2_PORTS_HIGH | C2_PORTS_WATCH
 
-# Remote-interactive admin channels (MITRE T1021): WinRM 5985/5986, RDP 3389,
-# VNC 5900. The lateral-movement backbone of an internal living-off-the-land
-# intrusion (dev01 B-6: outbound WinRM + inbound RDP were the real attack and
-# scored low). Dual-use — admins use them too — so they floor at "medium" (a
-# watch signal, not a C2 verdict), and ONLY for a connection with a real remote
-# peer: every Windows host listens on 3389/5985 itself, so a bare listening
-# socket (0.0.0.0:3389) must not match. SMB 445 / LDAP 389 are deliberately
-# excluded — routine domain traffic on every domain-joined machine.
+# Remote-interactive admin channels (T1021: RDP/VNC/WinRM), the lateral-movement backbone (B-6).
+# Dual-use → medium, and only with a real remote peer (every host listens on 3389/5985 itself). SMB
+# 445 / LDAP 389 excluded: routine domain traffic.
 LATERAL_MOVEMENT_PORTS = frozenset({3389, 5900, 5985, 5986})
 
 
-# Known-good infrastructure — substring match against the full lowercased
-# domain. A random-looking subdomain under one of these (e.g. a hex label under
-# cloudfront.net) is still legitimate, so we match the parent. Shared so both the
-# tshark wrapper (DNS gating) and the aggregator (issue B1 co-occurrence) agree
-# on what counts as benign.
+# Known-good infrastructure, substring match on the full lowercased domain (a random subdomain under
+# cloudfront etc. is still legitimate). Shared by the tshark DNS gating and the aggregator's B1
+# co-occurrence pass.
 DNS_ALLOWLIST = (
     "apple.com", "icloud.com", "aaplimg.com", "apple-dns.net",
     "apple-cloudkit", "cdn-apple.com", "mzstatic.com",
@@ -60,11 +38,8 @@ DNS_ALLOWLIST = (
 DNS_ALLOWLIST_SUFFIXES = (".local", ".arpa", ".lan", ".internal", ".home")
 
 
-# Ransomware / encrypted-payload file extensions. A file carrying one of these is
-# a strong signal on its own, regardless of where it sits. Shared so the disk
-# (tsk_fls) and memory-filescan (volatility) paths match against ONE list instead
-# of keeping their own drifting copies. Stored as a tuple so it works directly
-# with str.endswith(...) as well as `in` membership.
+# Ransomware / encrypted-payload extensions — a strong signal anywhere. One list shared by tsk_fls
+# and volatility filescan; tuple so str.endswith() works.
 RANSOM_EXTENSIONS = (
     ".wnry", ".wncry", ".wcry", ".wncryt",
     ".locky", ".zepto", ".odin", ".cerber", ".cerber3",
@@ -73,11 +48,8 @@ RANSOM_EXTENSIONS = (
     ".ryuk", ".lockbit", ".conti", ".djvu",
 )
 
-# Executable / script file extensions. Shared so the disk wrapper (which flags
-# them only inside a staging directory) and the report's IOC filename extraction
-# agree on what counts as an executable/script. Stored as a tuple for
-# str.endswith(...). NOT flagged on extension alone — see the staging-dir gate in
-# tsk_wrapper (flagging every binary flooded a real OS disk).
+# Executable / script extensions. NOT flagged on extension alone — see the staging-dir gate in
+# tsk_wrapper. Shared with the report's IOC extraction.
 EXECUTABLE_EXTENSIONS = (
     ".exe", ".dll", ".bat", ".cmd", ".ps1", ".vbs", ".vbe",
     ".js", ".jse", ".wsf", ".hta", ".scr", ".jar",
@@ -85,8 +57,8 @@ EXECUTABLE_EXTENSIONS = (
 
 
 def is_lan_ipv4(ip: str) -> bool:
-    """True for an RFC1918 (LAN) IPv4 address string — the internal hosts. Used
-    to pick the affected machine out of a connection and to map hosts to MACs."""
+    """True for an RFC1918 (LAN) IPv4 address string — the internal hosts. Used to pick the
+    affected machine out of a connection and to map hosts to MACs."""
     return (
         ip.startswith("10.")
         or ip.startswith("192.168.")
@@ -95,8 +67,8 @@ def is_lan_ipv4(ip: str) -> bool:
 
 
 def c2_port_severity(port):
-    """Return the severity a C2-indicator port warrants, or None if the port is
-    not a C2 indicator. `port` may be an int or a digit string."""
+    """Return the severity a C2-indicator port warrants, or None if the port is not a C2
+    indicator. `port` may be an int or a digit string."""
     try:
         port = int(port)
     except (TypeError, ValueError):
