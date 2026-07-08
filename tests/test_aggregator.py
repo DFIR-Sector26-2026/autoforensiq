@@ -245,6 +245,41 @@ def test_c2_port_tiers_high_vs_watch():
     assert "c2_port_watch" in by_id["watch"]["ioc_match"]
 
 
+def test_lateral_movement_ports_flag_sessions_not_listeners():
+    """B-6: remote-interactive admin channels (WinRM 5985 / RDP 3389) are the
+    lateral-movement backbone of an internal LOTL intrusion and must surface as
+    medium watch signals — but ONLY for a session with a real remote peer. Every
+    Windows host listens on 3389/5985 itself, so the bare listening socket
+    (0.0.0.0:3389 / :::5985) must stay low, as must benign internal service
+    traffic (Elasticsearch :9200)."""
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        # N1: outbound WinRM to a remote host -> medium + tag
+        {"artifact_id": "winrm_out", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCPv4 172.16.4.9:59494 -> 172.16.5.21:5985 (PID:-)"},
+        # N4: established RDP session (dev01 is the server; peer is real) -> medium + tag
+        {"artifact_id": "rdp_est", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCPv4 172.16.4.9:3389 -> 172.16.5.26:54708 (PID:-)"},
+        # The host's own listeners: at most one real IP -> must NOT match
+        {"artifact_id": "rdp_listen4", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCPv4 0.0.0.0:3389 -> 0.0.0.0:0 (PID:432)"},
+        {"artifact_id": "winrm_listen6", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCPv6 :::5985 -> :::0 (PID:4)"},
+        # Benign internal service traffic -> untouched (negative control)
+        {"artifact_id": "es_9200", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCPv4 172.16.4.9:54768 -> 172.16.4.8:9200 (PID:-)"},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    for flagged in ("winrm_out", "rdp_est"):
+        assert by_id[flagged]["severity"] == "medium", flagged
+        assert "lateral_movement_port" in by_id[flagged]["ioc_match"], flagged
+    for quiet in ("rdp_listen4", "winrm_listen6", "es_9200"):
+        assert by_id[quiet]["severity"] == "low", quiet
+        assert "lateral_movement_port" not in by_id[quiet].get("ioc_match", []), quiet
+
+
 def test_same_pid_requires_information_adding_evidence():
     """Issue 4.7: a same_pid group confined to the process-identity types
     (process row + command line + tree position, one tool) is the same fact

@@ -92,7 +92,10 @@ def _emit(artifact_id, value, severity, confidence, source_id):
 _SUBSTRING_RULES = [
     ("ioc_proc",    SUSPICIOUS_PROCESSES,  "Suspicious process detected: {term}", "high",     0.90),
     ("ioc_keyword", SUSPICIOUS_KEYWORDS,   "Malware indicator detected: {term}",  "critical", 0.95),
-    ("ioc_dll",     SUSPICIOUS_DLL_PATHS,  "Suspicious DLL path detected: {term}", "high",     0.85),
+    # medium, not high (B-9c): a DLL under temp/appdata is a lead, not a finding —
+    # browsers and updaters legitimately keep DLLs there (Edge components under
+    # AppData\Local). Catalog-named malware still escalates via the rescorer.
+    ("ioc_dll",     SUSPICIOUS_DLL_PATHS,  "Suspicious DLL path detected: {term}", "medium",   0.85),
 ]
 
 

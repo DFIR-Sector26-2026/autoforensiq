@@ -53,7 +53,24 @@ class PlasoWrapper(BaseWrapper):
             print(f"  [ERROR] Source path not found: {source_path}")
             return []
 
-        plaso_dump = Path(tempfile.gettempdir()) / "autoforensiq_plaso.dump"
+        # NOT tempfile.gettempdir(): /tmp is tmpfs (RAM-backed) on Fedora/most
+        # systemd distros, and the storage dump alone measured 1.9 GB on the 11 GB
+        # dev01 E01 — staging it in RAM competes with the plaso workers for the
+        # same memory budget (B-4's original OOM pressure). /var/tmp is the
+        # disk-backed temp location.
+        temp_dir = Path("/var/tmp") if os.path.isdir("/var/tmp") else Path(tempfile.gettempdir())
+        plaso_dump = temp_dir / "autoforensiq_plaso.dump"
+        csv_output = temp_dir / "autoforensiq_timeline.csv"
+
+        # These fixed-path temp files are only cleaned up on the success path, so
+        # a run killed mid-write (timeout/OOM) leaves a PARTIAL sqlite dump behind
+        # — and log2timeline RESUMES into an existing storage file, crashing
+        # instantly with "sqlite3.DatabaseError: database disk image is malformed"
+        # (B-4: every dev01 run after the first timed-out one produced 0 items
+        # this way). psort likewise refuses to overwrite an existing CSV. Always
+        # start from a clean slate.
+        for stale in (plaso_dump, csv_output):
+            stale.unlink(missing_ok=True)
 
         # STEP 1 — log2timeline
         print("  [PLASO] Running log2timeline (this may take a few minutes)...")
@@ -102,11 +119,22 @@ class PlasoWrapper(BaseWrapper):
                 # forever with no TTY. "none" = current volume only, no prompt
                 # (processing every snapshot would also multiply runtime).
                 "--vss_stores", "none",
+                # The default spawns one worker per core (15 on this box), which
+                # under a 14 GB budget drove the machine into memory pressure and
+                # the 600s timeout (B-4). Four workers is the sweet spot: bounded
+                # memory, and the run is I/O-bound anyway.
+                "--workers", "4",
                 "--storage_file", str(plaso_dump),
                 source_path
             ],
             input_files=[source_path],
             output_files=[str(plaso_dump)],
+            # Deliberately kept at 600s (accepted limitation): a measured run on
+            # an 11 GB E01 needed ~18 min here plus ~46 min in psort — raising
+            # the timeouts would buy a ~65-minute stage whose keyword filter
+            # mostly re-corroborates what the memory/disk wrappers already
+            # surface. GB-scale images therefore time out and plaso contributes
+            # nothing; small images complete fine.
             timeout=600
         )
 
@@ -120,8 +148,6 @@ class PlasoWrapper(BaseWrapper):
             return []
 
         # STEP 2 — psort export
-        csv_output = Path(tempfile.gettempdir()) / "autoforensiq_timeline.csv"
-
         print("  [PLASO] Running psort (exporting timeline to CSV)...")
 
         stdout, stderr, code = self.run_command(
@@ -166,6 +192,12 @@ class PlasoWrapper(BaseWrapper):
 
         items = []
 
+        # Real psort output contains fields beyond csv's 128 KB default limit
+        # (evtx "Strings" blobs) — the resulting csv.Error escapes the row loop
+        # and silently truncates the timeline (the dev01 CSV died at row ~360k
+        # of 633k).
+        csv.field_size_limit(sys.maxsize)
+
         try:
             p = Path(csv_path)
             with p.open("r", encoding="utf-8", errors="replace") as f:
@@ -174,9 +206,16 @@ class PlasoWrapper(BaseWrapper):
 
                 for row in reader:
                     try:
-                        timestamp = row.get("datetime", "")
-                        source = row.get("source", "")
-                        desc = row.get("description", "")
+                        # l2tcsv columns (B-12): the format has no "datetime" or
+                        # "description" — the header is date,time,timezone,MACB,
+                        # source,sourcetype,...,desc,...,filename,... Reading the
+                        # wrong keys made every row look empty, so the keyword
+                        # filter matched nothing and a *successful* plaso run
+                        # still produced 0 items. "sourcetype" is the readable
+                        # label ("Registry Key"); "source" is a short code (REG).
+                        timestamp = f'{row.get("date", "")} {row.get("time", "")}'.strip()
+                        source = row.get("sourcetype", "")
+                        desc = row.get("desc", "")
                         filename = row.get("filename", "")
 
                         lower_desc = desc.lower()
@@ -193,7 +232,15 @@ class PlasoWrapper(BaseWrapper):
                                     artifact_id=f"plaso_{abs(hash(timestamp + desc)) % 99999}",
                                     evidence_type="timeline_event",
                                     value=f"[{timestamp}] [{source}] {desc} | File: {filename}",
-                                    severity="high",
+                                    # medium, not high: the bare-substring filter
+                                    # is a lead generator, not a detector — on the
+                                    # dev01 CSV it kept 7,734 rows, almost all
+                                    # benign (Start-Menu powershell .lnk files,
+                                    # WinSxS "Deployments" keys matching
+                                    # "startup"). Blanket high would flood Key
+                                    # Findings; genuinely bad events still
+                                    # escalate via the ioc_rescorer catalogs.
+                                    severity="medium",
                                     confidence=0.72,
                                     timestamp=timestamp
                                 )

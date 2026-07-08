@@ -38,7 +38,18 @@ STAGING_DIRS = (
 )
 
 
+# OS-managed servicing dirs that contain "/temp/" path segments but are NOT
+# user-writable staging (violating the list's premise above): the .NET GAC
+# native-image cache (\Windows\assembly\temp\<random>\*.ni.dll — the random
+# subdir is ngen's doing, standard on every .NET box) and Windows component
+# servicing (\Windows\WinSxS\Temp\InFlight\...). On dev01 these two made up 140
+# of the 141 "Executable in staging directory" DLL flags (B-9c).
+_OS_SERVICING_DIRS = ("/windows/assembly/", "/windows/winsxs/")
+
+
 def _in_staging_dir(lower_path: str) -> bool:
+    if any(seg in lower_path for seg in _OS_SERVICING_DIRS):
+        return False
     return any(seg in lower_path for seg in STAGING_DIRS)
 
 

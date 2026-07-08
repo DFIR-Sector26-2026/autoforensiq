@@ -31,6 +31,16 @@ C2_PORTS_WATCH = frozenset({6666, 6667, 6668, 6669, 8888, 9999, 12345, 54321})
 # feature, where a port is one signal among fourteen rather than a verdict.
 C2_PORTS_ALL = C2_PORTS_HIGH | C2_PORTS_WATCH
 
+# Remote-interactive admin channels (MITRE T1021): WinRM 5985/5986, RDP 3389,
+# VNC 5900. The lateral-movement backbone of an internal living-off-the-land
+# intrusion (dev01 B-6: outbound WinRM + inbound RDP were the real attack and
+# scored low). Dual-use — admins use them too — so they floor at "medium" (a
+# watch signal, not a C2 verdict), and ONLY for a connection with a real remote
+# peer: every Windows host listens on 3389/5985 itself, so a bare listening
+# socket (0.0.0.0:3389) must not match. SMB 445 / LDAP 389 are deliberately
+# excluded — routine domain traffic on every domain-joined machine.
+LATERAL_MOVEMENT_PORTS = frozenset({3389, 5900, 5985, 5986})
+
 
 # Known-good infrastructure — substring match against the full lowercased
 # domain. A random-looking subdomain under one of these (e.g. a hex label under

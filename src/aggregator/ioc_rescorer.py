@@ -22,7 +22,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from src.data.threat_intel import C2_PORTS_HIGH, C2_PORTS_WATCH
+from src.data.threat_intel import C2_PORTS_HIGH, C2_PORTS_WATCH, LATERAL_MOVEMENT_PORTS
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 _DEFAULT_CATALOG_PATH = ROOT_DIR / "src" / "data" / "ioc_patterns.json"
@@ -92,6 +92,17 @@ _HOST_TOKEN_RE = re.compile(
 
 def _is_ip(token: str) -> bool:
     return bool(_IP_TOKEN_RE.fullmatch(token.strip()))
+
+
+def _has_remote_peer(value: str) -> bool:
+    """True when a connection value names two distinct real endpoints — i.e. an
+    actual session with a remote peer, not a listening socket. Listeners read
+    `0.0.0.0:3389 -> 0.0.0.0:0` / `:::5985 -> :::0` (at most one real IP), while
+    an established pair carries both hosts (`172.16.4.9:3389 -> 172.16.5.26:...`).
+    Gate for the lateral-movement port tier (B-6): every Windows host listens on
+    RDP/WinRM itself, so the bare listener must not match."""
+    ips = {ip for ip in _IP_TOKEN_RE.findall(value) if ip != "0.0.0.0"}
+    return len(ips) >= 2
 
 
 def _persistence_actionable(item: dict, value: str) -> bool:
@@ -205,6 +216,18 @@ def _build_indicator_list(catalog: dict, case_context: dict) -> list[dict]:
             "severity": "medium",
             "category": "c2_channel",
         })
+    # Remote-interactive admin channels (WinRM/RDP/VNC) — the lateral-movement
+    # backbone of an internal LOTL intrusion (B-6). Medium watch signal, and only
+    # for a session with a real remote peer: every Windows host listens on
+    # 3389/5985 itself, so a bare listening socket must not match.
+    if LATERAL_MOVEMENT_PORTS:
+        indicators.append({
+            "id": "lateral_movement_port",
+            "ports": sorted(LATERAL_MOVEMENT_PORTS),
+            "severity": "medium",
+            "category": "lateral_movement",
+            "requires_remote_peer": True,
+        })
 
     exfil = catalog.get("exfil_keywords") or {}
     if exfil.get("keywords"):
@@ -295,6 +318,8 @@ def rescore_item(
 
         if "ports" in rule:
             hit = bool(ports_in_value.intersection(rule["ports"]))
+            if hit and rule.get("requires_remote_peer") and not _has_remote_peer(value):
+                hit = False
         elif "hosts" in rule or "ips" in rule:
             if hosts_in_value is None:
                 hosts_in_value = {h.lower().rstrip(".") for h in _HOST_TOKEN_RE.findall(value)}

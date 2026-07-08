@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from .base_wrapper import BaseWrapper, stable_artifact_id
-from src.data.threat_intel import c2_port_severity, RANSOM_EXTENSIONS
+from src.data.threat_intel import c2_port_severity, RANSOM_EXTENSIONS, EXECUTABLE_EXTENSIONS
 
 PLUGINS = [
     "windows.pslist",
@@ -106,9 +106,13 @@ def tree_lineage(node, max_depth=5):
     return "\n".join(paths)
 
 
+# Despite the name, this list's only consumer is _parse_pslist's OWN-NAME
+# severity heuristic (parent->child lineage is scored by SUSPICIOUS_RELATIONSHIPS
+# below). cmd.exe / powershell.exe are deliberately NOT here (B-5/B-9a): they run
+# constantly on a healthy host, so a bare-name match flagged e.g. the benign
+# Kibana launcher cmd.exe HIGH. Their malicious use is still scored with context —
+# the SUSPICIOUS_RELATIONSHIPS pairs and the ioc_engine `powershell -enc` keyword.
 SUSPICIOUS_PARENTS = [
-    "cmd.exe",
-    "powershell.exe",
     "wscript.exe",
     "cscript.exe",
     "mshta.exe",
@@ -1196,7 +1200,10 @@ class VolatilityWrapper(BaseWrapper):
 
         suspicious_dlls = [
             "unknown",
-            "temp",
+            # Path segment, not a bare token: "temp" as a substring matched inside
+            # ordinary DLL names (DevDispI-temp-rovider.dll flagged HIGH, B-9d).
+            # The filescan/dumpfiles marker lists already use the \temp\ form.
+            "\\temp\\",
             "appdata\\roaming",
             "programdata"
         ]
@@ -1237,8 +1244,14 @@ class VolatilityWrapper(BaseWrapper):
         items = []
         seen = set()
 
-        # Markers that indicate staging/execution locations or payloads.
-        suspicious_markers = [
+        # Markers that indicate staging/execution locations or payloads. The two
+        # classes are scored differently (B-9b): location markers count AT MOST
+        # ONCE — a file sits in one place, and Windows nests these dir names
+        # (\AppData\Local\Temp\, \AppData\Roaming\...\Startup\), so two location
+        # hits are usually one location, not two independent signals. Before the
+        # cap, every file in AppData\Local\Temp scored HIGH (MpCmdRun.log). A
+        # payload marker on top of a location still reaches high (\temp\evil.ps1).
+        location_markers = [
             "\\appdata\\",
             "\\temp\\",
             "\\users\\public\\",
@@ -1247,6 +1260,8 @@ class VolatilityWrapper(BaseWrapper):
             "\\runonce",
             "\\tasks\\",
             "\\intel\\",
+        ]
+        payload_markers = [
             ".onion",
             ".ps1",
             ".vbs",
@@ -1297,6 +1312,15 @@ class VolatilityWrapper(BaseWrapper):
             "tasksche", "taskdl", "taskse", "mssecsvc",
             "wannacry", "wanacry", "@please_read_me@",
         ]
+        # Boundary-aware: a marker must not sit inside a longer word, or ordinary
+        # system files match — "tasksche" is a substring of "TaskScheduler", which
+        # flagged WPTaskScheduler.dll and the TaskScheduler .evtx logs as named
+        # WannaCry payloads (B-9b). Letters on either side disqualify the hit;
+        # "tasksche.exe" (dot boundary) still matches.
+        malware_name_re = re.compile(
+            "|".join(f"(?<![a-z]){re.escape(tok)}(?![a-z])"
+                     for tok in malware_filename_markers)
+        )
 
         for line in lines:
 
@@ -1336,7 +1360,13 @@ class VolatilityWrapper(BaseWrapper):
                     # thumbnails), so they hit \appdata\ + \startup markers and got
                     # flagged high alongside the genuine Startup .lnk persistence.
                     # They are never artifacts; drop them regardless of path.
-                    if basename in ("desktop.ini", "thumbs.db"):
+                    # startswith, not equality: raw-strings scraping glues garbage
+                    # onto basenames (e.g. "Desktop.ini4e6-…}.tmp" — a partial GUID
+                    # + .tmp from an adjacent memory string). Don't skip if the
+                    # suffix forms an executable name (desktop.ini.exe is a
+                    # masquerade, not scrape noise).
+                    if basename.startswith(("desktop.ini", "thumbs.db")) and \
+                            not basename.endswith(EXECUTABLE_EXTENSIONS):
                         continue
 
                     # Known ransomware extension or named payload — a strong
@@ -1344,7 +1374,7 @@ class VolatilityWrapper(BaseWrapper):
                     # (bypasses the staging-marker / system-binary gates below).
                     if (
                         ext in RANSOM_EXTENSIONS or
-                        any(tok in basename for tok in malware_filename_markers)
+                        malware_name_re.search(basename)
                     ):
                         seen.add(normalized)
                         items.append(
@@ -1361,13 +1391,26 @@ class VolatilityWrapper(BaseWrapper):
                     # relevance gate to avoid flooding with low-signal paths.
                     # ".js" as a substring also matches ".json", so count it
                     # only when it's the real file extension (3.3-D).
-                    marker_hits = 0
-                    for marker in suspicious_markers:
+                    location_hits = sum(1 for m in location_markers if m in normalized)
+                    payload_hits = 0
+                    for marker in payload_markers:
                         if marker == ".js":
                             if ext == ".js":
-                                marker_hits += 1
+                                payload_hits += 1
                         elif marker in normalized:
-                            marker_hits += 1
+                            payload_hits += 1
+                    # Location capped at 1 (see the marker-class note above).
+                    marker_hits = min(location_hits, 1) + payload_hits
+
+                    # Autostart persistence (T1547.001): an executable / script /
+                    # shortcut file INSIDE a Startup folder is a finding on its
+                    # own — the classic .lnk-in-Startup pattern (dev01 N6,
+                    # setwallpaper.lnk) — independent of the location cap above.
+                    in_autostart = (
+                        "\\startup\\" in normalized
+                        and (basename.endswith(EXECUTABLE_EXTENSIONS)
+                             or basename.endswith(".lnk"))
+                    )
 
                     in_random_staging = _has_suspicious_staging_path(normalized)
                     # Ensure a random-named staging path still clears the
@@ -1391,10 +1434,11 @@ class VolatilityWrapper(BaseWrapper):
                     seen.add(normalized)
 
                     # A randomly-named staging directory is a malware hallmark and
-                    # ranks high on its own (3.3-C), as does any path hitting 2+
-                    # markers. A single generic location marker (\temp\, \appdata\)
-                    # stays medium — too noisy to call high on its own.
-                    if marker_hits >= 2 or in_random_staging:
+                    # ranks high on its own (3.3-C), as does location+payload
+                    # (\temp\evil.ps1) and autostart persistence. A single generic
+                    # location marker (\temp\, \appdata\) stays medium — too noisy
+                    # to call high on its own.
+                    if marker_hits >= 2 or in_random_staging or in_autostart:
                         severity = "high"
                         confidence = 0.90
                     else:

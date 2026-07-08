@@ -596,6 +596,28 @@ def test_parse_filescan_json_is_not_matched_as_js():
     assert any("dropper.js" in v for v in values)           # real .js still flagged
 
 
+def test_parse_filescan_drops_garbage_suffixed_benign_names():
+    # Raw-strings scraping glues garbage onto basenames (a partial GUID + .tmp
+    # from an adjacent memory string), so "Desktop.ini4e6-…}.tmp" evaded the
+    # exact-match skip for ubiquitous benign files. startswith now covers those
+    # — but not an executable masquerade (desktop.ini.exe in Startup is a
+    # finding, not scrape noise).
+    wrapper = VolatilityWrapper()
+    programs = "\\Users\\x\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs"
+    mock_output = "\n".join([
+        "Volatility 3 Framework 2.28.0",
+        "Offset\tName",
+        f"0x1000\t{programs}\\Maintenance\\Desktop.ini4e6-4699-9046-34a7c1ef12fc}}.tmp",
+        f"0x2000\t{programs}\\Startup\\desktop.ini",
+        "0x3000\t\\Users\\x\\AppData\\Local\\Thumbs.db",
+        f"0x4000\t{programs}\\Startup\\desktop.ini.exe",
+    ])
+    items = wrapper._parse("windows.filescan", mock_output)
+    values = [it["value"] for it in items]
+    assert len(values) == 1                     # noise variants all dropped...
+    assert "desktop.ini.exe" in values[0]       # ...only the masquerade kept
+
+
 def test_extract_strings():
     wrapper = VolatilityWrapper()
 
@@ -1033,6 +1055,37 @@ def test_plaso_resolve_cmd_falls_back_to_path_then_bare(monkeypatch, tmp_path):
     monkeypatch.setattr(plaso_wrapper.shutil, "which",
                         lambda n: "/usr/bin/log2timeline.py" if n == "log2timeline.py" else None)
     assert plaso_wrapper._resolve_cmd("log2timeline.py", "log2timeline") == "/usr/bin/log2timeline.py"
+
+
+def test_plaso_parse_csv_reads_l2tcsv_columns(tmp_path):
+    # B-12: psort's l2tcsv format has no "datetime"/"description" columns — the
+    # header is date,time,...,sourcetype,...,desc,...,filename. The parser was
+    # reading the wrong keys, so every row looked empty and even a successful
+    # plaso run produced 0 items.
+    from src.wrappers.plaso_wrapper import PlasoWrapper
+    header = ("date,time,timezone,MACB,source,sourcetype,type,user,host,"
+              "short,desc,version,filename,inode,notes,format,extra")
+    # plaso's windows Run-key plugin emits sourcetype "Run Key" (the generic
+    # winreg plugin's "Registry Key" carries no filter keyword).
+    run_key = ('01/27/2023,19:04:11,UTC,M...,REG,Run Key,Content Modification Time,'
+               '-,-,short,"[HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run] '
+               'evil: [REG_SZ] C:\\Temp\\evil.exe",2,'
+               'NTFS:\\Windows\\System32\\config\\SOFTWARE,1,-,winreg,-')
+    benign = ('05/08/2021,08:23:59,UTC,M...,REG,Registry Key,Content Modification Time,'
+              '-,-,short,"[HKLM\\Software\\Classes\\CLSID\\{X}] (default): [REG_SZ] ok",2,'
+              'NTFS:\\Windows\\System32\\config\\SOFTWARE,1,-,winreg,-')
+    csv_path = tmp_path / "timeline.csv"
+    csv_path.write_text("\n".join([header, run_key, benign]) + "\n")
+
+    items = PlasoWrapper()._parse_csv(csv_path)
+
+    assert len(items) == 1  # only the Run-key row matches SUSPICIOUS_SOURCES
+    item = items[0]
+    assert "evil.exe" in item["value"]
+    assert item["timestamp"] == "01/27/2023 19:04:11"
+    # medium, not high: the keyword filter is a lead generator (7,734 mostly
+    # benign keeps on the dev01 CSV) — it must not flood Key Findings.
+    assert item["severity"] == "medium"
 
 
 # ─────────────────────────────────────────────────────────────
