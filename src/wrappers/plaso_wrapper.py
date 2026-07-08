@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import csv
 from pathlib import Path
-from src.wrappers.base_wrapper import BaseWrapper
+from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
 
 
 def _resolve_cmd(preferred: str, fallback: str) -> str:
@@ -229,7 +229,7 @@ class PlasoWrapper(BaseWrapper):
                         if is_suspicious:
                             items.append(
                                 self.make_evidence_item(
-                                    artifact_id=f"plaso_{abs(hash(timestamp + desc)) % 99999}",
+                                    artifact_id=stable_artifact_id("plaso", timestamp, desc),
                                     evidence_type="timeline_event",
                                     value=f"[{timestamp}] [{source}] {desc} | File: {filename}",
                                     # medium, not high: the bare-substring filter

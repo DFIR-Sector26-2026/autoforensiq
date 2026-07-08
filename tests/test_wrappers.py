@@ -94,6 +94,47 @@ def test_parse_fls_skips_directory_nodes():
     assert not any(v.rstrip().endswith("/Windows/Temp") for v in values)
 
 
+def test_parse_fls_surfaces_powershell_transcripts_as_low():
+    # B-6/B-7 (N5): transcript files are emitted as LOW file artifacts so they
+    # become visible/correlatable — never higher, since transcription is often
+    # enabled fleet-wide and existence alone is weak evidence. Other .txt files
+    # are still not flagged.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    body = "\n".join([
+        "0|/Users/cbarton-a/Documents/20230126/PowerShell_transcript.DEV01"
+        ".AbCdEf12.20230126120000.txt|453|r/rrwxrwxrwx|0|0|42|0|0|0|0",
+        "0|/Users/cbarton-a/Documents/notes.txt|454|r/rrwxrwxrwx|0|0|10|0|0|0|0",
+    ])
+    items = TSKWrapper()._parse_fls_lines(body)
+    assert len(items) == 1
+    assert items[0]["severity"] == "low"
+    assert items[0]["value"].startswith("PowerShell transcript: ")
+    assert "PowerShell_transcript.DEV01" in items[0]["value"]
+
+
+def test_mactime_keeps_transcript_timeline_events_low(monkeypatch):
+    # _run_mactime historically hardcodes medium for every _file_signal match;
+    # a low signal (transcript) must not be elevated by appearing in the timeline.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    wrapper = TSKWrapper()
+    # _run_mactime reads activity from column 2 and filepath from column 3.
+    csv = (
+        "Date,Size,Type,File Name,UID,GID\n"
+        "2023-01-26T12:00:00,42,macb,/Users/cbarton-a/Documents/20230126"
+        "/PowerShell_transcript.DEV01.AbCdEf12.20230126120000.txt,0,0\n"
+        "2023-01-26T12:01:00,42,macb,/Windows/Temp/evil.exe,0,0\n"
+    )
+    monkeypatch.setattr(wrapper, "run_command", lambda *a, **k: (csv, "", 0))
+    by_path = {}
+    for item in wrapper._run_mactime("nonempty"):
+        if "transcript" in item["value"].lower():
+            by_path["transcript"] = item
+        elif "evil.exe" in item["value"]:
+            by_path["exe"] = item
+    assert by_path["transcript"]["severity"] == "low"
+    assert by_path["exe"]["severity"] == "medium"
+
+
 def test_parse_cmdline_zero_args_stores_process_name():
     # Issue 3.4-r: a process with exactly PID + name and zero arguments must store
     # just the process name as `value`, not the raw "PID<tab>Process" row. The
@@ -1086,6 +1127,41 @@ def test_plaso_parse_csv_reads_l2tcsv_columns(tmp_path):
     # medium, not high: the keyword filter is a lead generator (7,734 mostly
     # benign keeps on the dev01 CSV) — it must not flood Key Findings.
     assert item["severity"] == "medium"
+
+
+def test_plaso_and_regripper_artifact_ids_stable_and_distinct(tmp_path):
+    # plaso/regripper minted ids with abs(hash())%99999 — per-process-salted, so
+    # ids changed every run, and only ~100k buckets, so distinct artifacts could
+    # collide onto one id and be silently dropped by the aggregator's
+    # dedup-by-artifact_id (the same defect dropped ~19k tsk items on dev01).
+    from src.wrappers.plaso_wrapper import PlasoWrapper
+    from src.wrappers.regripper_wrapper import RegRipperWrapper
+
+    header = ("date,time,timezone,MACB,source,sourcetype,type,user,host,"
+              "short,desc,version,filename,inode,notes,format,extra")
+    rows = [
+        ('01/27/2023,19:04:11,UTC,M...,REG,Run Key,Content Modification Time,'
+         '-,-,short,"[HKLM\\...\\Run] evil: [REG_SZ] C:\\Temp\\evil.exe",2,'
+         'NTFS:\\SOFTWARE,1,-,winreg,-'),
+        ('01/27/2023,19:04:11,UTC,M...,REG,Run Key,Content Modification Time,'
+         '-,-,short,"[HKLM\\...\\Run] evil2: [REG_SZ] C:\\Temp\\evil2.exe",2,'
+         'NTFS:\\SOFTWARE,1,-,winreg,-'),
+    ]
+    csv_path = tmp_path / "timeline.csv"
+    csv_path.write_text("\n".join([header] + rows) + "\n")
+    plaso_ids = [i["artifact_id"] for i in PlasoWrapper()._parse_csv(csv_path)]
+    assert plaso_ids == [i["artifact_id"] for i in PlasoWrapper()._parse_csv(csv_path)]
+    assert len(set(plaso_ids)) == len(plaso_ids) == 2
+
+    rip_output = "\n".join([
+        "run: C:\\Temp\\evil.exe",
+        "run: C:\\Temp\\evil2.exe",
+    ])
+    reg_ids = [i["artifact_id"]
+               for i in RegRipperWrapper()._parse_output(rip_output, "soft_run")]
+    assert reg_ids == [i["artifact_id"] for i in
+                       RegRipperWrapper()._parse_output(rip_output, "soft_run")]
+    assert len(set(reg_ids)) == len(reg_ids) == 2
 
 
 # ─────────────────────────────────────────────────────────────

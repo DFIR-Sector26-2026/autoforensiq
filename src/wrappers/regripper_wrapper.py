@@ -1,6 +1,6 @@
 import os
 import json
-from src.wrappers.base_wrapper import BaseWrapper
+from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
 
 def _resolve_regripper_path() -> str | None:
     candidate_paths = [
@@ -89,7 +89,7 @@ class RegRipperWrapper(BaseWrapper):
                 ]) else "medium"
 
                 items.append(self.make_evidence_item(
-                    artifact_id=f"reg_{plugin}_{abs(hash(line_stripped)) % 99999}",
+                    artifact_id=stable_artifact_id(f"reg_{plugin}", line_stripped),
                     evidence_type="registry_entry",
                     value=f"[{plugin}] {line_stripped}",
                     severity=severity,

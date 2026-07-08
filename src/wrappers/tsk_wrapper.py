@@ -64,6 +64,14 @@ def _file_signal(filepath: str):
         return "high", "Payload/encrypted file"
     if base.endswith(EXECUTABLE_EXTENSIONS) and _in_staging_dir(lower):
         return "medium", "Executable in staging directory"
+    # PowerShell transcripts (PowerShell_transcript.<HOST>.<id>.<ts>.txt) record
+    # what commands ran, but their mere existence is weak evidence — transcription
+    # is often enabled fleet-wide by GPO, so every legitimate user produces them.
+    # Deliberately LOW: this only makes them visible/correlatable (owner, PID,
+    # timestamp lift them if they tie to other findings); scoring by filename or
+    # "unusual location" would flood or overfit to one image (B-6/B-7, N5).
+    if base.startswith("powershell_transcript.") and base.endswith(".txt"):
+        return "low", "PowerShell transcript"
     return None
 
 
@@ -242,12 +250,16 @@ class TSKWrapper(BaseWrapper):
                 filepath  = parts[3].strip() if len(parts) > 3 else ""
                 activity  = parts[2].strip() if len(parts) > 2 else ""
 
-                if _file_signal(filepath):
+                signal = _file_signal(filepath)
+                if signal:
+                    # Timeline events for high/medium file signals stay medium
+                    # (historical behavior); a low signal (transcripts) must not
+                    # be elevated by appearing in the timeline.
                     items.append(self.make_evidence_item(
                         artifact_id=_path_id("timeline", filepath, timestamp),
                         evidence_type="timeline_event",
                         value=f"[{timestamp}] {activity} → {filepath}",
-                        severity="medium",
+                        severity="low" if signal[0] == "low" else "medium",
                         confidence=0.70,
                         timestamp=timestamp
                     ))

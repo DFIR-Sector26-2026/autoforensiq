@@ -25,7 +25,11 @@ function Section({ severity, items, sources }) {
 
       <div className="overflow-x-auto">
 
-        <table className="w-full text-sm">
+        {/* table-fixed + shared column widths: each severity section is its own
+            table, so auto layout would size columns per-section and the sections
+            wouldn't line up. Detail has no width — it takes the remainder and
+            wraps (break-all). */}
+        <table className="w-full text-sm table-fixed">
 
           <thead>
 
@@ -34,12 +38,12 @@ function Section({ severity, items, sources }) {
               text-slate-400
               border-b border-slate-700
             ">
-              <th className="py-2 pr-4 font-semibold">Severity</th>
-              <th className="py-2 pr-4 font-semibold">Type</th>
-              <th className="py-2 pr-4 font-semibold">Tool</th>
-              <th className="py-2 pr-4 font-semibold">Source File</th>
+              <th className="w-24 py-2 pr-4 font-semibold">Severity</th>
+              <th className="w-40 py-2 pr-4 font-semibold">Type</th>
+              <th className="w-28 py-2 pr-4 font-semibold">Tool</th>
+              <th className="w-44 py-2 pr-4 font-semibold">Source File</th>
               <th className="py-2 pr-4 font-semibold">Detail</th>
-              <th className="py-2 font-semibold">IOC</th>
+              <th className="w-44 py-2 font-semibold">IOC</th>
             </tr>
 
           </thead>
@@ -65,7 +69,7 @@ function Section({ severity, items, sources }) {
                   {humanize(e.source_tool)}
                 </td>
 
-                <td className="py-2 pr-4 font-mono text-xs text-slate-400 break-all">
+                <td className="py-2 pr-4 font-mono text-xs text-slate-400 whitespace-nowrap">
                   {sources[e.source_tool] || "—"}
                 </td>
 
