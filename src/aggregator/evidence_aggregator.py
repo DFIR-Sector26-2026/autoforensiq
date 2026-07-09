@@ -695,8 +695,7 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
             continue
         if signal.get("bytes_transferred", 0) < EXFIL_BYTES_THRESHOLD:
             continue
-        if signal.get("timestamp_dt") is None:
-            continue
+        # No timestamp gate: file-correlation checks it per pair; the network-only path needs none.
         network_events.append({"item": item, "signal": signal})
 
     findings = []
@@ -733,6 +732,35 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
             matching_file_events.append(file_event)
 
         if not matching_file_events:
+            # Network-only fallback (pcap-only cases have no file events): the flow must already be
+            # flagged (IOC tag or critical/high) — volume alone would fire on benign bulk uploads.
+            anchor = network_event["item"]
+            tags = anchor.get("ioc_match") or []
+            if tags or str(anchor.get("severity", "")).lower() in ("critical", "high"):
+                flagged_as = ", ".join(tags) if tags else f"{anchor.get('severity')} severity"
+                bytes_transferred = network_signal.get("bytes_transferred", 0)
+                findings.append(_make_finding(
+                    anchor=anchor,
+                    related_items=[],
+                    correlation_type="exfiltration",
+                    finding=(
+                        f"Large outbound transfer to {destination} "
+                        f"({bytes_transferred:,} bytes; flagged: {flagged_as})"
+                    ),
+                    what_confirmed_it=[
+                        "Large outbound traffic exceeded the exfiltration threshold",
+                        f"The flow was independently flagged ({flagged_as})",
+                        "No file-system evidence available to identify the transferred data",
+                    ],
+                    confidence=_correlation_confidence([anchor], base=0.62),
+                    extra={
+                        "file": "",
+                        "destination": destination,
+                        "timestamp": network_signal.get("timestamp", ""),
+                        "bytes_transferred": bytes_transferred,
+                        "match_type": "network_only",
+                    },
+                ))
             continue
 
         anchor = network_event["item"]

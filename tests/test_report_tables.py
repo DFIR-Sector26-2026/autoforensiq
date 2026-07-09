@@ -11,6 +11,7 @@ from src.report_generator.report_generator import (
     _build_ioc_report,
     _build_ml_only_section,
     _build_process_tree,
+    _evidence_techniques,
     _extract_iocs,
     _finding_sort_key,
     _indicators_cell,
@@ -688,3 +689,31 @@ def test_dashboard_summary_anomaly_breaks_medium_tie():
     shap = {"explanations": {"m1": {"is_anomaly": True, "summary": "unusual"}}}
     dash = _build_dashboard_summary(_ue(items), {"case_type": "malware"}, shap)
     assert dash["summary"]["overall_severity"] == "high"
+
+
+def test_evidence_techniques_map_flagged_stealer_stages():
+    # macOS case gap: stage=credentials / stage=wallets URLs justified T1555/T1657
+    # but the static case table couldn't know that. Flagged (critical/high) items
+    # now map with the item value as the basis; low-severity items never map.
+    items = [
+        {"value": "http://94.232.249.129/api/metrics/run?uid=1&stage=credentials",
+         "severity": "critical"},
+        {"value": "http://94.232.249.129/api/metrics/run?uid=1&stage=wallets",
+         "severity": "critical"},
+        {"value": "credential note in an unflagged item", "severity": "low"},
+    ]
+    rows = _evidence_techniques(items)
+    assert {tid for tid, _, _, _ in rows} == {"T1555", "T1657"}
+    basis = next(b for tid, _, _, b in rows if tid == "T1555")
+    assert "stage=credentials" in basis
+
+
+def test_dashboard_mitre_includes_evidence_derived_techniques():
+    items = [_item("critical", "u1", etype="http_request",
+                   value="http://x/api/metrics/run?stage=wallets")]
+    dash = _build_dashboard_summary(_ue(items), {"case_type": "data_exfiltration"}, {})
+    by_id = {row["id"]: row for row in dash["mitre"]}
+    assert "T1657" in by_id
+    assert "stage=wallets" in by_id["T1657"]["basis"]
+    # Static case-table techniques are kept alongside.
+    assert "T1041" in by_id

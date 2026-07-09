@@ -25,15 +25,26 @@ from src.gui.theme import (
 )
 from src.gui.widgets import ArtifactRow
 
-# Extension → artifact type (mirrors _map_evidence_files in autoforensiq.py)
+# Extension → artifact type (mirrors _map_evidence_files in autoforensiq.py). Also the single
+# source for the evidence-dialog filter groups below — add new extensions here, not there.
 _EXT_MAP: dict[str, str] = {
     ".dmp": "memory_dump", ".mem": "memory_dump", ".raw": "memory_dump",
     ".pcap": "pcap", ".pcapng": "pcap",
-    ".img": "disk_image", ".dd": "disk_image", ".e01": "disk_image",
+    ".img": "disk_image", ".dd": "disk_image", ".e01": "disk_image", ".dmg": "disk_image",
     ".dat": "registry_hive", ".hiv": "registry_hive",
     ".eml": "email_archive", ".msg": "email_archive",
     ".log": "log_files", ".evtx": "log_files",
 }
+
+# Artifact type → evidence-dialog filter label, in display order.
+_TYPE_LABELS = [
+    ("memory_dump",   "Memory dumps"),
+    ("pcap",          "PCAP"),
+    ("disk_image",    "Disk images"),
+    ("registry_hive", "Registry hives"),
+    ("log_files",     "Log files"),
+    ("email_archive", "Email"),
+]
 
 
 def _detect_type(path: str) -> str:
@@ -42,6 +53,10 @@ def _detect_type(path: str) -> str:
     t = _EXT_MAP.get(p.suffix.lower())
     if t:
         return t
+    # .csv is conditional, not in _EXT_MAP: the CLI routes it to the email analyzer only when the
+    # name signals mail (D4), so only those badge as email — a bare data.csv stays unknown.
+    if p.suffix.lower() == ".csv" and any(h in low for h in ("email", "mail", "inbox", "phish", "spam")):
+        return "email_archive"
     if "memory" in low:
         return "memory_dump"
     if any(k in low for k in ("ntuser", "system", "software")):
@@ -244,24 +259,33 @@ class AutoForensiqGUI(ctk.CTk):
         self._priority_hint.pack_forget()
 
     def _add_evidence_files(self) -> None:
+        # Multi-select dialog (Ctrl/Shift+click selects several files at once). Tk patterns are
+        # case-sensitive on Linux, so every extension is offered in both cases — dev01-c-drive.E01
+        # and a Windows MEMORY.DMP were invisible under a lowercase-only filter.
+        groups = {
+            label: [ext.lstrip(".") for ext, t in _EXT_MAP.items() if t == atype]
+            for atype, label in _TYPE_LABELS
+        }
+        # Conditional in _detect_type, so not in _EXT_MAP — but still selectable here.
+        groups["Email"].append("csv")
+
+        def both_cases(exts: list[str]) -> str:
+            return " ".join(f"*.{e} *.{e.upper()}" for e in exts)
+
         paths = filedialog.askopenfilenames(
             title="Select evidence files",
             filetypes=[
-                ("Forensic artifacts",
-                 "*.dmp *.mem *.raw *.pcap *.pcapng *.img *.dd *.e01 "
-                 "*.dat *.hiv *.log *.evtx *.eml *.msg"),
-                ("Memory dumps",   "*.dmp *.mem *.raw"),
-                ("PCAP",           "*.pcap *.pcapng"),
-                ("Disk images",    "*.img *.dd *.e01"),
-                ("Registry hives", "*.dat *.hiv"),
-                ("Log files",      "*.log *.evtx"),
-                ("Email",          "*.eml *.msg"),
-                ("All files",      "*.*"),
+                ("Forensic artifacts", both_cases([e for exts in groups.values() for e in exts])),
+                *[(label, both_cases(exts)) for label, exts in groups.items()],
+                ("All files", "*.*"),
             ],
             initialdir=str(ROOT_DIR.parent),
         )
+        existing = set(self.get_artifact_order())
         for p in paths:
-            self._add_artifact_row(p)
+            if p not in existing:
+                self._add_artifact_row(p)
+                existing.add(p)
 
     def _add_artifact_row(self, filepath: str) -> None:
         self._empty_label.pack_forget()

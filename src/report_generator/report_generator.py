@@ -491,6 +491,42 @@ MITRE_BY_CASE = {
     ],
 }
 
+# Keyword → MITRE technique, matched only against already-flagged (critical/high) item values —
+# annotates existing findings, never creates one (e.g. an infostealer's stage=credentials URL).
+EVIDENCE_TECHNIQUES = [
+    ("credential", ("T1555", "Credentials from Password Stores", "Credential Access")),
+    ("wallet", ("T1657", "Financial Theft", "Impact")),
+]
+
+
+def _evidence_techniques(items):
+    """[(tid, tname, tactic, basis_value)] justified by flagged evidence; first hit wins per tid."""
+    found = {}
+    for e in items:
+        if str(e.get("severity", "")).lower() not in ("critical", "high"):
+            continue
+        value = str(e.get("value", ""))
+        lowered = value.lower()
+        for keyword, (tid, tname, tactic) in EVIDENCE_TECHNIQUES:
+            if keyword in lowered and tid not in found:
+                found[tid] = (tid, tname, tactic, _truncate(value, 120))
+    return list(found.values())
+
+
+def _mitre_techniques(case_type, all_items, n_anomalies):
+    """Merged MITRE rows [(tid, tname, tactic, basis)]: the static per-case table, with
+    evidence-derived rows overriding the generic basis (or appending). Single source for the
+    report table and dashboard.json so the two never disagree."""
+    basis = "Anomaly detected" if n_anomalies > 0 else "Inferred from case type"
+    techniques = {
+        tid: (tname, tactic, basis)
+        for tid, tname, tactic in MITRE_BY_CASE.get(case_type, MITRE_BY_CASE["unknown"])
+    }
+    for tid, tname, tactic, evidence_basis in _evidence_techniques(all_items):
+        techniques[tid] = (tname, tactic, f"Flagged evidence: {evidence_basis}")
+    return [(tid, tname, tactic, row_basis) for tid, (tname, tactic, row_basis) in techniques.items()]
+
+
 RECOMMENDATIONS_BY_CASE = {
     "ransomware": [
         "Immediately isolate affected systems from the network to prevent further encryption spread.",
@@ -1463,16 +1499,14 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     if recon_notes:
         classification += "\n\n" + "\n".join(f"> {note}" for note in recon_notes)
 
-    # MITRE ATT&CK
-    techniques = MITRE_BY_CASE.get(case_type, MITRE_BY_CASE["unknown"])
-    basis      = "Anomaly detected" if n_anomalies > 0 else "Inferred from case type"
+    # MITRE ATT&CK — static per-case techniques, plus/overridden-by rows justified by specific flagged evidence
     mitre_rows = [
         "| Technique ID | Technique Name | Tactic | Evidence Basis |",
         "|--------------|----------------|--------|----------------|",
     ]
-    for tid, tname, tactic in techniques:
+    for tid, tname, tactic, row_basis in _mitre_techniques(case_type, all_items, n_anomalies):
         mitre_rows.append(
-            f"| {_md_cell(tid)} | {_md_cell(tname)} | {_md_cell(tactic)} | {_md_cell(basis)} |"
+            f"| {_md_cell(tid)} | {_md_cell(tname)} | {_md_cell(tactic)} | {_md_cell(row_basis)} |"
         )
     mitre_section = "## MITRE ATT&CK Mapping\n\n" + "\n".join(mitre_rows)
 
@@ -1607,10 +1641,9 @@ def _build_dashboard_summary(unified_evidence, case_context, shap_explanations):
     overall_sev = "high" if (rule_sev == "medium" and n_anomalies >= 1) else rule_sev
 
     case_type = case_context.get("case_type", "unknown")
-    basis     = "Anomaly detected" if n_anomalies > 0 else "Inferred from case type"
     mitre = [
-        {"id": tid, "name": tname, "tactic": tactic, "basis": basis}
-        for tid, tname, tactic in MITRE_BY_CASE.get(case_type, MITRE_BY_CASE["unknown"])
+        {"id": tid, "name": tname, "tactic": tactic, "basis": row_basis}
+        for tid, tname, tactic, row_basis in _mitre_techniques(case_type, all_items, n_anomalies)
     ]
 
     return {

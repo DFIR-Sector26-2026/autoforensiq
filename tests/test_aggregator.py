@@ -654,6 +654,39 @@ def test_exfiltration_filename_match_is_strong():
     assert any("file name matched" in c for c in findings[0]["what_confirmed_it"])
 
 
+def test_exfiltration_network_only_requires_flagged_flow():
+    """A pcap-only case has no file events, so a large outbound transfer could never
+    produce an exfiltration finding (macOS case: the 11.6 MB flow stayed in the generic
+    network bucket). A flagged large flow now yields a network-only finding; an
+    unflagged one still doesn't — volume alone is not evidence (cloud sync/backups
+    exceed the threshold too)."""
+    from src.aggregator.evidence_aggregator import (
+        enrich_evidence_items, _build_exfiltration_findings,
+    )
+    items = [
+        {"artifact_id": "net1", "source_tool": "tshark",
+         "evidence_type": "network_connection",
+         "value": "TCP 10.5.11.101 -> 165.245.215.18:80 (12139599 bytes, 8556 packets)",
+         "severity": "high", "confidence": 0.8,
+         "ioc_match": ["bad_host", "data_exfiltration"],
+         "timestamp": "", "linked_artifacts": []},
+        {"artifact_id": "net2", "source_tool": "tshark",
+         "evidence_type": "network_connection",
+         "value": "TCP 10.5.11.101 -> 34.120.0.9:443 (52000000 bytes, 40000 packets)",
+         "severity": "low", "confidence": 0.5,
+         "timestamp": "", "linked_artifacts": []},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "c"})
+    findings = _build_exfiltration_findings(enriched, signals)
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["match_type"] == "network_only"
+    assert "165.245.215.18" in f["destination"]
+    assert f["bytes_transferred"] == 12139599
+    assert any("No file-system evidence" in c for c in f["what_confirmed_it"])
+    assert any("bad_host" in c for c in f["what_confirmed_it"])
+
+
 def test_run_bulk_aggregation_writes_summary():
     """Test that the CLI bulk helper aggregates multiple machine bundles."""
     with tempfile.TemporaryDirectory() as tmpdir:

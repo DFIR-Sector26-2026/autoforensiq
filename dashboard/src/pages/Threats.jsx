@@ -59,23 +59,30 @@ function Section({ severity, items, sources }) {
                   {e.severity}
                 </td>
 
-                <td className="py-2 pr-4 text-slate-300 whitespace-nowrap">
+                {/* Every content cell truncates (clip + ellipsis inside its fixed column) */}
+                <td className="py-2 pr-4 text-slate-300 truncate" title={humanize(e.evidence_type)}>
                   {humanize(e.evidence_type)}
                 </td>
 
-                <td className="py-2 pr-4 text-slate-400 whitespace-nowrap">
+                <td className="py-2 pr-4 text-slate-400 truncate" title={humanize(e.source_tool)}>
                   {humanize(e.source_tool)}
                 </td>
 
-                <td className="py-2 pr-4 font-mono text-xs text-slate-400 whitespace-nowrap">
+                <td
+                  className="py-2 pr-4 font-mono text-xs text-slate-400 truncate"
+                  title={sources[e.source_tool] || ""}
+                >
                   {sources[e.source_tool] || "—"}
                 </td>
 
-                <td className="py-2 pr-4 font-mono text-xs text-slate-200 break-all">
+                <td className="py-2 pr-4 font-mono text-xs text-slate-200 truncate" title={e.value}>
                   {e.value}
                 </td>
 
-                <td className="py-2 text-xs text-orange-300 break-all">
+                <td
+                  className="py-2 text-xs text-orange-300 truncate"
+                  title={(e.ioc_match || []).map(humanize).join(", ")}
+                >
                   {(e.ioc_match || []).map(humanize).join(", ")}
                 </td>
 
