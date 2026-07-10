@@ -514,9 +514,8 @@ def _evidence_techniques(items):
 
 
 def _mitre_techniques(case_type, all_items, n_anomalies):
-    """Merged MITRE rows [(tid, tname, tactic, basis)]: the static per-case table, with
-    evidence-derived rows overriding the generic basis (or appending). Single source for the
-    report table and dashboard.json so the two never disagree."""
+    """Merged MITRE rows [(tid, tname, tactic, basis)]: static per-case table + evidence-derived
+    rows. Single source for the report table and dashboard.json so the two never disagree."""
     basis = "Anomaly detected" if n_anomalies > 0 else "Inferred from case type"
     techniques = {
         tid: (tname, tactic, basis)
@@ -1499,7 +1498,7 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     if recon_notes:
         classification += "\n\n" + "\n".join(f"> {note}" for note in recon_notes)
 
-    # MITRE ATT&CK — static per-case techniques, plus/overridden-by rows justified by specific flagged evidence
+    # MITRE ATT&CK — static per-case techniques plus rows justified by specific flagged evidence.
     mitre_rows = [
         "| Technique ID | Technique Name | Tactic | Evidence Basis |",
         "|--------------|----------------|--------|----------------|",

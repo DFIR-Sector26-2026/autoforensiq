@@ -259,9 +259,8 @@ class AutoForensiqGUI(ctk.CTk):
         self._priority_hint.pack_forget()
 
     def _add_evidence_files(self) -> None:
-        # Multi-select dialog (Ctrl/Shift+click selects several files at once). Tk patterns are
-        # case-sensitive on Linux, so every extension is offered in both cases — dev01-c-drive.E01
-        # and a Windows MEMORY.DMP were invisible under a lowercase-only filter.
+        # Multi-select dialog (Ctrl/Shift+click). Tk patterns are case-sensitive on Linux, so each
+        # extension is offered in both cases (dev01-c-drive.E01 / MEMORY.DMP were invisible before).
         groups = {
             label: [ext.lstrip(".") for ext, t in _EXT_MAP.items() if t == atype]
             for atype, label in _TYPE_LABELS
