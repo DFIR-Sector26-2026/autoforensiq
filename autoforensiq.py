@@ -110,18 +110,20 @@ def run_tool_selector(case_context: dict):
 
     except Exception as exc:
 
-        print(f"  [WARN] Tool selector failed ({exc})")
+        # DFIR-safe degradation: over-collect (run every wrapper) rather than risk missing
+        # evidence; the plan records the fallback so the audit trail shows DTSA never ran.
+        from src.orchestrator import WRAPPER_MAP
+
+        print(f"  [WARN] Tool selector failed ({exc}) — "
+              f"falling back to running ALL {len(WRAPPER_MAP)} tools")
 
         stub_plan = {
             "tools": [
-                {"name": "volatility3", "order": 1},
-                {"name": "tshark", "order": 2},
-                {"name": "tsk_fls", "order": 3},
-                {"name": "regripper", "order": 4},
-                {"name": "plaso", "order": 5},
-                {"name": "email", "order": 6},
-                {"name": "browser", "order": 7}
-            ]
+                {"name": name, "order": i}
+                for i, name in enumerate(WRAPPER_MAP, start=1)
+            ],
+            "fallback": True,
+            "fallback_reason": str(exc),
         }
 
         with open(out_path, "w") as f:

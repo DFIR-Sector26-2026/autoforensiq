@@ -7,7 +7,8 @@ import tempfile
 from pathlib import Path
 
 from .base_wrapper import BaseWrapper, stable_artifact_id
-from src.data.threat_intel import c2_port_severity, RANSOM_EXTENSIONS, EXECUTABLE_EXTENSIONS, SEVERITY_ORDER
+from src.data.threat_intel import (
+    c2_port_severity, RANSOM_EXTENSIONS, EXECUTABLE_EXTENSIONS, SEVERITY_ORDER, is_benign_domain)
 
 PLUGINS = [
     "windows.pslist",
@@ -122,54 +123,6 @@ SUSPICIOUS_RELATIONSHIPS = {
     ("wscript.exe", "powershell.exe"),
     ("explorer.exe", "powershell.exe"),
 }
-
-# Benign infrastructure dropped at source (D3): a dump carries ~22k OS/CDN/CA hostnames that flooded
-# the evidence set and P5. Exact-or-subdomain match only (lookalike-safe); the reputation layer
-# still runs on whatever survives.
-BENIGN_DOMAIN_SUFFIXES = {
-    # Microsoft / Windows OS + telemetry + update + cloud
-    "microsoft.com", "windows.com", "windowsupdate.com", "msftncsi.com",
-    "msftconnecttest.com", "microsoftonline.com", "live.com", "msn.com",
-    "office.com", "office365.com", "outlook.com", "bing.com", "skype.com",
-    "xboxlive.com", "azure.com", "azureedge.net", "msedge.net", "windows.net",
-    "msocdn.com", "s-microsoft.com", "microsoft.net",
-    # Mozilla / Firefox
-    "mozilla.org", "mozilla.com", "mozilla.net", "firefox.com",
-    # Google
-    "google.com", "googleapis.com", "gstatic.com", "googleusercontent.com",
-    "google-analytics.com", "doubleclick.net", "gvt1.com", "gvt2.com",
-    "youtube.com", "ytimg.com", "googlesyndication.com",
-    # Apple
-    "apple.com", "icloud.com", "mzstatic.com",
-    # CDNs
-    "akamai.net", "akamaiedge.net", "akamaihd.net", "edgekey.net",
-    "edgesuite.net", "llnwd.net", "cloudfront.net", "cloudflare.com",
-    "fastly.net", "fbcdn.net", "amazonaws.com",
-    # Certificate authorities / OCSP / CRL
-    "digicert.com", "verisign.com", "globalsign.com", "symantec.com",
-    "entrust.net", "godaddy.com", "sectigo.com", "letsencrypt.org",
-    "comodoca.com", "usertrust.com", "thawte.com", "geotrust.com",
-    # Linux distros (the bundled Ubuntu / casper images)
-    "ubuntu.com", "debian.org", "canonical.com", "archlinux.org",
-    "launchpad.net", "kernel.org",
-    # Standards / schema hosts that litter binaries
-    "w3.org", "oasis-open.org", "ietf.org", "iana.org",
-    # Common vendor hosts
-    "adobe.com", "intel.com", "nvidia.com", "amd.com", "dell.com",
-    "hp.com", "lenovo.com", "java.com", "oracle.com",
-}
-
-
-def _is_benign_domain(host: str) -> bool:
-    """True when `host` is benign infrastructure (issue D3): it equals one of
-    BENIGN_DOMAIN_SUFFIXES or is a sub-domain of one. Host-aware, so a lookalike like
-    "microsoft.com.evil.tld" is NOT treated as benign."""
-    host = host.lower().rstrip(".")
-    for base in BENIGN_DOMAIN_SUFFIXES:
-        if host == base or host.endswith("." + base):
-            return True
-    return False
-
 
 # URL/network-context anchors — THE GATE for string-swept domains (D3): only domains sitting in URL
 # grammar are emitted; bare tokens are noise (a real C2 still arrives via its actual connection/DNS
@@ -1753,7 +1706,7 @@ class VolatilityWrapper(BaseWrapper):
                 continue
 
             # Benign OS/CDN/CA infrastructure dominates a dump — drop.
-            if _is_benign_domain(value):
+            if is_benign_domain(value):
                 continue
 
             # THE GATE: only domains in real URL/network grammar survive.

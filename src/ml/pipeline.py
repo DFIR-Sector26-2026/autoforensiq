@@ -158,33 +158,13 @@ def run_ml_pipeline(
 
     log.info("[P5] Loading evidence from %s", input_path)
     unified_evidence = json.loads(Path(input_path).read_text())
-    evidence_records = unified_evidence
-
-    # unified_evidence.json may be wrapped in a top-level object:
-    #   { "evidence_items": [...] }  OR just a plain list
-    if isinstance(unified_evidence, dict):
-        evidence_records = (
-            unified_evidence.get("evidence_items")
-            or unified_evidence.get("items")
-            or []
-        )
+    evidence_records = unified_evidence.get("evidence_items", [])
 
     machine_index = _build_machine_index(evidence_records)
-    findings_lookup = _build_finding_lookup(
-        unified_evidence.get("findings", [])
-        if isinstance(unified_evidence, dict)
-        else []
-    )
+    findings_lookup = _build_finding_lookup(unified_evidence.get("findings", []))
     exfiltration_lookup = _build_finding_lookup(
-        unified_evidence.get("exfiltration_findings", [])
-        if isinstance(unified_evidence, dict)
-        else []
-    )
-    bulk_summary = (
-        unified_evidence.get("bulk_summary", {})
-        if isinstance(unified_evidence, dict)
-        else {}
-    )
+        unified_evidence.get("exfiltration_findings", []))
+    bulk_summary = unified_evidence.get("bulk_summary", {})
 
     # ── 2. Group evidence → train scoped models ───────────────────────────────
     baseline_groups = _group_records(baseline_records)

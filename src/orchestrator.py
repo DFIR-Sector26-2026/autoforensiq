@@ -201,26 +201,9 @@ def run_tools(execution_plan: dict, evidence_files: dict):
         f"  [SAVED] {len(ioc_items)} IOC items → output/raw/ioc_output.json"
     )
 
-    # SAVE UNIFIED EVIDENCE
-
-    os.makedirs(
-        "output",
-        exist_ok=True
-    )
-
-    with open(
-        "output/unified_evidence.json",
-        "w"
-    ) as f:
-
-        json.dump(
-            merged_items,
-            f,
-            indent=2
-        )
-
+    # unified_evidence.json is written only by the P4 aggregator (single owner, dict shape)
     print(
-        f"\n[MERGE] {len(merged_items)} total evidence items saved"
+        f"\n[MERGE] {len(merged_items)} total evidence items collected"
     )
 
     return all_raw_outputs

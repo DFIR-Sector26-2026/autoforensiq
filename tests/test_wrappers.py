@@ -972,11 +972,11 @@ def test_extract_strings_onion_kept_as_low_indicator():
 
 def test_is_benign_domain_is_host_aware():
     # A lookalike subdomain ("microsoft.com.evil.ru") must NOT be whitelisted.
-    from src.wrappers.volatility_wrapper import _is_benign_domain
-    assert _is_benign_domain("www.microsoft.com") is True
-    assert _is_benign_domain("microsoft.com") is True
-    assert _is_benign_domain("microsoft.com.evil.ru") is False
-    assert _is_benign_domain("evil-c2-panel.xyz") is False
+    from src.data.threat_intel import is_benign_domain
+    assert is_benign_domain("www.microsoft.com") is True
+    assert is_benign_domain("microsoft.com") is True
+    assert is_benign_domain("microsoft.com.evil.ru") is False
+    assert is_benign_domain("evil-c2-panel.xyz") is False
 
 
 def test_extract_strings_registry_key_stops_at_pipe():

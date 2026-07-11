@@ -42,6 +42,54 @@ DNS_ALLOWLIST = (
 DNS_ALLOWLIST_SUFFIXES = (".local", ".arpa", ".lan", ".internal", ".home")
 
 
+# Benign infrastructure dropped at source by the volatility string sweep (D3): a dump carries ~22k
+# OS/CDN/CA hostnames that flooded the evidence set and P5. Exact-or-subdomain match only
+# (lookalike-safe, unlike DNS_ALLOWLIST's substring rule above — D7); reputation still runs on
+# whatever survives.
+BENIGN_DOMAIN_SUFFIXES = {
+    # Microsoft / Windows OS + telemetry + update + cloud
+    "microsoft.com", "windows.com", "windowsupdate.com", "msftncsi.com",
+    "msftconnecttest.com", "microsoftonline.com", "live.com", "msn.com",
+    "office.com", "office365.com", "outlook.com", "bing.com", "skype.com",
+    "xboxlive.com", "azure.com", "azureedge.net", "msedge.net", "windows.net",
+    "msocdn.com", "s-microsoft.com", "microsoft.net",
+    # Mozilla / Firefox
+    "mozilla.org", "mozilla.com", "mozilla.net", "firefox.com",
+    # Google
+    "google.com", "googleapis.com", "gstatic.com", "googleusercontent.com",
+    "google-analytics.com", "doubleclick.net", "gvt1.com", "gvt2.com",
+    "youtube.com", "ytimg.com", "googlesyndication.com",
+    # Apple
+    "apple.com", "icloud.com", "mzstatic.com",
+    # CDNs
+    "akamai.net", "akamaiedge.net", "akamaihd.net", "edgekey.net",
+    "edgesuite.net", "llnwd.net", "cloudfront.net", "cloudflare.com",
+    "fastly.net", "fbcdn.net", "amazonaws.com",
+    # Certificate authorities / OCSP / CRL
+    "digicert.com", "verisign.com", "globalsign.com", "symantec.com",
+    "entrust.net", "godaddy.com", "sectigo.com", "letsencrypt.org",
+    "comodoca.com", "usertrust.com", "thawte.com", "geotrust.com",
+    # Linux distros (the bundled Ubuntu / casper images)
+    "ubuntu.com", "debian.org", "canonical.com", "archlinux.org",
+    "launchpad.net", "kernel.org",
+    # Standards / schema hosts that litter binaries
+    "w3.org", "oasis-open.org", "ietf.org", "iana.org",
+    # Common vendor hosts
+    "adobe.com", "intel.com", "nvidia.com", "amd.com", "dell.com",
+    "hp.com", "lenovo.com", "java.com", "oracle.com",
+}
+
+
+def is_benign_domain(host: str) -> bool:
+    """True when `host` equals one of BENIGN_DOMAIN_SUFFIXES or is a sub-domain of one. Host-aware,
+    so a lookalike like "microsoft.com.evil.tld" is NOT treated as benign."""
+    host = host.lower().rstrip(".")
+    for base in BENIGN_DOMAIN_SUFFIXES:
+        if host == base or host.endswith("." + base):
+            return True
+    return False
+
+
 # Ransomware / encrypted-payload extensions — a strong signal anywhere. One list shared by tsk_fls
 # and volatility filescan; tuple so str.endswith() works.
 RANSOM_EXTENSIONS = (
