@@ -13,24 +13,14 @@ from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
 from src.ioc.ioc_engine import extract_iocs
 
 
-# WRAPPER MAP
-
 WRAPPER_MAP = {
-
     "volatility3": VolatilityWrapper,
-
     "memprocfs": MemProcFSWrapper,
-
     "tshark": TsharkWrapper,
-
     "tsk_fls": TSKWrapper,
-
     "regripper": RegRipperWrapper,
-
     "plaso": PlasoWrapper,
-
     "email": EmailWrapper,
-
     "browser": BrowserWrapper,
 }
 
@@ -44,167 +34,73 @@ TOOL_EVIDENCE_MAP = {
 }
 
 
-# MAIN ORCHESTRATOR
-
 def run_tools(execution_plan: dict, evidence_files: dict):
 
-    tools = sorted(
-        execution_plan["tools"],
-        key=lambda t: t["order"]
-    )
-
+    tools = sorted(execution_plan["tools"], key=lambda t: t["order"])
     all_raw_outputs = {}
-
     merged_items = []
 
-    # EXECUTE TOOLS
-
     for tool_spec in tools:
-
         name = tool_spec["name"]
 
         print(f"\n{'=' * 50}")
         print(f"  Running: {name}")
         print(f"{'=' * 50}")
 
-        # UNKNOWN TOOL
-
         if name not in WRAPPER_MAP:
-
             print(f"  [SKIP] No wrapper found for: {name}")
-
             continue
 
         wrapper = WRAPPER_MAP[name]()
 
         # Each wrapper declares the evidence key it consumes (D2) — one lookup instead of a per-tool
-        # if/elif ladder.
+        # if/elif ladder. One evidence type may carry several artifacts, so normalise to a list and
+        # run the tool on each.
         evidence_path = evidence_files.get(wrapper.consumes)
 
-        # VALIDATE EVIDENCE PATH(S) — one evidence type may carry several artifacts, so normalise to
-        # a list and run the tool on each.
-
         if not evidence_path:
-
-            print(
-                f"  [SKIP] No evidence file provided for {name}"
-            )
-
+            print(f"  [SKIP] No evidence file provided for {name}")
             all_raw_outputs[name] = []
-
             continue
 
-        evidence_paths = (
-            evidence_path
-            if isinstance(evidence_path, list)
-            else [evidence_path]
-        )
-
-        # EXECUTE TOOL (once per supplied artifact)
+        evidence_paths = evidence_path if isinstance(evidence_path, list) else [evidence_path]
 
         items = []
-
         for path in evidence_paths:
-
             if not os.path.exists(path):
-
-                print(
-                    f"  [SKIP] Evidence path does not exist: {path}"
-                )
-
+                print(f"  [SKIP] Evidence path does not exist: {path}")
                 continue
-
             try:
-
                 out = wrapper.run(path)
-
                 if out:
-
                     items.extend(out)
-
             except Exception as e:
-
-                print(
-                    f"  [ERROR] {name} failed on {path}: {e}"
-                )
+                print(f"  [ERROR] {name} failed on {path}: {e}")
 
         all_raw_outputs[name] = items
-
         merged_items.extend(items)
 
-        # SAVE RAW TOOL OUTPUT (combined across artifacts)
-
-        os.makedirs(
-            "output/raw",
-            exist_ok=True
-        )
-
-        out_path = (
-            f"output/raw/{name}_output.json"
-        )
-
+        # save raw tool output (combined across artifacts)
+        os.makedirs("output/raw", exist_ok=True)
+        out_path = f"output/raw/{name}_output.json"
         with open(out_path, "w") as f:
-
-            json.dump(
-                {
-                    "tool": name,
-                    "items": items
-                },
-                f,
-                indent=2
-            )
-
-        print(
-            f"  [SAVED] {len(items)} items → {out_path}"
-        )
-
-    # IOC EXTRACTION
+            json.dump({"tool": name, "items": items}, f, indent=2)
+        print(f"  [SAVED] {len(items)} items → {out_path}")
 
     print(f"\n{'=' * 50}")
     print("  IOC EXTRACTION")
     print(f"{'=' * 50}")
 
-    ioc_items = extract_iocs(
-        merged_items
-    )
+    ioc_items = extract_iocs(merged_items)
+    print(f"  [IOC] Extracted {len(ioc_items)} IOC items")
+    merged_items.extend(ioc_items)
 
-    print(
-        f"  [IOC] Extracted {len(ioc_items)} IOC items"
-    )
-
-    merged_items.extend(
-        ioc_items
-    )
-
-    # SAVE IOC RAW OUTPUT
-
-    os.makedirs(
-        "output/raw",
-        exist_ok=True
-    )
-
-    with open(
-        "output/raw/ioc_output.json",
-        "w"
-    ) as f:
-
-        json.dump(
-            {
-                "tool": "ioc_engine",
-                "items": ioc_items
-            },
-            f,
-            indent=2
-        )
-
-    print(
-        f"  [SAVED] {len(ioc_items)} IOC items → output/raw/ioc_output.json"
-    )
+    os.makedirs("output/raw", exist_ok=True)
+    with open("output/raw/ioc_output.json", "w") as f:
+        json.dump({"tool": "ioc_engine", "items": ioc_items}, f, indent=2)
+    print(f"  [SAVED] {len(ioc_items)} IOC items → output/raw/ioc_output.json")
 
     # unified_evidence.json is written only by the P4 aggregator (single owner, dict shape)
-    print(
-        f"\n[MERGE] {len(merged_items)} total evidence items collected"
-    )
+    print(f"\n[MERGE] {len(merged_items)} total evidence items collected")
 
     return all_raw_outputs
-
