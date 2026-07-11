@@ -142,7 +142,7 @@ def _format_percent(value):
 
 def _format_top_factors(factors):
     if not factors:
-        return "_No SHAP factors recorded._"
+        return "_No contributing factors recorded._"
 
     lines = []
     for factor in factors[:5]:
@@ -150,7 +150,7 @@ def _format_top_factors(factors):
             "- "
             f"{factor.get('feature', 'unknown')}: "
             f"{factor.get('direction', 'unknown impact')} "
-            f"(SHAP {_format_score(factor.get('shap_value'))}) — "
+            f"(impact score {_format_score(factor.get('shap_value'))}) — "
             f"{factor.get('meaning', 'No explanation available.')}"
         )
 
@@ -176,7 +176,7 @@ def _format_baseline_comparison(comparisons):
 
 def _format_correlation_context(correlations):
     if not correlations:
-        return "_No P4 correlation context recorded._"
+        return "_No cross-evidence correlation recorded._"
 
     lines = []
     for item in correlations[:5]:
@@ -211,7 +211,7 @@ def _build_explainability_section(shap_explanations, max_items=8):
     ]
 
     if not items:
-        return "_No anomalous artifacts were available for XAI analysis._"
+        return "_No anomalous artifacts to explain._"
 
     sections = []
 
@@ -248,7 +248,7 @@ def _build_explainability_section(shap_explanations, max_items=8):
                     exp.get("baseline_comparison", [])
                 ),
                 "",
-                "**P4 Correlation Context**",
+                "**Cross-Evidence Correlation**",
                 "",
                 _format_correlation_context(
                     exp.get("correlation_context", [])
@@ -456,7 +456,7 @@ MITRE_BY_CASE = {
         ("T1547", "Boot/Logon Autostart Execution", "Persistence"),
         ("T1083", "File and Directory Discovery", "Discovery"),
     ],
-    "malware": [
+    "malware_infection": [
         ("T1055", "Process Injection", "Defense Evasion"),
         ("T1059", "Command and Scripting Interpreter", "Execution"),
         ("T1547", "Boot/Logon Autostart Execution", "Persistence"),
@@ -473,7 +473,7 @@ MITRE_BY_CASE = {
         ("T1213", "Data from Information Repositories", "Collection"),
         ("T1048", "Exfiltration Over Alternative Protocol", "Exfiltration"),
     ],
-    "network_intrusion": [
+    "apt_intrusion": [
         ("T1190", "Exploit Public-Facing Application", "Initial Access"),
         ("T1021", "Remote Services", "Lateral Movement"),
         ("T1071", "Application Layer Protocol", "C2"),
@@ -534,7 +534,7 @@ RECOMMENDATIONS_BY_CASE = {
         "Restore systems from verified clean backups only after confirming backup integrity.",
         "Engage law enforcement and notify relevant regulatory bodies as required.",
     ],
-    "malware": [
+    "malware_infection": [
         "Isolate affected hosts and block identified C2 IP addresses and domains at the perimeter.",
         "Run a full AV/EDR scan with updated signatures on all potentially exposed systems.",
         "Review and harden PowerShell and script execution policies (constrained language mode).",
@@ -555,7 +555,7 @@ RECOMMENDATIONS_BY_CASE = {
         "Audit access rights across all shared repositories and sensitive data stores.",
         "Implement User and Entity Behaviour Analytics (UEBA) for ongoing behavioural monitoring.",
     ],
-    "network_intrusion": [
+    "apt_intrusion": [
         "Patch all externally-facing services and audit for additional exploitation attempts.",
         "Rotate all service account and privileged credentials on affected systems immediately.",
         "Review and tighten firewall rules - remove any unnecessary port exposures.",
@@ -827,6 +827,7 @@ def _extract_iocs(evidence_items, severity_lookup=None):
                 "matches": set(),
                 "tools": set(),
                 "artifact_ids": set(),
+                "ids_by_tool": {},
             }
             records[key] = rec
         # An indicator inherits the highest severity of any item it appeared in.
@@ -839,11 +840,13 @@ def _extract_iocs(evidence_items, severity_lookup=None):
         for m in (item.get("ioc_match") or []):
             rec["matches"].add(m)
         # Track every contributing tool + artifact so the detailed IOC report can resolve source
-        # files and the per-indicator XAI explanation.
+        # files, per-tool artifact-id pointers, and the per-indicator XAI explanation.
         if item.get("source_tool"):
             rec["tools"].add(item["source_tool"])
         if item.get("artifact_id"):
             rec["artifact_ids"].add(item["artifact_id"])
+            if item.get("source_tool"):
+                rec["ids_by_tool"].setdefault(item["source_tool"], set()).add(item["artifact_id"])
 
     for item in evidence_items:
         if not isinstance(item, dict):
@@ -899,6 +902,8 @@ def _ioc_xai_note(rec, anomaly_lookup, limit=100):
 # string-sweep mass folds into a collapsed sample (counts + tiered sample + pointer to the JSON —
 # never dropped).
 _IOC_SURFACE_RANK = _SEVERITY_RANK["medium"]  # medium-or-higher earns a main-table row
+# Artifact-id pointers shown per tool in the Sources cell; the rest are counted (+N more).
+_IOC_IDS_SHOWN = 3
 # A domain whose wrapper confidence reached the URL-context (anchored) tier.
 _ANCHORED_CONF = 0.45
 _FOLDED_SAMPLE_CAP = 50
@@ -958,8 +963,8 @@ def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None,
 
     if surfaced:
         rows = [
-            "| Indicator | Type | Severity | IOC Match | Context(s) | Source (tool · file) | Why (XAI) |",
-            "|-----------|------|----------|-----------|------------|----------------------|-----------|",
+            "| Indicator | Type | Severity | IOC Match | Context(s) | Sources (tool · file: artifact ids) | Why flagged |",
+            "|-----------|------|----------|-----------|------------|-------------------------------------|-----------|",
         ]
         for r in surfaced:
             matches = ", ".join(sorted(r["matches"])) if r["matches"] else "-"
@@ -967,7 +972,15 @@ def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None,
             srcs = []
             for tool in sorted(r.get("tools") or ([r["tool"]] if r.get("tool") else [])):
                 src_file = tool_sources.get(tool, "-")
-                srcs.append(tool if src_file in ("-", "", None) else f"{tool} · {src_file}")
+                src = tool if src_file in ("-", "", None) else f"{tool} · {src_file}"
+                # Artifact-id pointers: greppable in raw/<tool>_output.json and
+                # unified_evidence.json (wishlist: IOC drill-down to the source items).
+                ids = sorted(r.get("ids_by_tool", {}).get(tool, ()))
+                if ids:
+                    shown = ", ".join(ids[:_IOC_IDS_SHOWN])
+                    extra = len(ids) - _IOC_IDS_SHOWN
+                    src += f": {shown}" + (f" +{extra} more" if extra > 0 else "")
+                srcs.append(src)
             src_cell = "; ".join(srcs) if srcs else "-"
             xai = _ioc_xai_note(r, anomaly_lookup)
             rows.append(
@@ -1357,7 +1370,7 @@ def _build_ml_only_section(all_items, anomaly_ids, anomaly_lookup, tool_sources)
     candidates.sort(key=_finding_sort_key)
     shown = candidates[:ML_ONLY_CAP]
     rows = [
-        "| Type | Artifact | Source · File | Why (XAI) |",
+        "| Type | Artifact | Source · File | Why flagged |",
         "|------|----------|---------------|-----------|",
     ]
     for e in shown:
@@ -1524,7 +1537,7 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     shown_findings = priority_items[:KEY_FINDINGS_CAP]
     if shown_findings:
         kf_rows = [
-            "| Severity | Host | Timestamp | Type | Finding | Indicators / IOC Match | Source · File | Why (XAI) |",
+            "| Severity | Host | Timestamp | Type | Finding | Indicators / IOC Match | Source · File | Why flagged |",
             "|----------|------|-----------|------|---------|------------------------|---------------|-----------|",
         ]
         for item in shown_findings:

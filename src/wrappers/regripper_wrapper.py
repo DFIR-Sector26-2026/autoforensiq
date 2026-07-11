@@ -66,16 +66,14 @@ class RegRipperWrapper(BaseWrapper):
     def _parse_output(self, output: str, plugin: str) -> list:
         items = []
         lines = output.strip().splitlines()
-        current_section = ""
 
         for line in lines:
             line_stripped = line.strip()
             if not line_stripped or line_stripped.startswith("#"):
                 continue
 
-            # detect section headers
+            # skip section headers
             if line_stripped.endswith(":") or line_stripped.startswith("Launching"):
-                current_section = line_stripped
                 continue
 
             lower = line_stripped.lower()
@@ -101,7 +99,7 @@ class RegRipperWrapper(BaseWrapper):
 
 
 if __name__ == "__main__":
-    import sys, json
+    import sys
     if len(sys.argv) < 2:
         print("Usage: python -m src.wrappers.regripper_wrapper <NTUSER.DAT>")
         sys.exit(1)

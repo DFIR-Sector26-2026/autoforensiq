@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from .base_wrapper import BaseWrapper, stable_artifact_id
-from src.data.threat_intel import c2_port_severity, RANSOM_EXTENSIONS, EXECUTABLE_EXTENSIONS
+from src.data.threat_intel import c2_port_severity, RANSOM_EXTENSIONS, EXECUTABLE_EXTENSIONS, SEVERITY_ORDER
 
 PLUGINS = [
     "windows.pslist",
@@ -197,6 +197,185 @@ def _has_network_context(corpus: str, start: int, end: int, value: str) -> bool:
     if suffix[:1] == ":" and len(suffix) > 1 and suffix[1].isdigit():
         return True
     return False
+
+
+# ── _extract_strings tables and validators, module-level: the method runs up to 3× per image over
+# multi-hundred-MB corpora, so nothing below may be rebuilt per call. ──
+
+# Final label must be a registered TLD — filters filename noise while keeping ccTLD/.gov/.edu C2
+# a tiny allowlist would drop.
+_VALID_TLDS = {
+    # common / generic + frequently-abused gTLDs
+    "com", "net", "org", "info", "biz", "gov", "edu", "mil", "int",
+    "name", "pro", "mobi", "asia", "xyz", "top", "site", "online",
+    "club", "shop", "app", "dev", "io", "co", "me", "tv", "cc", "ws",
+    "su", "onion", "tk", "ml", "ga", "cf", "gq", "work", "click",
+    "link", "live", "icu", "fun", "buzz", "host", "space", "website",
+    "press", "party", "stream", "download", "loan", "review", "date",
+    "trade", "racing", "win", "bid", "faith", "cricket", "men", "pw",
+    # ISO 3166 country-code TLDs
+    "ac", "ad", "ae", "af", "ag", "ai", "al", "am", "ao", "ar", "at",
+    "au", "aw", "ax", "az", "ba", "bb", "bd", "be", "bf", "bg", "bh",
+    "bi", "bj", "bm", "bn", "bo", "br", "bs", "bt", "bw", "by", "bz",
+    "ca", "cd", "cg", "ch", "ci", "ck", "cl", "cm", "cn", "cr", "cu",
+    "cv", "cw", "cx", "cy", "cz", "de", "dj", "dk", "dm", "do", "dz",
+    "ec", "ee", "eg", "es", "et", "eu", "fi", "fj", "fk", "fm", "fo",
+    "fr", "gb", "gd", "ge", "gf", "gg", "gh", "gi", "gl", "gm", "gn",
+    "gp", "gr", "gt", "gu", "gw", "gy", "hk", "hn", "hr", "ht", "hu",
+    "id", "ie", "il", "im", "in", "iq", "ir", "is", "it", "je", "jm",
+    "jo", "jp", "ke", "kg", "kh", "ki", "kn", "kp", "kr", "kw", "ky",
+    "kz", "la", "lb", "lc", "li", "lk", "lr", "ls", "lt", "lu", "lv",
+    "ly", "ma", "mc", "mg", "mk", "mm", "mn", "mo", "mp", "mq", "mr",
+    "ms", "mt", "mu", "mv", "mw", "mx", "my", "mz", "na", "nc", "ne",
+    "nf", "ng", "ni", "nl", "no", "np", "nr", "nu", "nz", "om", "pa",
+    "pe", "pg", "ph", "pk", "pn", "pr", "ps", "pt", "qa", "re",
+    "ro", "rw", "sa", "sb", "sc", "sd", "se", "sg", "si", "sk", "sl",
+    "sm", "sn", "sr", "ss", "st", "sv", "sx", "sy", "sz", "tc", "td",
+    "tg", "th", "tj", "tl", "tn", "tr", "tt", "tw", "tz", "ua", "ug",
+    "uk", "us", "uy", "uz", "va", "vc", "ve", "vg", "vi", "vn", "vu",
+    "wf", "ye", "yt", "za", "zm", "zw", "ru", "to",
+    # ccTLDs that also double as script/binary extensions (kept valid here; the
+    # ambiguous-TLD guard requires a sub-domain).
+    "pl", "py", "pm", "sh", "so", "rs", "md", "ax",
+}
+
+# ccTLDs that double as code extensions (main.py, lib.so) — need a sub-domain (3+ labels) to
+# count as a domain. (.pf is dropped from _VALID_TLDS entirely: Prefetch extension.)
+_AMBIGUOUS_CODE_TLDS = {"py", "pl", "sh", "so", "rs", "md", "pm", "ax", "nc"}
+
+_ONION_RE = re.compile(r"[a-z0-9]{16,56}\.onion", re.IGNORECASE)
+_BTC_BASE58_RE = re.compile(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b")
+_BTC_BECH32_RE = re.compile(r"\bbc1[ac-hj-np-z02-9]{8,87}\b", re.IGNORECASE)
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}")
+
+# `|` is illegal in a registry path — it means the sweep ran into adjacent memory; stopping there
+# also keeps stray pipes from corrupting the markdown report table.
+_REGISTRY_RES = [re.compile(p, re.IGNORECASE) for p in (
+    r"(?:HKLM|HKEY_LOCAL_MACHINE|HKCU|HKEY_CURRENT_USER|HKCR|HKEY_CLASSES_ROOT|HKU|HKEY_USERS)\\[^\s\"'|]+",
+    r"\\Registry\\Machine\\[^\s\"'|]+",
+    r"\\Registry\\User\\[^\s\"'|]+",
+)]
+
+_DOMAIN_RE = re.compile(
+    r"(?<![@\\])\b(?:[a-z0-9-]{1,63}\.)+(?P<tld>[a-z]{2,24})\b",
+    re.IGNORECASE,
+)
+
+
+def _base58_decode(value: str):
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    decoded = bytearray()
+    num = 0
+
+    for char in value:
+        index = alphabet.find(char)
+        if index == -1:
+            return None
+        num = num * 58 + index
+
+    while num > 0:
+        num, remainder = divmod(num, 256)
+        decoded.insert(0, remainder)
+
+    leading_zeros = len(value) - len(value.lstrip("1"))
+    return bytearray(b"\x00" * leading_zeros) + decoded
+
+
+def _is_valid_btc_address(value: str) -> bool:
+    if not re.fullmatch(r"^[13][1-9A-HJ-NP-Za-km-z]{25,34}$", value):
+        return False
+
+    decoded = _base58_decode(value)
+    if not decoded or len(decoded) < 5:
+        return False
+
+    payload = bytes(decoded[:-4])
+    checksum = bytes(decoded[-4:])
+    digest = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+
+    return digest == checksum and len(payload) == 21
+
+
+# Native SegWit `bc1…` validation (BIP-173/350), which base58check can't cover: witness v0 uses
+# the bech32 checksum constant (1); v1+ (Taproot) uses bech32m (0x2bc830a3).
+_BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+
+def _bech32_polymod(values):
+    gen = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
+    chk = 1
+    for v in values:
+        top = chk >> 25
+        chk = ((chk & 0x1ffffff) << 5) ^ v
+        for i in range(5):
+            chk ^= gen[i] if ((top >> i) & 1) else 0
+    return chk
+
+
+def _bech32_hrp_expand(hrp):
+    return [ord(c) >> 5 for c in hrp] + [0] + [ord(c) & 31 for c in hrp]
+
+
+def _convertbits(data, frombits, tobits):
+    # 5-bit groups -> 8-bit bytes, no padding (witness-program decode).
+    acc = 0
+    bits = 0
+    ret = []
+    maxv = (1 << tobits) - 1
+    for value in data:
+        if value < 0 or (value >> frombits):
+            return None
+        acc = (acc << frombits) | value
+        bits += frombits
+        while bits >= tobits:
+            bits -= tobits
+            ret.append((acc >> bits) & maxv)
+    if bits >= frombits or ((acc << (tobits - bits)) & maxv):
+        return None
+    return ret
+
+
+def _is_valid_bech32_btc_address(value: str) -> bool:
+    # BIP-173 forbids mixed case; accept all-lower or all-upper.
+    if value != value.lower() and value != value.upper():
+        return False
+    v = value.lower()
+    if not (14 <= len(v) <= 90):
+        return False
+
+    pos = v.rfind("1")
+    if pos < 1 or pos + 7 > len(v):
+        return False
+
+    hrp, data_part = v[:pos], v[pos + 1:]
+    if hrp != "bc":                      # Bitcoin mainnet only
+        return False
+
+    data = []
+    for c in data_part:
+        d = _BECH32_CHARSET.find(c)
+        if d == -1:
+            return False
+        data.append(d)
+
+    wit_ver = data[0]
+    checksum = _bech32_polymod(_bech32_hrp_expand(hrp) + data)
+    if wit_ver == 0:
+        if checksum != 1:                # bech32
+            return False
+    elif 1 <= wit_ver <= 16:
+        if checksum != 0x2bc830a3:        # bech32m
+            return False
+    else:
+        return False
+
+    program = _convertbits(data[1:-6], 5, 8)
+    if program is None or not (2 <= len(program) <= 40):
+        return False
+    # v0 programs are exactly 20 (P2WPKH) or 32 (P2WSH) bytes.
+    if wit_ver == 0 and len(program) not in (20, 32):
+        return False
+    return True
 
 
 class VolatilityWrapper(BaseWrapper):
@@ -492,8 +671,6 @@ class VolatilityWrapper(BaseWrapper):
         severity then confidence, first-seen order (3.3-F). linked_artifacts in the key keeps
         PID-less values (process_relation) from merging across distinct PID pairs."""
 
-        severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
-
         best = {}
         order = []
 
@@ -511,11 +688,11 @@ class VolatilityWrapper(BaseWrapper):
 
             cur = best[key]
             challenger = (
-                severity_rank.get(it.get("severity"), 0),
+                SEVERITY_ORDER.get(it.get("severity"), 0),
                 it.get("confidence", 0) or 0,
             )
             incumbent = (
-                severity_rank.get(cur.get("severity"), 0),
+                SEVERITY_ORDER.get(cur.get("severity"), 0),
                 cur.get("confidence", 0) or 0,
             )
             if challenger > incumbent:
@@ -931,8 +1108,6 @@ class VolatilityWrapper(BaseWrapper):
         """PIDs flagged by a *behavioral* IOC (high/critical commandline or network connection) —
         the "corroborated by another IOC" escape from the malfind JIT down-rank. Name-based
         heuristics deliberately excluded to keep corroboration independent."""
-        import re
-
         corroborating_types = {"commandline", "network_connection"}
         pids = set()
 
@@ -1176,8 +1351,6 @@ class VolatilityWrapper(BaseWrapper):
 
     def _parse_filescan(self, lines: list) -> list:
 
-        import re
-
         items = []
         seen = set()
 
@@ -1360,8 +1533,6 @@ class VolatilityWrapper(BaseWrapper):
 
     def _parse_dumpfiles(self, lines: list) -> list:
 
-        import re
-
         items = []
         seen = set()
 
@@ -1475,56 +1646,12 @@ class VolatilityWrapper(BaseWrapper):
 
     def _extract_strings(self, corpus: str) -> list:
 
-        import re
-
         items = []
 
         if not corpus:
             return items
 
         seen = set()
-
-        # Final label must be a registered TLD — filters filename noise while keeping
-        # ccTLD/.gov/.edu C2 a tiny allowlist would drop.
-        valid_tlds = {
-            # common / generic + frequently-abused gTLDs
-            "com", "net", "org", "info", "biz", "gov", "edu", "mil", "int",
-            "name", "pro", "mobi", "asia", "xyz", "top", "site", "online",
-            "club", "shop", "app", "dev", "io", "co", "me", "tv", "cc", "ws",
-            "su", "onion", "tk", "ml", "ga", "cf", "gq", "work", "click",
-            "link", "live", "icu", "fun", "buzz", "host", "space", "website",
-            "press", "party", "stream", "download", "loan", "review", "date",
-            "trade", "racing", "win", "bid", "faith", "cricket", "men", "pw",
-            # ISO 3166 country-code TLDs
-            "ac", "ad", "ae", "af", "ag", "ai", "al", "am", "ao", "ar", "at",
-            "au", "aw", "ax", "az", "ba", "bb", "bd", "be", "bf", "bg", "bh",
-            "bi", "bj", "bm", "bn", "bo", "br", "bs", "bt", "bw", "by", "bz",
-            "ca", "cd", "cg", "ch", "ci", "ck", "cl", "cm", "cn", "cr", "cu",
-            "cv", "cw", "cx", "cy", "cz", "de", "dj", "dk", "dm", "do", "dz",
-            "ec", "ee", "eg", "es", "et", "eu", "fi", "fj", "fk", "fm", "fo",
-            "fr", "gb", "gd", "ge", "gf", "gg", "gh", "gi", "gl", "gm", "gn",
-            "gp", "gr", "gt", "gu", "gw", "gy", "hk", "hn", "hr", "ht", "hu",
-            "id", "ie", "il", "im", "in", "iq", "ir", "is", "it", "je", "jm",
-            "jo", "jp", "ke", "kg", "kh", "ki", "kn", "kp", "kr", "kw", "ky",
-            "kz", "la", "lb", "lc", "li", "lk", "lr", "ls", "lt", "lu", "lv",
-            "ly", "ma", "mc", "mg", "mk", "mm", "mn", "mo", "mp", "mq", "mr",
-            "ms", "mt", "mu", "mv", "mw", "mx", "my", "mz", "na", "nc", "ne",
-            "nf", "ng", "ni", "nl", "no", "np", "nr", "nu", "nz", "om", "pa",
-            "pe", "pg", "ph", "pk", "pn", "pr", "ps", "pt", "qa", "re",
-            "ro", "rw", "sa", "sb", "sc", "sd", "se", "sg", "si", "sk", "sl",
-            "sm", "sn", "sr", "ss", "st", "sv", "sx", "sy", "sz", "tc", "td",
-            "tg", "th", "tj", "tl", "tn", "tr", "tt", "tw", "tz", "ua", "ug",
-            "uk", "us", "uy", "uz", "va", "vc", "ve", "vg", "vi", "vn", "vu",
-            "wf", "ye", "yt", "za", "zm", "zw", "ru", "to",
-            # ccTLDs that also double as script/binary extensions (kept valid here; the
-            # ambiguous-TLD guard below requires a sub-domain).
-            "pl", "py", "pm", "sh", "so", "rs", "md", "ax",
-        }
-
-        # ccTLDs that double as script/binary extensions (main.py, lib.so, l3codecx.ax) — require a
-        # sub-domain (3+ labels) before treating as a domain. (.pf is dropped from valid_tlds
-        # entirely: Prefetch extension.)
-        ambiguous_code_tlds = {"py", "pl", "sh", "so", "rs", "md", "pm", "ax", "nc"}
 
         def _add_item(value: str, evidence_type: str, severity: str, confidence: float, artifact_prefix: str):
             normalized = value.lower()
@@ -1542,142 +1669,30 @@ class VolatilityWrapper(BaseWrapper):
                 )
             )
 
-        def _base58_decode(value: str):
-
-            alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-            decoded = bytearray()
-            num = 0
-
-            for char in value:
-                index = alphabet.find(char)
-                if index == -1:
-                    return None
-                num = num * 58 + index
-
-            while num > 0:
-                num, remainder = divmod(num, 256)
-                decoded.insert(0, remainder)
-
-            leading_zeros = len(value) - len(value.lstrip("1"))
-            return bytearray(b"\x00" * leading_zeros) + decoded
-
-        def _is_valid_btc_address(value: str) -> bool:
-            if not re.fullmatch(r"^[13][1-9A-HJ-NP-Za-km-z]{25,34}$", value):
-                return False
-
-            decoded = _base58_decode(value)
-            if not decoded or len(decoded) < 5:
-                return False
-
-            payload = bytes(decoded[:-4])
-            checksum = bytes(decoded[-4:])
-            digest = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
-
-            return digest == checksum and len(payload) == 21
-
-        # Native SegWit (bech32 / bech32m, BIP-173 / BIP-350) — the modern
-        # `bc1…` address family the base58check path above can't validate:
-        #   * witness v0  (P2WPKH/P2WSH) uses the bech32 checksum constant (1)
-        #   * witness v1+ (P2TR Taproot) uses the bech32m constant (0x2bc830a3)
-        _BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
-
-        def _bech32_polymod(values):
-            gen = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
-            chk = 1
-            for v in values:
-                top = chk >> 25
-                chk = ((chk & 0x1ffffff) << 5) ^ v
-                for i in range(5):
-                    chk ^= gen[i] if ((top >> i) & 1) else 0
-            return chk
-
-        def _bech32_hrp_expand(hrp):
-            return [ord(c) >> 5 for c in hrp] + [0] + [ord(c) & 31 for c in hrp]
-
-        def _convertbits(data, frombits, tobits):
-            # 5-bit groups -> 8-bit bytes, no padding (witness-program decode).
-            acc = 0
-            bits = 0
-            ret = []
-            maxv = (1 << tobits) - 1
-            for value in data:
-                if value < 0 or (value >> frombits):
-                    return None
-                acc = (acc << frombits) | value
-                bits += frombits
-                while bits >= tobits:
-                    bits -= tobits
-                    ret.append((acc >> bits) & maxv)
-            if bits >= frombits or ((acc << (tobits - bits)) & maxv):
-                return None
-            return ret
-
-        def _is_valid_bech32_btc_address(value: str) -> bool:
-            # BIP-173 forbids mixed case; accept all-lower or all-upper.
-            if value != value.lower() and value != value.upper():
-                return False
-            v = value.lower()
-            if not (14 <= len(v) <= 90):
-                return False
-
-            pos = v.rfind("1")
-            if pos < 1 or pos + 7 > len(v):
-                return False
-
-            hrp, data_part = v[:pos], v[pos + 1:]
-            if hrp != "bc":                      # Bitcoin mainnet only
-                return False
-
-            data = []
-            for c in data_part:
-                d = _BECH32_CHARSET.find(c)
-                if d == -1:
-                    return False
-                data.append(d)
-
-            wit_ver = data[0]
-            checksum = _bech32_polymod(_bech32_hrp_expand(hrp) + data)
-            if wit_ver == 0:
-                if checksum != 1:                # bech32
-                    return False
-            elif 1 <= wit_ver <= 16:
-                if checksum != 0x2bc830a3:        # bech32m
-                    return False
-            else:
-                return False
-
-            program = _convertbits(data[1:-6], 5, 8)
-            if program is None or not (2 <= len(program) <= 40):
-                return False
-            # v0 programs are exactly 20 (P2WPKH) or 32 (P2WSH) bytes.
-            if wit_ver == 0 and len(program) not in (20, 32):
-                return False
-            return True
-
         # .onion kept even bare (rarely sits in URL grammar) but at LOW — an in-memory threat-intel
         # feed carries dozens of uncontacted families' .onions, which at HIGH manufactured a false
         # verdict (B-8).
-        for match in re.finditer(r"[a-z0-9]{16,56}\.onion", corpus, flags=re.IGNORECASE):
+        for match in _ONION_RE.finditer(corpus):
 
             _add_item(match.group(0).lower(), "suspicious_domain", "low", 0.6, "ioc")
 
         # Checksum-valid BTC wallets at LOW, same rationale as .onion above; a catalog-known ransom
         # wallet still escalates via the rescorer.
-        for match in re.finditer(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b", corpus):
+        for match in _BTC_BASE58_RE.finditer(corpus):
 
             candidate = match.group(0)
 
             if _is_valid_btc_address(candidate):
                 _add_item(candidate, "suspicious_crypto", "low", 0.6, "btc")
 
-        for match in re.finditer(r"\bbc1[ac-hj-np-z02-9]{8,87}\b", corpus, flags=re.IGNORECASE):
+        for match in _BTC_BECH32_RE.finditer(corpus):
 
             candidate = match.group(0)
 
             if _is_valid_bech32_btc_address(candidate):
                 _add_item(candidate.lower(), "suspicious_crypto", "low", 0.6, "btc")
 
-        for match in re.finditer(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}", corpus):
+        for match in _EMAIL_RE.finditer(corpus):
 
             addr = match.group(0)
             local, _, domain = addr.partition("@")
@@ -1689,8 +1704,8 @@ class VolatilityWrapper(BaseWrapper):
             if (
                 len(labels) < 2 or
                 len(labels[-2]) < 2 or
-                tld not in valid_tlds or
-                tld in ambiguous_code_tlds or
+                tld not in _VALID_TLDS or
+                tld in _AMBIGUOUS_CODE_TLDS or
                 not any(c.isalpha() for c in local) or
                 local.startswith(".") or local.endswith(".") or ".." in local or
                 any(
@@ -1702,24 +1717,11 @@ class VolatilityWrapper(BaseWrapper):
 
             _add_item(addr, "email_address", "medium", 0.85, "email")
 
-        # `|` is illegal in a registry path — it means the sweep ran into adjacent memory; stopping
-        # there also keeps stray pipes from corrupting the markdown report table.
-        registry_patterns = [
-            r"(?:HKLM|HKEY_LOCAL_MACHINE|HKCU|HKEY_CURRENT_USER|HKCR|HKEY_CLASSES_ROOT|HKU|HKEY_USERS)\\[^\s\"'|]+",
-            r"\\Registry\\Machine\\[^\s\"'|]+",
-            r"\\Registry\\User\\[^\s\"'|]+",
-        ]
+        for pattern in _REGISTRY_RES:
 
-        for pattern in registry_patterns:
-
-            for match in re.finditer(pattern, corpus, flags=re.IGNORECASE):
+            for match in pattern.finditer(corpus):
 
                 _add_item(match.group(0), "registry_key", "medium", 0.88, "reg")
-
-        domain_pattern = re.compile(
-            r"(?<![@\\])\b(?:[a-z0-9-]{1,63}\.)+(?P<tld>[a-z]{2,24})\b",
-            flags=re.IGNORECASE,
-        )
 
         # Emit a domain ONLY when anchored in URL/network grammar (_has_network_context): bare
         # fragments were 25k of 36k items on dev01 and stalled P5. A real C2 arrives via its
@@ -1729,12 +1731,12 @@ class VolatilityWrapper(BaseWrapper):
         seen_domains = set()
         anchored_domains = []
 
-        for match in domain_pattern.finditer(corpus):
+        for match in _DOMAIN_RE.finditer(corpus):
 
             value = match.group(0).lower()
             tld = match.group("tld").lower()
 
-            if tld not in valid_tlds:
+            if tld not in _VALID_TLDS:
                 continue
 
             labels = value.split(".")
@@ -1747,7 +1749,7 @@ class VolatilityWrapper(BaseWrapper):
 
             # Disambiguate ccTLDs that double as script extensions: only accept them with a
             # sub-domain (e.g. "panel.c2.pl"), not a bare "script.py".
-            if tld in ambiguous_code_tlds and len(labels) < 3:
+            if tld in _AMBIGUOUS_CODE_TLDS and len(labels) < 3:
                 continue
 
             # Benign OS/CDN/CA infrastructure dominates a dump — drop.

@@ -5,7 +5,12 @@ severity + source-file rendering, no cross-type leakage) and the markdown cell
 sanitizer used by the IOC / MITRE / Critical Findings tables.
 """
 
+import json
+from pathlib import Path
+
 from src.report_generator.report_generator import (
+    MITRE_BY_CASE,
+    RECOMMENDATIONS_BY_CASE,
     _build_dashboard_summary,
     _build_evidence_coverage,
     _build_ioc_report,
@@ -605,11 +610,11 @@ def test_p5_breaks_tie_only_at_the_medium_high_margin():
     # Highest evidence severity is medium. With no anomaly it stays MEDIUM; one
     # independent P5 anomaly nudges it to HIGH (the tie-breaker), nothing more.
     items = [_item("medium", "f1"), _item("low", "f2")]
-    quiet = _mock_report(_ue(items), {"explanations": {}}, {"case_type": "malware"})
+    quiet = _mock_report(_ue(items), {"explanations": {}}, {"case_type": "malware_infection"})
     assert "Overall case severity: **MEDIUM**" in quiet
 
     shap = {"explanations": {"f1": {"is_anomaly": True, "reason": "outlier"}}}
-    nudged = _mock_report(_ue(items), shap, {"case_type": "malware"})
+    nudged = _mock_report(_ue(items), shap, {"case_type": "malware_infection"})
     assert "Overall case severity: **HIGH**" in nudged
 
 
@@ -687,7 +692,7 @@ def test_dashboard_summary_anomaly_breaks_medium_tie():
     # No critical/high evidence, one medium item, and a P5 anomaly → nudged HIGH.
     items = [_item("medium", "m1")]
     shap = {"explanations": {"m1": {"is_anomaly": True, "summary": "unusual"}}}
-    dash = _build_dashboard_summary(_ue(items), {"case_type": "malware"}, shap)
+    dash = _build_dashboard_summary(_ue(items), {"case_type": "malware_infection"}, shap)
     assert dash["summary"]["overall_severity"] == "high"
 
 
@@ -717,3 +722,27 @@ def test_dashboard_mitre_includes_evidence_derived_techniques():
     assert "stage=wallets" in by_id["T1657"]["basis"]
     # Static case-table techniques are kept alongside.
     assert "T1041" in by_id
+
+
+def test_case_tables_cover_every_schema_case_type():
+    # D3 regression: keys once mismatched the classifier's case types ("malware" vs
+    # "malware_infection") and silently fell through to "unknown" — pin both tables to the enum.
+    schema = json.loads(
+        (Path(__file__).parent.parent / "src/schemas/case_context_schema.json").read_text())
+    case_types = set(schema["properties"]["case_type"]["enum"])
+    assert set(MITRE_BY_CASE) == case_types
+    assert set(RECOMMENDATIONS_BY_CASE) == case_types
+
+
+def test_ioc_sources_cell_lists_artifact_id_pointers():
+    # Wishlist (IOC drill-down): each surfaced IOC row points at its contributing
+    # artifact_ids per tool, capped at 3 with a +N more counter.
+    items = [
+        {"artifact_id": f"proc_{n}", "source_tool": "volatility3",
+         "evidence_type": "process", "value": f"tasksche.exe (PID:{n})",
+         "severity": "critical", "ioc_match": ["wannacry_dropper"]}
+        for n in (1, 2, 3, 4, 5)
+    ]
+    out = _build_ioc_report(items, tool_sources={"volatility3": "memory.raw"})
+    row = next(l for l in out.splitlines() if "tasksche.exe" in l)
+    assert "volatility3 · memory.raw: proc_1, proc_2, proc_3 +2 more" in row

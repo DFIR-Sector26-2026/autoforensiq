@@ -87,9 +87,9 @@ def test_catalog_matches_wannacry_network_iocs():
     # killswitch: gains a match tag; stays medium (string-only, uncorroborated)
     assert by_id["dom_1"]["ioc_match"] == ["wannacry_killswitch"]
     assert by_id["dom_1"]["severity"] == "medium"
-    # any .onion matches the general Tor-hidden-service rule; keeps its tag and
-    # its wrapper severity (uncorroborated, so not boosted further)
-    assert by_id["onion_1"]["ioc_match"] == ["tor_hidden_service"]
+    # a KNOWN WannaCry onion matches the general Tor rule AND the named
+    # attribution rule (PF-1a); still uncorroborated, so severity is not boosted
+    assert by_id["onion_1"]["ioc_match"] == ["tor_hidden_service", "wannacry_c2"]
     assert by_id["onion_1"]["severity"] == "high"
     # BTC ransom wallet matches the curated named-intel rule and escalates (not a
     # domain type, so the corroboration gate does not apply)
@@ -104,6 +104,28 @@ def test_catalog_matches_wannacry_network_iocs():
     rescore_items(novel, cat, {})
     assert novel[0]["ioc_match"] == ["tor_hidden_service"]
     assert novel[0]["severity"] == "medium"
+
+
+def test_named_onion_attribution_escalates_when_contacted():
+    """PF-1a: wannacry_c2 adds family attribution over the generic tor rule — a contacted known
+    onion (dns_query, not corroboration-gated) floors critical with both tags; an unknown onion
+    keeps the generic high floor."""
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        {"artifact_id": "dns_known", "evidence_type": "dns_query",
+         "value": "DNS query: gx7ekbenv2riucmf.onion", "severity": "low",
+         "source_tool": "tshark"},
+        {"artifact_id": "dns_novel", "evidence_type": "dns_query",
+         "value": "DNS query: abcdef0123456789deadbeef.onion", "severity": "low",
+         "source_tool": "tshark"},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    assert by_id["dns_known"]["ioc_match"] == ["tor_hidden_service", "wannacry_c2"]
+    assert by_id["dns_known"]["severity"] == "critical"
+    assert by_id["dns_novel"]["ioc_match"] == ["tor_hidden_service"]
+    assert by_id["dns_novel"]["severity"] == "high"
 
 
 def test_string_domain_needs_network_corroboration_to_escalate():

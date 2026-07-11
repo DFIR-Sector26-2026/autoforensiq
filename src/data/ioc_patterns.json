@@ -35,6 +35,13 @@
       "category": "c2"
     },
     {
+      "id": "wannacry_c2",
+      "_comment": "Attribution layer over tor_hidden_service (PF-1a): WannaCry's five hard-coded c.wnry Tor C2 onions (public threat intel). A known onion matches both rules — the generic one detects, this one names the family and floors it to critical.",
+      "match": ["gx7ekbenv2riucmf.onion", "57g7spgrzlojinas.onion", "xxlvbrloxvriy2c5.onion", "76jdd2ir2embyv47.onion", "cwwnhwhlz52maqm7.onion"],
+      "severity": "critical",
+      "category": "known_malware"
+    },
+    {
       "id": "wannacry_ransom_wallet",
       "_comment": "WannaCry hard-coded BTC ransom wallets (lowercased for case-insensitive substring match against the lowercased haystack).",
       "match": ["13am4vw2dhxygxeqepohkhsquy6ngaeb94", "12t9ydpgwuez9nymgw519p7aa8isjr6smw", "115p7ummngoj1pmvkphijcrdfjnxj6lrln"],

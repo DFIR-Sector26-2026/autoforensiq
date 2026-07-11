@@ -89,3 +89,20 @@ def test_distinct_indicators_are_not_collapsed():
     values = {i["value"] for i in iocs}
     assert "Suspicious process detected: tasksche.exe" in values
     assert "Suspicious process detected: @WanaDecryptor@" in values
+
+
+def test_bare_wmic_is_not_an_indicator_but_abuse_forms_are():
+    # Bare "wmic" (routine admin use) must not flag at critical/0.95 — same FP class as the
+    # removed bare cmd.exe names (B-5); the shadow-copy/remote-exec abuse forms still flag.
+    items = [
+        {"artifact_id": "cmd_1", "evidence_type": "commandline",
+         "value": "wmic computersystem get domain"},
+        {"artifact_id": "cmd_2", "evidence_type": "commandline",
+         "value": "wmic shadowcopy delete /nointeractive"},
+        {"artifact_id": "cmd_3", "evidence_type": "commandline",
+         "value": 'wmic process call create "evil.exe"'},
+    ]
+    iocs = extract_iocs(items)
+    linked = {l for i in iocs for l in i["linked_artifacts"]}
+    assert "cmd_1" not in linked
+    assert {"cmd_2", "cmd_3"} <= linked

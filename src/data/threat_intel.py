@@ -16,6 +16,10 @@ C2_PORTS_WATCH = frozenset({6666, 6667, 6668, 6669, 8888, 9999, 12345, 54321})
 # port is one signal among fourteen rather than a verdict.
 C2_PORTS_ALL = C2_PORTS_HIGH | C2_PORTS_WATCH
 
+# Canonical severity ranking (D6) — was independently defined in both aggregator modules and a
+# volatility local. The report/ML/JS variants differ semantically and stay separate.
+SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+
 # Remote-interactive admin channels (T1021: RDP/VNC/WinRM), the lateral-movement backbone (B-6).
 # Dual-use → medium, and only with a real remote peer (every host listens on 3389/5985 itself). SMB
 # 445 / LDAP 389 excluded: routine domain traffic.

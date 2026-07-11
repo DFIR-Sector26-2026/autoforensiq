@@ -15,13 +15,11 @@ import jsonschema
 from referencing import Registry, Resource
 
 from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
-from src.data.threat_intel import DNS_ALLOWLIST, DNS_ALLOWLIST_SUFFIXES, is_lan_ipv4
+from src.data.threat_intel import DNS_ALLOWLIST, DNS_ALLOWLIST_SUFFIXES, SEVERITY_ORDER, is_lan_ipv4
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 # Severity ranking for sorting
-SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
-
 # IOC catalog for post-aggregation severity re-scoring (loaded once).
 _IOC_CATALOG = load_ioc_catalog()
 
@@ -36,6 +34,9 @@ def load_json(path: str) -> dict[str, Any]:
 _SCHEMAS_DIR = ROOT_DIR / "src" / "schemas"
 _EVIDENCE_ITEM_SCHEMA = load_json(str(_SCHEMAS_DIR / "evidence_item.json")) if (_SCHEMAS_DIR / "evidence_item.json").exists() else None
 _UNIFIED_EVIDENCE_SCHEMA = load_json(str(_SCHEMAS_DIR / "unified_evidence.json")) if (_SCHEMAS_DIR / "unified_evidence.json").exists() else None
+# Compiled once: jsonschema.validate() recompiles the schema per call, which is ~13k compilations
+# on a large run.
+_EVIDENCE_ITEM_VALIDATOR = jsonschema.Draft7Validator(_EVIDENCE_ITEM_SCHEMA) if _EVIDENCE_ITEM_SCHEMA else None
 
 
 def write_json(path: str, data: dict[str, Any]) -> None:
@@ -71,10 +72,10 @@ def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
             tool_name = data.get("tool", filename.replace("_output.json", ""))
             items = data.get("items", [])
             if items:
-                if _EVIDENCE_ITEM_SCHEMA:
+                if _EVIDENCE_ITEM_VALIDATOR:
                     for item in items:
                         try:
-                            jsonschema.validate(instance=item, schema=_EVIDENCE_ITEM_SCHEMA)
+                            _EVIDENCE_ITEM_VALIDATOR.validate(item)
                         except jsonschema.ValidationError as ve:
                             print(f"    [WARN] Schema violation in {filename}: {ve.message}")
                 all_outputs[tool_name] = items

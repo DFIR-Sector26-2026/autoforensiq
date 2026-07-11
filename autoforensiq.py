@@ -28,11 +28,6 @@ def _stub(stage_name: str, expected_output: str):
     print(f"         Expected output: {expected_output}")
 
 
-def _load_json(path: str):
-    with open(path) as f:
-        return json.load(f)
-
-
 def _ensure_output_dir():
     (ROOT_DIR / "output").mkdir(exist_ok=True)
     (ROOT_DIR / "output" / "raw").mkdir(exist_ok=True)
@@ -436,6 +431,16 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--ti-enrich",
+        action="store_true",
+        help=(
+            "Opt-in: query the abuse.ch ThreatFox database to attribute flagged IOCs to known "
+            "malware families. Discloses case IOCs to a third party — off by default. Needs "
+            "ABUSECH_AUTH_KEY set; degrades silently offline."
+        )
+    )
+
+    parser.add_argument(
         "--gui",
         action="store_true",
         help="Force the GUI even when other flags are provided."
@@ -696,6 +701,17 @@ def main(args=None):
                   f"(support {reconciliation['evidence_support_score']})")
     except Exception as exc:
         print(f"  [RECONCILE] skipped ({exc})")
+
+    # PF-1b — opt-in ThreatFox attribution. Runs before P5/P7, which re-read the unified file.
+    if args.ti_enrich:
+        try:
+            from src.ioc.ti_enricher import enrich_unified
+            n = enrich_unified(
+                unified_evidence,
+                output_path=str(ROOT_DIR / "output" / "unified_evidence.json"))
+            print(f"  [TI] ThreatFox attribution annotated {n} item(s)")
+        except Exception as exc:
+            print(f"  [TI] enrichment skipped ({exc})")
 
     # STAGE 5/6
     shap_explanations = run_ml_pipeline()

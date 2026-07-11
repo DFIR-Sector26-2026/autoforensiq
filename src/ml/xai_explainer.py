@@ -24,78 +24,72 @@ _MAX_SHAP_BACKGROUND = 64
 
 INDICATORS = [
     (4,  10, "C2 port",
-     "Network connection established on a known command-and-control port "
-     "(commonly used by Metasploit, Netcat, or custom RAT frameworks)."),
+     "Network connection on a port attackers commonly use to remotely control "
+     "infected machines (a known command-and-control port, used by tools like "
+     "Metasploit and Netcat)."),
 
     (10,  9, "EXE dropped in Temp",
-     "An executable file was written to a user-writable Temp/AppData path, "
-     "a hallmark of dropper-stage malware or exploit delivery."),
+     "An executable file was written to a user-writable Temp/AppData folder — "
+     "a common first step when malware installs itself."),
 
     (11,  9, "C2 keyword in value",
-     "The artifact description contains terms associated with reverse shells, "
-     "C2 beaconing, or remote-access tooling."),
+     "The artifact's text contains terms linked to remote-control malware "
+     "(reverse shell, beacon, remote-access tool)."),
 
     (1,   8, "Suspicious process",
-     "The process binary is on the known LOLBin / malware watchlist "
-     "(e.g., certutil, mshta, mimikatz, or a named malware sample)."),
+     "The process name is on the watchlist of legitimate tools attackers "
+     "often abuse (e.g., certutil, mshta) or matches a known malware name "
+     "(e.g., mimikatz)."),
 
     (2,   8, "Suspicious parent process",
-     "The process was spawned by a shell or scripting host (cmd.exe, "
-     "powershell.exe, wscript.exe), which is abnormal for legitimate "
-     "system services."),
+     "The process was started by a command shell or script host (cmd.exe, "
+     "powershell.exe, wscript.exe) — unusual for legitimate system services."),
 
     (12,  7, "Data exfiltration indicator",
-     "Keywords consistent with data exfiltration were detected "
+     "Keywords suggesting data was being stolen were detected "
      "(e.g., outbound upload, DNS tunnelling, or covert POST request)."),
 
     (9,   6, "Temp/AppData path",
-     "File or process path is rooted in a Temp or AppData subdirectory – "
-     "commonly abused for staging malware away from Program Files."),
+     "The file or process lives under Temp or AppData — folders attackers "
+     "favour because any user can write there without special permissions."),
 
     (3,   5, "Non-standard port",
-     "Network activity observed on a port outside the common web-traffic "
-     "set, suggesting custom protocol or evasion of standard firewall rules."),
+     "Network activity on an uncommon port, which can indicate a custom "
+     "protocol or an attempt to slip past firewall rules."),
 
     (7,   4, "Network evidence type",
-     "The artifact is a network connection record; combined with other "
-     "indicators this increases lateral-movement or beaconing likelihood."),
+     "This is a network connection record; combined with other indicators it "
+     "raises the likelihood of malware check-ins (beaconing) or an attacker "
+     "moving between hosts."),
 
     (6,   4, "File-system evidence",
-     "A suspicious filesystem artifact was observed; treat as potential "
-     "persistence mechanism or dropped payload."),
+     "A suspicious file was observed; it could be a dropped malware payload "
+     "or a way for malware to survive reboots (persistence)."),
 
     (8,   4, "Email evidence",
-     "Email artefact detected; may indicate phishing delivery or data "
-     "exfiltration via mail channel."),
+     "Email artifact detected; possible phishing delivery or data theft via "
+     "the mail channel."),
 
     (0,   3, "System process anomaly",
-     "A core Windows system process exhibited behaviour deviating from the "
-     "normal baseline (unexpected parent or network activity)."),
+     "A core Windows system process behaved unlike its normal baseline "
+     "(unexpected parent process or network activity)."),
 
     (5,   2, "Network activity",
-     "Network connectivity was recorded; alone this is low-signal but "
-     "elevates risk when combined with other indicators."),
+     "Network connectivity was recorded; weak evidence on its own, but it "
+     "raises risk when combined with other indicators."),
 ]
-
-SEVERITY_LABEL = {
-    1.0:  "Critical",
-    0.75: "High",
-    0.50: "Medium",
-    0.25: "Low",
-    0.0:  "Informational",
-}
 
 FEATURE_MEANINGS = {
     "is_system_process":
         "A core Windows process showed unusual behavior.",
     "is_suspicious_process":
-        "The process name matches a known LOLBin or suspicious tool.",
+        "The process name matches a tool attackers commonly abuse, or a known malware name.",
     "suspicious_parent":
-        "The parent process is commonly abused for script or shell execution.",
+        "The parent process is a shell or script host attackers commonly abuse.",
     "port_is_nonstandard":
-        "The connection used a non-standard network port.",
+        "The connection used an uncommon network port.",
     "port_is_known_c2":
-        "The connection used a port commonly associated with command-and-control.",
+        "The connection used a port attackers commonly use to control infected machines.",
     "has_network":
         "The artifact contains network activity.",
     "evidence_is_file":
@@ -105,15 +99,15 @@ FEATURE_MEANINGS = {
     "evidence_is_email":
         "The artifact is email evidence.",
     "path_in_temp":
-        "The path is in a user-writable staging directory.",
+        "The path is in a folder any user can write to (Temp/AppData), often used to hide malware.",
     "path_has_exe_in_temp":
         "An executable appeared in Temp/AppData/Downloads.",
     "keyword_c2_indicator":
-        "The artifact contains C2, beacon, shell, or RAT indicators.",
+        "The text contains remote-control malware terms (beacon, shell, remote-access tool).",
     "keyword_exfil":
-        "The artifact contains data exfiltration indicators.",
+        "The text contains signs of data being stolen.",
     "severity_score":
-        "The original evidence severity increased the anomaly score.",
+        "The evidence item's own severity raised the anomaly score.",
 }
 
 REVIEW_ACTIONS = {

@@ -1,18 +1,9 @@
 import os
 import re
 import json
-import hashlib
 import tempfile
-from src.wrappers.base_wrapper import BaseWrapper
+from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
 from src.data.threat_intel import RANSOM_EXTENSIONS, EXECUTABLE_EXTENSIONS
-
-
-def _path_id(prefix: str, *parts: str) -> str:
-    """Stable artifact_id from the file path (+ optional timestamp), md5 slice. The old
-    abs(hash())%99999 collided distinct files (silently dropped by the aggregator's dedup: 68,690
-    -> 49,738 on dev01) and changed every run."""
-    digest = hashlib.md5("|".join(parts).encode("utf-8", "replace")).hexdigest()
-    return f"{prefix}_{digest[:16]}"
 
 
 # EXECUTABLE_EXTENSIONS are notable only inside a staging dir (or deleted) — extension alone flooded
@@ -135,7 +126,7 @@ class TSKWrapper(BaseWrapper):
                     severity, label = signal
 
                 items.append(self.make_evidence_item(
-                    artifact_id=_path_id("file", filepath),
+                    artifact_id=stable_artifact_id("file", filepath),
                     evidence_type="file_artifact",
                     value=f"{label}: {filepath}",
                     severity=severity,
@@ -229,7 +220,7 @@ class TSKWrapper(BaseWrapper):
                     # behavior); a low signal (transcripts) must not be elevated by appearing in the
                     # timeline.
                     items.append(self.make_evidence_item(
-                        artifact_id=_path_id("timeline", filepath, timestamp),
+                        artifact_id=stable_artifact_id("timeline", filepath, timestamp),
                         evidence_type="timeline_event",
                         value=f"[{timestamp}] {activity} → {filepath}",
                         severity="low" if signal[0] == "low" else "medium",

@@ -1,14 +1,13 @@
 import os
 import re
 import json
-import subprocess
+from datetime import datetime, timezone
 from src.wrappers.base_wrapper import BaseWrapper
 from src.data.threat_intel import (
     C2_PORTS_ALL, c2_port_severity, DNS_ALLOWLIST, DNS_ALLOWLIST_SUFFIXES,
     is_lan_ipv4,
 )
 import hashlib
-SUSPICIOUS_PROTOS = ["dns", "http", "smb", "ftp"]
 
 # Non-browser HTTP User-Agents typical of malware droppers and C2 clients. A scripted UA on outbound
 # web traffic is a strong signal (issue B2: the macOS stealer beaconed with curl/8.7.1). Matched
@@ -41,6 +40,16 @@ DNS_QTYPE_NAMES = {
     "16": "TXT", "28": "AAAA", "33": "SRV", "43": "DS", "48": "DNSKEY",
     "65": "HTTPS", "257": "CAA",
 }
+
+def _epoch_to_iso(epoch: str) -> str:
+    """frame.time_epoch float → readable ISO-8601 UTC for the timestamp field; raw epochs stay
+    inside artifact_ids (no id churn). Unparseable input is returned unchanged."""
+    try:
+        dt = datetime.fromtimestamp(float(epoch), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return epoch or ""
+    return dt.isoformat(timespec="seconds").replace("+00:00", "Z")
+
 
 class TsharkWrapper(BaseWrapper):
     consumes = "pcap"
@@ -119,7 +128,7 @@ class TsharkWrapper(BaseWrapper):
                     value=f"TCP {src} → {dst}:{dport} ({agg['bytes']} bytes, {agg['packets']} packets)",
                     severity=severity,
                     confidence=0.75,
-                    timestamp=ts
+                    timestamp=_epoch_to_iso(ts)
                 ))
             except Exception:
                 continue
@@ -175,7 +184,7 @@ class TsharkWrapper(BaseWrapper):
                 value=f"DNS {qtype_name} query from {src} → {domain} (label entropy: {entropy:.2f})",
                 severity=severity,
                 confidence=0.80,
-                timestamp=timestamp
+                timestamp=_epoch_to_iso(timestamp)
             ))
         print(f"  [TSHARK] DNS queries → {len(items)} items")
         return items
@@ -228,7 +237,7 @@ class TsharkWrapper(BaseWrapper):
                 value=value,
                 severity="high" if suspicious_ua else "medium",
                 confidence=0.70,
-                timestamp=timestamp
+                timestamp=_epoch_to_iso(timestamp)
             ))
         print(f"  [TSHARK] HTTP requests → {len(items)} items")
         return items
@@ -293,7 +302,7 @@ class TsharkWrapper(BaseWrapper):
                 value=f"HTTP body {src} → {dst}{uri} [{'; '.join(indicators)}]",
                 severity="high" if urls else "medium",
                 confidence=0.75,
-                timestamp=timestamp
+                timestamp=_epoch_to_iso(timestamp)
             ))
         print(f"  [TSHARK] HTTP bodies → {len(items)} indicator item(s)")
         return items
@@ -336,29 +345,41 @@ class TsharkWrapper(BaseWrapper):
                 value=f"Host {ip} has MAC {mac}",
                 severity="low",
                 confidence=0.90,
-                timestamp=timestamp
+                timestamp=_epoch_to_iso(timestamp)
             ))
         print(f"  [TSHARK] Host identities → {len(items)} item(s)")
         return items
 
     def _get_suspicious_ports(self, pcap_path: str) -> list:
         print("  [TSHARK] Checking suspicious ports...")
-        items = []
-        for port in sorted(C2_PORTS_ALL):
-            stdout, _, code = self.run_command([
-                "tshark", "-r", pcap_path,
-                "-Y", f"tcp.dstport == {port}",
-                "-T", "fields",
-                "-e", "frame.time_epoch",
-                "-e", "ip.src",
-                "-e", "ip.dst"
-            ], input_files=[pcap_path], timeout=30)
+        # One combined-filter pass; was one full pcap read per port (12 scans). The reconciler
+        # counts suspicious_port as a data_exfiltration signature type, so the items stay.
+        port_set = ", ".join(str(p) for p in sorted(C2_PORTS_ALL))
+        stdout, _, code = self.run_command([
+            "tshark", "-r", pcap_path,
+            "-Y", f"tcp.dstport in {{{port_set}}}",
+            "-T", "fields",
+            "-e", "frame.time_epoch",
+            "-e", "ip.src",
+            "-e", "ip.dst",
+            "-e", "tcp.dstport"
+        ], input_files=[pcap_path], timeout=30)
 
-            if code != 0 or not stdout.strip():
-                continue
-            lines = stdout.strip().splitlines()
-            if lines:
-                first = lines[0].split("\t")
+        items = []
+        if code == 0 and stdout.strip():
+            # Group packets by destination port, keeping first-seen order within each.
+            by_port: dict[int, list[list[str]]] = {}
+            for line in stdout.strip().splitlines():
+                fields = line.split("\t")
+                try:
+                    port = int(fields[3])
+                except (IndexError, ValueError):
+                    continue
+                by_port.setdefault(port, []).append(fields)
+
+            for port in sorted(by_port):
+                lines = by_port[port]
+                first = lines[0]
                 timestamp = first[0] if first else ""
                 src = first[1] if len(first) > 1 else "unknown"
                 dst = first[2] if len(first) > 2 else "unknown"
@@ -369,7 +390,7 @@ class TsharkWrapper(BaseWrapper):
                     value=f"Traffic on suspicious port {port}: {src} → {dst} ({len(lines)} packets)",
                     severity=c2_port_severity(port) or "high",
                     confidence=0.88,
-                    timestamp=timestamp
+                    timestamp=_epoch_to_iso(timestamp)
                 ))
         print(f"  [TSHARK] Suspicious ports → {len(items)} items")
         return items
@@ -398,7 +419,7 @@ class TsharkWrapper(BaseWrapper):
 
 
 if __name__ == "__main__":
-    import sys, json
+    import sys
     if len(sys.argv) < 2:
         print("Usage: python -m src.wrappers.tshark_wrapper <capture.pcap>")
         sys.exit(1)

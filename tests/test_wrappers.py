@@ -1221,3 +1221,38 @@ def test_dns_query_type_disambiguates_artifact_id(monkeypatch):
     assert any("_HTTPS_" in i for i in ids)
     assert any("DNS A query" in i["value"] for i in items)
     assert any("DNS HTTPS query" in i["value"] for i in items)
+
+
+def test_suspicious_ports_single_pass_groups_by_port(monkeypatch):
+    # One combined-filter pass replaced 12 per-port scans; grouped output must keep the old
+    # shape: one item per port, first-seen src/dst/timestamp, packet count, tiered severity.
+    w = TsharkWrapper()
+    out = "\n".join([
+        "1781000001.0\t10.0.0.5\t165.245.215.18\t4444",
+        "1781000002.0\t10.0.0.5\t165.245.215.18\t4444",
+        "1781000003.0\t10.0.0.7\t8.8.4.4\t6667",
+        "1781000004.0\t10.0.0.5\t165.245.215.18\t4444",
+        "garbage-line-without-port",
+    ])
+    calls = []
+    def fake(cmd, **k):
+        calls.append(cmd)
+        return out, "", 0
+    monkeypatch.setattr(w, "run_command", fake)
+
+    items = w._get_suspicious_ports("x.pcap")
+    assert len(calls) == 1                                  # one pcap read
+    by_id = {i["artifact_id"]: i for i in items}
+    assert set(by_id) == {"suspport_4444", "suspport_6667"}
+    assert "10.0.0.5 → 165.245.215.18 (3 packets)" in by_id["suspport_4444"]["value"]
+    # frame.time_epoch floats are converted to readable ISO-8601 UTC at the source
+    assert by_id["suspport_4444"]["timestamp"] == "2026-06-09T10:13:21Z"
+    assert by_id["suspport_4444"]["severity"] == "high"     # C2_PORTS_HIGH
+    assert by_id["suspport_6667"]["severity"] == "medium"   # watch tier
+
+
+def test_epoch_to_iso_conversion_and_passthrough():
+    from src.wrappers.tshark_wrapper import _epoch_to_iso
+    assert _epoch_to_iso("1781000001.005") == "2026-06-09T10:13:21Z"
+    assert _epoch_to_iso("") == ""            # missing stays empty
+    assert _epoch_to_iso("not-a-number") == "not-a-number"  # unparseable passes through

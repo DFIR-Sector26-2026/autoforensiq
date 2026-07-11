@@ -133,14 +133,8 @@ class PlasoWrapper(BaseWrapper):
         items = self._parse_csv(csv_output)
 
         # cleanup
-        for f in [plaso_dump, csv_output]:
-            try:
-                if isinstance(f, Path):
-                    f.unlink()
-                else:
-                    os.remove(f)
-            except Exception:
-                pass
+        for f in (plaso_dump, csv_output):
+            f.unlink(missing_ok=True)
 
         return items
 

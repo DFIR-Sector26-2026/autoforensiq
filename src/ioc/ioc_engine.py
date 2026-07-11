@@ -19,6 +19,8 @@ SUSPICIOUS_PROCESSES = [
     "@WanaDecryptor@"
 ]
 
+# Bare "wmic" was here (standard admin tool — same FP class as the removed bare cmd.exe/powershell
+# names, B-5); only its specific abuse forms are indicators. ML keeps wmic.exe as a soft feature.
 SUSPICIOUS_KEYWORDS = [
     "mimikatz",
     "meterpreter",
@@ -26,7 +28,8 @@ SUSPICIOUS_KEYWORDS = [
     "cobaltstrike",
     "powershell -enc",
     "vssadmin delete shadows",
-    "wmic",
+    "wmic shadowcopy delete",
+    "wmic process call create",
 ]
 
 SUSPICIOUS_DLL_PATHS = [

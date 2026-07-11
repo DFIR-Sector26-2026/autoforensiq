@@ -197,93 +197,62 @@ def _mock_classify(report_text: str) -> dict:
 
 # ── Real LLM classifiers ──────────────────────────────────────────────────────
 
+def _get_api_key(cfg: dict, env_key_name: str) -> str:
+    api_key = os.environ.get(cfg["llm"][env_key_name])
+    if not api_key:
+        raise EnvironmentError(
+            f"API key not found. Set the {cfg['llm'][env_key_name]} "
+            "environment variable, or enable mock_mode in config.yaml."
+        )
+    return api_key
+
+
 def _call_anthropic(report_text: str, cfg: dict) -> dict:
     try:
         import anthropic
     except ImportError:
         raise ImportError("anthropic package not installed. Run: pip install anthropic")
 
-    api_key = os.environ.get(cfg["llm"]["anthropic_api_key_env"])
-    if not api_key:
-        raise EnvironmentError(
-            f"API key not found. Set the {cfg['llm']['anthropic_api_key_env']} "
-            "environment variable, or enable mock_mode in config.yaml."
-        )
-
-    client = anthropic.Anthropic(api_key=api_key)
-    model  = cfg["llm"]["anthropic_model"]
+    client = anthropic.Anthropic(api_key=_get_api_key(cfg, "anthropic_api_key_env"))
 
     message = client.messages.create(
-        model=model,
+        model=cfg["llm"]["anthropic_model"],
         max_tokens=cfg["llm"]["max_tokens"],
         temperature=cfg["llm"]["temperature"],
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": report_text}],
     )
 
-    raw = message.content[0].text.strip()
-    return _parse_llm_json(raw)
+    return _parse_llm_json(message.content[0].text.strip())
 
 
-def _call_openai(report_text: str, cfg: dict) -> dict:
+def _call_openai_compatible(report_text: str, cfg: dict, key_env: str, model_key: str,
+                            base_url: str = None, force_json: bool = False) -> dict:
+    """One client for every OpenAI-SDK provider (DeepSeek differs only in base_url and its lack
+    of response_format support) — was two ~30-line copy-pasted functions."""
     try:
         from openai import OpenAI
     except ImportError:
         raise ImportError("openai package not installed. Run: pip install openai")
 
-    api_key = os.environ.get(cfg["llm"]["openai_api_key_env"])
-    if not api_key:
-        raise EnvironmentError(
-            f"API key not found. Set the {cfg['llm']['openai_api_key_env']} "
-            "environment variable, or enable mock_mode in config.yaml."
-        )
+    client_kwargs = {"api_key": _get_api_key(cfg, key_env)}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    client = OpenAI(**client_kwargs)
 
-    client = OpenAI(api_key=api_key)
-    model  = cfg["llm"]["openai_model"]
-
+    completion_kwargs = {"response_format": {"type": "json_object"}} if force_json else {}
     response = client.chat.completions.create(
-        model=model,
-        max_tokens=cfg["llm"]["max_tokens"],
-        temperature=cfg["llm"]["temperature"],
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": report_text},
-        ],
-    )
-
-    raw = response.choices[0].message.content.strip()
-    return _parse_llm_json(raw)
-
-
-def _call_deepseek(report_text: str, cfg: dict) -> dict:
-    try:
-        from openai import OpenAI
-    except ImportError:
-        raise ImportError("openai package not installed. Run: pip install openai")
-
-    api_key = os.environ.get(cfg["llm"]["deepseek_api_key_env"])
-    if not api_key:
-        raise EnvironmentError(
-            f"API key not found. Set the {cfg['llm']['deepseek_api_key_env']} "
-            "environment variable, or enable mock_mode in config.yaml."
-        )
-
-    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-    model  = cfg["llm"]["deepseek_model"]
-
-    response = client.chat.completions.create(
-        model=model,
+        model=cfg["llm"][model_key],
         max_tokens=cfg["llm"]["max_tokens"],
         temperature=cfg["llm"]["temperature"],
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": report_text},
         ],
+        **completion_kwargs,
     )
 
-    raw = response.choices[0].message.content.strip()
-    return _parse_llm_json(raw)
+    return _parse_llm_json(response.choices[0].message.content.strip())
 
 
 def _parse_llm_json(raw: str) -> dict:
@@ -347,10 +316,12 @@ def classify(report_text: str, config_override: dict = None,
         result = _call_anthropic(report_text, cfg)
     elif provider == "openai":
         print(f"[CLASSIFIER] Calling OpenAI ({cfg['llm']['openai_model']})")
-        result = _call_openai(report_text, cfg)
+        result = _call_openai_compatible(report_text, cfg, "openai_api_key_env",
+                                         "openai_model", force_json=True)
     elif provider == "deepseek":
         print(f"[CLASSIFIER] Calling DeepSeek ({cfg['llm']['deepseek_model']})")
-        result = _call_deepseek(report_text, cfg)
+        result = _call_openai_compatible(report_text, cfg, "deepseek_api_key_env",
+                                         "deepseek_model", base_url="https://api.deepseek.com")
     else:
         raise ValueError(f"Unknown LLM provider: '{provider}'. Use 'anthropic', 'openai', or 'deepseek'.")
 

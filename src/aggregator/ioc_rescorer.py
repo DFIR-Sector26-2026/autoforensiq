@@ -10,13 +10,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from src.data.threat_intel import C2_PORTS_HIGH, C2_PORTS_WATCH, LATERAL_MOVEMENT_PORTS
+from src.data.threat_intel import C2_PORTS_HIGH, C2_PORTS_WATCH, LATERAL_MOVEMENT_PORTS, SEVERITY_ORDER
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 _DEFAULT_CATALOG_PATH = ROOT_DIR / "src" / "data" / "ioc_patterns.json"
-
-# Shared severity ranking (mirrors evidence_aggregator.SEVERITY_ORDER).
-SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 
 # Structural roll-ups whose text embeds items already emitted/scored on their own (process_tree
 # embeds every process) — re-scoring would double-count the malware as a second critical finding
