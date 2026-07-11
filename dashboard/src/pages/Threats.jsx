@@ -9,7 +9,7 @@ import { SEVERITY_TEXT } from "../data/severity";
 import { humanize } from "../utils/format";
 
 // Severities shown on this page, in display order.
-const SEV_ORDER = ["critical", "high", "low"];
+const SEV_ORDER = ["critical", "high", "medium", "low"];
 
 function Section({ severity, items, sources }) {
 
