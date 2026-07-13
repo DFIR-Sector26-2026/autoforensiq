@@ -11,6 +11,7 @@ from pathlib import Path
 from src.report_generator.report_generator import (
     MITRE_BY_CASE,
     RECOMMENDATIONS_BY_CASE,
+    _build_correlated_findings,
     _build_dashboard_summary,
     _build_evidence_coverage,
     _build_ioc_report,
@@ -243,6 +244,26 @@ def test_item_indicators_surfaces_string_sweep_iocs():
            "severity": "medium", "artifact_id": "reg_1"}
     assert ("Registry Key", "\\Registry\\Machine\\SOFTWARE\\WanaCrypt0r") in \
         _item_indicators(reg)
+
+
+def test_item_indicators_extracts_url_and_host_from_timeline_event():
+    # plaso timeline_event values embed the URL inline (no "→" arrow); before the branch existed,
+    # plaso-only runs (ubnist1 E01) reported ioc_count 0 despite 177 URL-bearing events.
+    ev = {"evidence_type": "timeline_event", "source_tool": "plaso",
+          "value": "[12/28/2008 21:30:03] [Firefox History] "
+                   "http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A1.doc "
+                   "(FCC-08-281A1.doc) [count: 0] Host: hraunfoss.fcc.gov visited from: "
+                   "http://www.fcc.gov/ (www.fcc.gov) Transition: DOWNLOAD",
+          "severity": "medium", "artifact_id": "tl_1"}
+    inds = _item_indicators(ev)
+    assert ("URL", "http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A1.doc") in inds
+    assert ("Domain", "hraunfoss.fcc.gov") in inds
+
+    # events without an embedded URL/host (e.g. filesystem timestamps) yield nothing
+    fs = {"evidence_type": "timeline_event", "source_tool": "plaso",
+          "value": "[12/28/2008 21:30:03] [FILE] atime /home/ubuntu/Desktop/report.doc",
+          "severity": "low", "artifact_id": "tl_2"}
+    assert _item_indicators(fs) == []
 
 
 def test_finding_sort_key_ranks_ioc_bearing_above_indicatorless():
@@ -746,3 +767,30 @@ def test_ioc_sources_cell_lists_artifact_id_pointers():
     out = _build_ioc_report(items, tool_sources={"volatility3": "memory.raw"})
     row = next(l for l in out.splitlines() if "tasksche.exe" in l)
     assert "volatility3 · memory.raw: proc_1, proc_2, proc_3 +2 more" in row
+
+
+def test_correlated_findings_table_strong_types_and_folded_timestamps():
+    # Strong correlations (linked_artifact/same_pid/same_file) render confidence-sorted; the noisy
+    # same_timestamp co-occurrences fold to a one-line count instead of flooding the table.
+    findings = [
+        {"correlation_type": "same_pid", "confidence": 0.87,
+         "finding": "PID 596 observed across multiple artifacts",
+         "artifacts": ["a", "b", "c"], "source_tools": ["volatility3"]},
+        {"correlation_type": "linked_artifact", "confidence": 0.99,
+         "finding": "Tool-declared link across 5 artifacts",
+         "artifacts": ["a", "b", "c", "d", "e"],
+         "source_tools": ["ioc_engine", "volatility3"]},
+        {"correlation_type": "same_timestamp", "confidence": 0.96,
+         "finding": "Shared timestamp bucket", "artifacts": ["x", "y"],
+         "source_tools": ["plaso"]},
+    ]
+    out = _build_correlated_findings(findings)
+    rows = [l for l in out.splitlines() if l.startswith("|") and "%" in l]
+    assert "99%" in rows[0] and "87%" in rows[1]   # confidence-sorted, strong types only
+    assert "ioc_engine, volatility3" in rows[0]
+    assert "Shared timestamp bucket" not in out
+    assert "1 same-timestamp co-occurrence(s) omitted" in out
+
+
+def test_correlated_findings_empty_sentinel():
+    assert "_No cross-artifact correlations detected._" in _build_correlated_findings([])

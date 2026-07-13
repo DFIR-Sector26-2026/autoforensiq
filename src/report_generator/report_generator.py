@@ -631,6 +631,10 @@ _URL_RE = re.compile(r"→\s*(\S+/\S*)")
 # services (e.g. <16-56 base32>.onion).
 _SUSP_DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9.\-]*\.[a-z]{2,})\b", re.IGNORECASE)
 _CRYPTO_RE = re.compile(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b")
+# plaso timeline_event values embed indicators inline (no "→" arrow): a bare http(s) URL and a
+# "Host: <domain>" token (browser-history events).
+_BARE_URL_RE = re.compile(r"\bhttps?://\S+", re.IGNORECASE)
+_HOST_RE = re.compile(r"\bHost:\s*([a-z0-9][a-z0-9.\-]*\.[a-z]{2,})", re.IGNORECASE)
 # Executable/script filename extensions for IOC extraction — shared with the disk wrapper via
 # threat_intel.EXECUTABLE_EXTENSIONS (was a private _FNAME_EXTS copy). Aggregates re-list many
 # process names — tokenizing them would stamp their severity onto every benign name, so files come
@@ -641,6 +645,7 @@ _IOC_CTX = {
     "network_connection": "Network connection",
     "dns_query": "DNS query",
     "http_request": "HTTP request",
+    "timeline_event": "Timeline event",
 }
 
 
@@ -709,6 +714,13 @@ def _item_indicators(item):
             dom = m.group(1).rstrip(".")
             label = "Onion Address" if dom.lower().endswith(".onion") else "Domain"
             out.append((label, dom))
+    elif etype == "timeline_event":
+        m = _BARE_URL_RE.search(val)
+        if m:
+            out.append(("URL", m.group(0).rstrip(").,;")))
+        m = _HOST_RE.search(val)
+        if m:
+            out.append(("Domain", m.group(1).rstrip(".")))
     elif etype == "suspicious_crypto":
         # Fall back to the bare value when the legacy-BTC regex misses, so a bech32/ETH wallet added
         # later isn't silently dropped.
@@ -1399,6 +1411,54 @@ def _build_ml_only_section(all_items, anomaly_ids, anomaly_lookup, tool_sources)
     return section
 
 
+# Correlation types worth an analyst's attention. same_timestamp is folded to a count: browsing
+# sessions share minute buckets, so it floods plaso runs with noise (48/72 on ubnist1).
+_STRONG_CORRELATION_TYPES = ("linked_artifact", "same_pid", "same_file")
+CORRELATED_FINDINGS_CAP = 15
+
+
+def _build_correlated_findings(findings):
+    """Markdown section for the aggregator's cross-artifact `findings`: strong correlation types
+    as a confidence-sorted table, weak same_timestamp co-occurrences as a one-line count."""
+    findings = [f for f in findings if isinstance(f, dict)]
+    strong = [f for f in findings if f.get("correlation_type") in _STRONG_CORRELATION_TYPES]
+    n_ts = sum(1 for f in findings if f.get("correlation_type") == "same_timestamp")
+    if not strong and not n_ts:
+        return "## Correlated Findings\n\n_No cross-artifact correlations detected._"
+
+    parts = ["## Correlated Findings"]
+    if strong:
+        strong.sort(key=lambda f: -(f.get("confidence") or 0))
+        shown = strong[:CORRELATED_FINDINGS_CAP]
+        rows = [
+            "| Correlation | Confidence | Finding | Artifacts | Tools |",
+            "|-------------|------------|---------|-----------|-------|",
+        ]
+        for f in shown:
+            conf = f.get("confidence")
+            conf_cell = f"{conf:.0%}" if isinstance(conf, (int, float)) else "-"
+            rows.append(
+                f"| {_md_cell(str(f.get('correlation_type', '-')).replace('_', ' '))} "
+                f"| {conf_cell} "
+                f"| {_md_cell(str(f.get('finding', '-'))[:90])} "
+                f"| {len(f.get('artifacts', []))} "
+                f"| {_md_cell(', '.join(f.get('source_tools', [])) or '-')} |"
+            )
+        parts.append(
+            f"**{len(strong)}** cross-artifact correlation(s) — the same PID, file, or "
+            "tool-declared link observed across multiple evidence items.\n\n" + "\n".join(rows)
+        )
+        overflow = len(strong) - len(shown)
+        if overflow > 0:
+            parts.append(f"_…and {overflow} more — see `output/unified_evidence.json`._")
+    if n_ts:
+        parts.append(
+            f"_{n_ts} same-timestamp co-occurrence(s) omitted (weak signal); "
+            "full list in `output/unified_evidence.json`._"
+        )
+    return "\n\n".join(parts)
+
+
 # ─────────────────────────────────────────────────────────────
 # MOCK REPORT BUILDER
 # ─────────────────────────────────────────────────────────────
@@ -1628,10 +1688,12 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     ml_only_section = _build_ml_only_section(
         all_items, anomaly_ids, anomaly_lookup, tool_sources)
 
+    correlation_section = _build_correlated_findings(unified_evidence.get("findings", []))
+
     sections = [
         cover, exec_summary, classification, findings_section,
-        ml_only_section, ioc_section, mitre_section, process_section,
-        hyp_section, verdict_section, recs_section,
+        correlation_section, ml_only_section, ioc_section, mitre_section,
+        process_section, hyp_section, verdict_section, recs_section,
         coverage_section, audit_section,
     ]
     return "\n\n---\n\n".join(sections)

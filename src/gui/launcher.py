@@ -476,15 +476,6 @@ class AutoForensiqGUI(ctk.CTk):
     def _build_console(self) -> None:
         _, body, hdr = self._card("PIPELINE OUTPUT")
 
-        ctk.CTkButton(
-            hdr, text="Clear",
-            command=self._clear_console,
-            width=56, height=24, corner_radius=6,
-            fg_color="transparent", hover_color=BORDER,
-            border_width=1, border_color=BORDER,
-            font=(FONT_FAMILY, 10), text_color=TEXT_MUTED,
-        ).pack(side="right")
-
         self._copy_btn = ctk.CTkButton(
             hdr, text="Copy",
             command=self._copy_console,
@@ -493,7 +484,7 @@ class AutoForensiqGUI(ctk.CTk):
             border_width=1, border_color=BORDER,
             font=(FONT_FAMILY, 10), text_color=TEXT_MUTED,
         )
-        self._copy_btn.pack(side="right", padx=(0, 6))
+        self._copy_btn.pack(side="right")
 
         self._console = ctk.CTkTextbox(
             body,
