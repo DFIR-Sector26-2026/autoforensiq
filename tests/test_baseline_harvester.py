@@ -37,6 +37,23 @@ def test_only_unflagged_low_severity_items_are_harvested(tmp_path):
     assert records[0]["confidence"] == 0.75
 
 
+def test_rule_penalized_features_never_enter_the_baseline(tmp_path):
+    # Low-severity unflagged records can still light rule-penalized features (rundll32/cmd.exe
+    # poisoning) — reject them or the distance detector learns those deviations are normal.
+    unified = tmp_path / "unified.json"
+    baseline = tmp_path / "baseline.json"
+    unified.write_text(json.dumps(_unified([
+        _item(artifact_id="poison", evidence_type="memprocfs_process",
+              value="rundll32.exe (PID:1024)"),
+        _item(artifact_id="c2kw", value="beacon to callback host"),
+        _item(artifact_id="ok"),
+    ])))
+    added = harvest_baseline(str(unified), str(baseline))
+    records = json.loads(baseline.read_text())
+    assert added == {"network": 1}
+    assert [r["artifact_id"] for r in records] == ["ok"]
+
+
 def test_harvest_dedupes_against_existing_baseline_across_runs(tmp_path):
     unified = tmp_path / "unified.json"
     baseline = tmp_path / "baseline.json"

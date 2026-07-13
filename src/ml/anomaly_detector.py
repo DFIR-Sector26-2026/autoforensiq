@@ -1,16 +1,14 @@
-"""IsolationForest trained on baseline-normal data + a deterministic rule boost. Design:
-contamination=0.01 (baseline is nearly pure normal); n_estimators=200 (stabilises scores on the
-tiny 5-record baseline); rule penalties for always-anomalous features so obvious threats aren't
-under-scored; confidence calibrated from the raw score into [0,1]."""
+"""Baseline-distance novelty detector + a deterministic rule boost. Replaced the IsolationForest,
+which couldn't split on the baseline's zero-variance discriminative features. Model scores are ≤ 0
+(0 = matches a baseline profile), so novelty only ever adds to what the rules already flag."""
 
 import numpy as np
-from sklearn.ensemble import IsolationForest
 from typing import List, Dict, Any
 
 
 # ── Rule-based booster ────────────────────────────────────────────────────────
 # Maps feature-index → extra negative score to add when feature == 1.
-# Negative = more anomalous (mirrors IsolationForest sign convention).
+# Negative = more anomalous (lower score = more anomalous throughout).
 RULE_BOOSTS: Dict[int, float] = {
     1:  -0.30,   # is_suspicious_process
     2:  -0.20,   # suspicious_parent
@@ -26,31 +24,42 @@ SEVERITY_AMPLIFIER = -0.25   # maximum penalty at severity=1.0 (critical)
 
 ANOMALY_THRESHOLD = -0.10    # scores below this → anomaly
 
+# ── Distance weights ──────────────────────────────────────────────────────────
+# Severity (feature 13) is excluded from the distance: SEVERITY_AMPLIFIER already prices it, and
+# the harvester admits only low-severity records so it carries no baseline variance anyway.
+SEVERITY_IDX = 13
+# Penalty per feature lit in the evidence but not in the nearest baseline profile.
+NOVEL_FEATURE_PENALTY = 0.12
+# Lacking a feature the profile has is only mildly unusual, not threatening.
+MISSING_FEATURE_PENALTY = 0.03
+MODEL_SCORE_FLOOR = -0.50
+
 
 class AnomalyDetector:
 
     def __init__(self):
-        self.model = IsolationForest(
-            n_estimators=200,
-            contamination=0.01,   # baseline is nearly 100 % clean
-            max_samples="auto",
-            random_state=42,
-            bootstrap=False,
-        )
+        self._profiles = None   # distinct baseline vectors over the binary features
         self._fitted = False
 
     # ── Training ──────────────────────────────────────────────────────────────
 
     def fit(self, X: np.ndarray) -> None:
-        """Train on baseline-normal feature matrix."""
-        self.model.fit(X)
+        """Store the distinct baseline-normal profiles (binary features only)."""
+        Xb = np.asarray(X, dtype=float)
+        self._profiles = np.unique(Xb[:, :SEVERITY_IDX], axis=0)
         self._fitted = True
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 
     def _model_score(self, X: np.ndarray) -> np.ndarray:
-        """Raw IsolationForest decision function scores (higher = more normal)."""
-        return self.model.decision_function(X)
+        """Negative novelty vs the nearest baseline profile (higher = more normal, max 0)."""
+        Xb = np.asarray(X, dtype=float)[:, :SEVERITY_IDX]
+        diff = Xb[:, None, :] - self._profiles[None, :, :]
+        novel   = np.clip(diff, 0.0, None).sum(axis=2)
+        missing = np.clip(-diff, 0.0, None).sum(axis=2)
+        novelty = (NOVEL_FEATURE_PENALTY * novel
+                   + MISSING_FEATURE_PENALTY * missing).min(axis=1)
+        return np.maximum(-novelty, MODEL_SCORE_FLOOR)
 
     def _rule_boost(self, X: np.ndarray) -> np.ndarray:
         """Deterministic penalty vector, one value per sample."""
@@ -65,7 +74,7 @@ class AnomalyDetector:
         if not self._fitted:
             raise RuntimeError("Call fit() before score_components().")
 
-        model_scores = self._model_score(X)          # typically (-0.5, +0.5)
+        model_scores = self._model_score(X)          # in [-0.5, 0]
         rule_scores  = self._rule_boost(X)           # always ≤ 0
         final_scores = model_scores + rule_scores
 

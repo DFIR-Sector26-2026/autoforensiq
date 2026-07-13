@@ -48,5 +48,1315 @@
     "severity": "low",
     "confidence": 0.92,
     "linked_artifacts": []
+  },
+  {
+    "artifact_id": "hostid_192_168_2_100_002170a73a0d",
+    "source_tool": "tshark",
+    "evidence_type": "host_identity",
+    "timestamp": "2009-01-26T17:57:25Z",
+    "value": "Host 192.168.2.100 has MAC 00:21:70:a7:3a:0d",
+    "severity": "low",
+    "confidence": 0.9,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "hostid_192_168_2_170_00219b32d84c",
+    "source_tool": "tshark",
+    "evidence_type": "host_identity",
+    "timestamp": "2009-01-26T17:57:25Z",
+    "value": "Host 192.168.2.170 has MAC 00:21:9b:32:d8:4c",
+    "severity": "low",
+    "confidence": 0.9,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "hostid_10_0_1_55_000d93641e32",
+    "source_tool": "tshark",
+    "evidence_type": "host_identity",
+    "timestamp": "2009-07-10T14:35:40Z",
+    "value": "Host 10.0.1.55 has MAC 00:0d:93:64:1e:32",
+    "severity": "low",
+    "confidence": 0.9,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "hostid_10_0_1_7_0016cb9ca198",
+    "source_tool": "tshark",
+    "evidence_type": "host_identity",
+    "timestamp": "2009-07-10T14:35:40Z",
+    "value": "Host 10.0.1.7 has MAC 00:16:cb:9c:a1:98",
+    "severity": "low",
+    "confidence": 0.9,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "hostid_10_0_1_1_001b63f26216",
+    "source_tool": "tshark",
+    "evidence_type": "host_identity",
+    "timestamp": "2009-07-10T14:35:40Z",
+    "value": "Host 10.0.1.1 has MAC 00:1b:63:f2:62:16",
+    "severity": "low",
+    "confidence": 0.9,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "hostid_10_0_1_9_0016cb9ca198",
+    "source_tool": "tshark",
+    "evidence_type": "host_identity",
+    "timestamp": "2009-07-10T14:36:02Z",
+    "value": "Host 10.0.1.9 has MAC 00:16:cb:9c:a1:98",
+    "severity": "low",
+    "confidence": 0.9,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "hostid_10_0_1_198_000393881684",
+    "source_tool": "tshark",
+    "evidence_type": "host_identity",
+    "timestamp": "2009-07-10T14:36:15Z",
+    "value": "Host 10.0.1.198 has MAC 00:03:93:88:16:84",
+    "severity": "low",
+    "confidence": 0.9,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_petit-globe_dyndns_org_PTR_1247236540.752405000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:35:40Z",
+    "value": "DNS PTR query from 10.0.1.55 \u2192 petit-globe.dyndns.org (label entropy: 3.10)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_xlite_counterpath_com_A_1247236565.339638000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:05Z",
+    "value": "DNS A query from 10.0.1.55 \u2192 xlite.counterpath.com (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_web_xlite_counterpath_com_A_1247236565.339954000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:05Z",
+    "value": "DNS A query from 10.0.1.55 \u2192 web.xlite.counterpath.com (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_xlite_counterpath_com_AAAA_1247236565.340036000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:05Z",
+    "value": "DNS AAAA query from 10.0.1.55 \u2192 xlite.counterpath.com (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_web_xlite_counterpath_com_AAAA_1247236565.340540000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:05Z",
+    "value": "DNS AAAA query from 10.0.1.55 \u2192 web.xlite.counterpath.com (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_web_xlite_counterpath_com_city_A_1247236565.539605000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:05Z",
+    "value": "DNS A query from 10.0.1.55 \u2192 web.xlite.counterpath.com.citycable.ch (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_web_xlite_counterpath_com_city_AAAA_1247236565.541092000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:05Z",
+    "value": "DNS AAAA query from 10.0.1.55 \u2192 web.xlite.counterpath.com.citycable.ch (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_www_apple_com_AAAA_1247236565.679385000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:05Z",
+    "value": "DNS AAAA query from 10.0.1.55 \u2192 www.apple.com (label entropy: 1.92)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_www_apple_com_A_1247236565.684076000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:05Z",
+    "value": "DNS A query from 10.0.1.55 \u2192 www.apple.com (label entropy: 1.92)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55__sip__udp_sip11_youroute_net_SRV_1247236567.176537000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:07Z",
+    "value": "DNS SRV query from 10.0.1.55 \u2192 _sip._udp.sip11.youroute.net (label entropy: 2.50)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55__sip__tcp_sip11_youroute_net_SRV_1247236567.176749000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:07Z",
+    "value": "DNS SRV query from 10.0.1.55 \u2192 _sip._tcp.sip11.youroute.net (label entropy: 2.50)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55__stun__udp_stun_counterpath_ne_SRV_1247236567.176806000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:07Z",
+    "value": "DNS SRV query from 10.0.1.55 \u2192 _stun._udp.stun.counterpath.net (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_sip11_youroute_net_A_1247236567.293703000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:07Z",
+    "value": "DNS A query from 10.0.1.55 \u2192 sip11.youroute.net (label entropy: 2.50)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_stun_counterpath_net_A_1247236567.484410000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:07Z",
+    "value": "DNS A query from 10.0.1.55 \u2192 stun.counterpath.net (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_sip11_youroute_net_35_1247236568.885251000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:08Z",
+    "value": "DNS 35 query from 10.0.1.55 \u2192 sip11.youroute.net (label entropy: 2.50)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_counterpath_s3_amazonaws_com_AAAA_1247236569.431838000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:09Z",
+    "value": "DNS AAAA query from 10.0.1.55 \u2192 counterpath.s3.amazonaws.com (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_counterpath_s3_amazonaws_com_A_1247236569.432306000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:09Z",
+    "value": "DNS A query from 10.0.1.55 \u2192 counterpath.s3.amazonaws.com (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_sip4_youroute_net_35_1247236570.403742000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:10Z",
+    "value": "DNS 35 query from 10.0.1.55 \u2192 sip4.youroute.net (label entropy: 2.50)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55__sip__tcp_sip4_youroute_net_SRV_1247236570.623669000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:10Z",
+    "value": "DNS SRV query from 10.0.1.55 \u2192 _sip._tcp.sip4.youroute.net (label entropy: 2.50)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55__sip__udp_sip4_youroute_net_SRV_1247236570.623731000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:10Z",
+    "value": "DNS SRV query from 10.0.1.55 \u2192 _sip._udp.sip4.youroute.net (label entropy: 2.50)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_sip4_youroute_net_A_1247236570.836357000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:10Z",
+    "value": "DNS A query from 10.0.1.55 \u2192 sip4.youroute.net (label entropy: 2.50)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_upgrades_counterpath_com_AAAA_1247236592.673336000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:32Z",
+    "value": "DNS AAAA query from 10.0.1.55 \u2192 upgrades.counterpath.com (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_upgrades_counterpath_com_A_1247236592.675716000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:36:32Z",
+    "value": "DNS A query from 10.0.1.55 \u2192 upgrades.counterpath.com (label entropy: 3.28)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_0_0_0_0_b_1_f_a_a_e_1_0_8_1_5__PTR_1247236769.261879000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:39:29Z",
+    "value": "DNS PTR query from 10.0.1.55 \u2192 0.0.0.0.b.1.f.a.a.e.1.0.8.1.5.4.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa (label entropy: 1.58)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_0_0_0_0_4_1_0_4_a_e_1_0_8_1_5__PTR_1247236769.262848000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:39:29Z",
+    "value": "DNS PTR query from 10.0.1.55 \u2192 0.0.0.0.4.1.0.4.a.e.1.0.8.1.5.4.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa (label entropy: 1.58)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_0_0_0_0_d_7_3_8_0_2_1_0_8_1_5__PTR_1247236770.140809000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:39:30Z",
+    "value": "DNS PTR query from 10.0.1.55 \u2192 0.0.0.0.d.7.3.8.0.2.1.0.8.1.5.4.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa (label entropy: 1.58)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_0_0_0_0_a_0_8_a_0_2_1_0_8_1_5__PTR_1247236770.148373000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:39:30Z",
+    "value": "DNS PTR query from 10.0.1.55 \u2192 0.0.0.0.a.0.8.a.0.2.1.0.8.1.5.4.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa (label entropy: 1.58)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_0_0_0_0_8_5_6_a_0_2_1_0_8_1_5__PTR_1247236772.133027000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:39:32Z",
+    "value": "DNS PTR query from 10.0.1.55 \u2192 0.0.0.0.8.5.6.a.0.2.1.0.8.1.5.4.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa (label entropy: 1.58)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_0_0_0_0_e_0_0_b_0_2_1_0_8_1_5__PTR_1247236772.144016000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:39:32Z",
+    "value": "DNS PTR query from 10.0.1.55 \u2192 0.0.0.0.e.0.0.b.0.2.1.0.8.1.5.4.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa (label entropy: 1.58)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_0_0_0_0_5_0_e_9_0_2_1_0_8_1_5__PTR_1247236776.080721000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:39:36Z",
+    "value": "DNS PTR query from 10.0.1.55 \u2192 0.0.0.0.5.0.e.9.0.2.1.0.8.1.5.4.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa (label entropy: 1.58)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_0_0_0_0_a_0_6_4_0_2_1_0_8_1_5__PTR_1247236776.080797000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:39:36Z",
+    "value": "DNS PTR query from 10.0.1.55 \u2192 0.0.0.0.a.0.6.4.0.2.1.0.8.1.5.4.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa (label entropy: 1.58)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_0_0_0_0_4_1_4_c_0_2_1_0_8_1_5__PTR_1247236784.226731000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:39:44Z",
+    "value": "DNS PTR query from 10.0.1.55 \u2192 0.0.0.0.4.1.4.c.0.2.1.0.8.1.5.4.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa (label entropy: 1.58)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "dns_10_0_1_55_0_0_0_0_c_6_3_1_0_2_1_0_8_1_5__PTR_1247236784.226859000",
+    "source_tool": "tshark",
+    "evidence_type": "dns_query",
+    "timestamp": "2009-07-10T14:39:44Z",
+    "value": "DNS PTR query from 10.0.1.55 \u2192 0.0.0.0.c.6.3.1.0.2.1.0.8.1.5.4.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa (label entropy: 1.58)",
+    "severity": "low",
+    "confidence": 0.8,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_10_0_1_7_54104_1247236540.109167",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:40Z",
+    "value": "TCP 10.0.1.55 \u2192 10.0.1.7:54104 (25423961 bytes, 23540 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_7_10_0_1_55_407_1247236540.121945",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:40Z",
+    "value": "TCP 10.0.1.7 \u2192 10.0.1.55:407 (960332 bytes, 13712 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_208_245_107_9_10_0_1_55_61130_1247236540.153922",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:40Z",
+    "value": "TCP 208.245.107.9 \u2192 10.0.1.55:61130 (31264 bytes, 362 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_208_245_107_9_4000_1247236540.15405",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:40Z",
+    "value": "TCP 10.0.1.55 \u2192 208.245.107.9:4000 (72643 bytes, 1205 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_208_245_107_9_10_0_1_55_61127_1247236540.248326",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:40Z",
+    "value": "TCP 208.245.107.9 \u2192 10.0.1.55:61127 (128123 bytes, 734 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_208_245_107_9_10_0_1_55_61129_1247236541.288232",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:41Z",
+    "value": "TCP 208.245.107.9 \u2192 10.0.1.55:61129 (9644 bytes, 109 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_208_245_107_3_10_0_1_55_61112_1247236544.540742",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:44Z",
+    "value": "TCP 208.245.107.3 \u2192 10.0.1.55:61112 (12072 bytes, 62 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_208_245_107_3_4000_1247236544.545071",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:44Z",
+    "value": "TCP 10.0.1.55 \u2192 208.245.107.3:4000 (5201 bytes, 61 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_212_243_80_21_10_0_1_55_61131_1247236546.086369",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:46Z",
+    "value": "TCP 212.243.80.21 \u2192 10.0.1.55:61131 (5379 bytes, 60 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_212_243_80_21_4000_1247236546.086511",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:46Z",
+    "value": "TCP 10.0.1.55 \u2192 212.243.80.21:4000 (6358 bytes, 58 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_17_250_248_161_5354_1247236547.284063",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:47Z",
+    "value": "TCP 10.0.1.55 \u2192 17.250.248.161:5354 (1508 bytes, 16 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_17_250_248_161_10_0_1_55_61207_1247236547.46233",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:47Z",
+    "value": "TCP 17.250.248.161 \u2192 10.0.1.55:61207 (3206 bytes, 14 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_202_1_7_9_10_0_1_55_61132_1247236548.237284",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:48Z",
+    "value": "TCP 202.1.7.9 \u2192 10.0.1.55:61132 (5239 bytes, 58 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_202_1_7_9_4000_1247236548.23747",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:35:48Z",
+    "value": "TCP 10.0.1.55 \u2192 202.1.7.9:4000 (6357 bytes, 58 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_75_101_141_136_80_1247236565.72873",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:36:05Z",
+    "value": "TCP 10.0.1.55 \u2192 75.101.141.136:80 (998 bytes, 7 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_75_101_141_136_10_0_1_55_61212_1247236565.839998",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:36:05Z",
+    "value": "TCP 75.101.141.136 \u2192 10.0.1.55:61212 (2178 bytes, 6 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_17_148_16_32_993_1247236569.086636",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:36:09Z",
+    "value": "TCP 10.0.1.55 \u2192 17.148.16.32:993 (326 bytes, 4 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_17_148_16_32_10_0_1_55_53920_1247236569.31917",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:36:09Z",
+    "value": "TCP 17.148.16.32 \u2192 10.0.1.55:53920 (354 bytes, 4 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_72_21_203_133_443_1247236569.650621",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:36:09Z",
+    "value": "TCP 10.0.1.55 \u2192 72.21.203.133:443 (4402 bytes, 56 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_72_21_203_133_10_0_1_55_61214_1247236569.767483",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:36:09Z",
+    "value": "TCP 72.21.203.133 \u2192 10.0.1.55:61214 (111539 bytes, 81 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_85_218_20_43_15711_1247236592.323318",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:36:32Z",
+    "value": "TCP 10.0.1.55 \u2192 85.218.20.43:15711 (268 bytes, 4 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_85_218_20_43_10_0_1_55_61088_1247236592.323897",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:36:32Z",
+    "value": "TCP 85.218.20.43 \u2192 10.0.1.55:61088 (284 bytes, 4 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_64_69_76_35_443_1247236592.803567",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:36:32Z",
+    "value": "TCP 10.0.1.55 \u2192 64.69.76.35:443 (1569 bytes, 14 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_64_69_76_35_10_0_1_55_61215_1247236593.00247",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:36:33Z",
+    "value": "TCP 64.69.76.35 \u2192 10.0.1.55:61215 (2131 bytes, 9 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_84_74_36_35_41470_1247236635.565526",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:37:15Z",
+    "value": "TCP 10.0.1.55 \u2192 84.74.36.35:41470 (569 bytes, 4 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_84_74_36_35_10_0_1_55_53923_1247236635.752512",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:37:15Z",
+    "value": "TCP 84.74.36.35 \u2192 10.0.1.55:53923 (216 bytes, 3 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_10_0_1_55_17_250_248_83_5223_1247236727.153067",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:38:47Z",
+    "value": "TCP 10.0.1.55 \u2192 17.250.248.83:5223 (361 bytes, 3 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "conn_17_250_248_83_10_0_1_55_60163_1247236727.330514",
+    "source_tool": "tshark",
+    "evidence_type": "network_connection",
+    "timestamp": "2009-07-10T14:38:47Z",
+    "value": "TCP 17.250.248.83 \u2192 10.0.1.55:60163 (334 bytes, 3 packets)",
+    "severity": "low",
+    "confidence": 0.75,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_208",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "RamCapture64.e (PID 208, PPID 2224) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_532",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "lsm.exe (PID 532, PPID 420) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_880",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "calc.exe (PID 880, PPID 1328) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1048",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "vmicsvc.exe (PID 1048, PPID 516) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1068",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "vmicsvc.exe (PID 1068, PPID 516) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1096",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "vmicsvc.exe (PID 1096, PPID 516) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1120",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "vmicsvc.exe (PID 1120, PPID 516) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1148",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "vmicsvc.exe (PID 1148, PPID 516) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1236",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "inetinfo.exe (PID 1236, PPID 516) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1480",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 1480, PPID 2268) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1716",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "sqlwriter.exe (PID 1716, PPID 516) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1840",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "UI0Detect.exe (PID 1840, PPID 516) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1988",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "msdtc.exe (PID 1988, PPID 516) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2068",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 2068, PPID 2268) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2096",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "sppsvc.exe (PID 2096, PPID 516) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2140",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 2140, PPID 2268) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2268",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 2268, PPID 2224) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2384",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "jusched.exe (PID 2384, PPID 2304) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2408",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 2408, PPID 2268) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2416",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "taskeng.exe (PID 2416, PPID 836) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2436",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "jucheck.exe (PID 2436, PPID 2384) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2452",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "UI0Detect.exe (PID 2452, PPID 1840) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2596",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "Redline.exe (PID 2596, PPID 2224) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2764",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 2764, PPID 2268) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_3036",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 3036, PPID 2268) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_3048",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 3048, PPID 2268) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_3176",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "procexp64.exe (PID 3176, PPID 2224) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_3476",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 3476, PPID 2268) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_3812",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 3812, PPID 2268) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_3868",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 3868, PPID 2268) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_3896",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "notepad.exe (PID 3896, PPID 2004) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_3976",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "chrome.exe (PID 3976, PPID 2268) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_4052",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "calc.exe (PID 4052, PPID 2004) \u2014 ordinary process",
+    "severity": "low",
+    "confidence": 0.55,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_4",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "System (PID 4, PPID 0) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_268",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "smss.exe (PID 268, PPID 4) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_344",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 344, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_360",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "csrss.exe (PID 360, PPID 340) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_368",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "dllhost.exe (PID 368, PPID 628) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_420",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "wininit.exe (PID 420, PPID 340) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_428",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "csrss.exe (PID 428, PPID 412) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_456",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "winlogon.exe (PID 456, PPID 412) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_516",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "services.exe (PID 516, PPID 420) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_524",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "lsass.exe (PID 524, PPID 420) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_568",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "taskhost.exe (PID 568, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_628",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 628, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_704",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 704, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_792",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 792, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_836",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 836, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_856",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "spoolsv.exe (PID 856, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_884",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 884, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_936",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 936, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_976",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 976, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1176",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 1176, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1216",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 1216, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1244",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 1244, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1556",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 1556, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_1744",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 1744, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2012",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 2012, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2128",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "svchost.exe (PID 2128, PPID 516) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2200",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "dwm.exe (PID 2200, PPID 936) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_2224",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "explorer.exe (PID 2224, PPID 2192) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_3888",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "conhost.exe (PID 3888, PPID 360) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "memprocfs_proc_4016",
+    "source_tool": "memprocfs",
+    "evidence_type": "memprocfs_process",
+    "timestamp": "",
+    "value": "conhost.exe (PID 4016, PPID 428) \u2014 common Windows system process",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
   }
 ]

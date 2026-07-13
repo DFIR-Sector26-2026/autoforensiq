@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+from src.ml.anomaly_detector import RULE_BOOSTS
+from src.ml.feature_engineering import extract_features
 from src.ml.pipeline import _model_scope
 
 BASELINE_FIELDS = ("artifact_id", "source_tool", "evidence_type", "timestamp",
@@ -21,6 +23,11 @@ def _is_benign_record(item: dict) -> bool:
     if item.get("ioc_match"):
         return False
     if str(item.get("evidence_type", "")).endswith("_status"):
+        return False
+    # A record lighting any rule-penalized feature is never certifiably benign — it would teach
+    # the detector that rule-punished deviations are normal (the rundll32/cmd.exe poisoning).
+    features = extract_features(item)
+    if any(features[i] for i in RULE_BOOSTS):
         return False
     return bool(str(item.get("value", "")).strip())
 
