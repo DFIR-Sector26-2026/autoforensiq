@@ -221,6 +221,23 @@ def test_tsk_run_fls_bare_filesystem_no_offset(monkeypatch):
     assert len(items) == 1
 
 
+def test_tsk_known_malware_filename_flagged_outside_staging_dir():
+    # The staging-dir gate hid the synthetic fixture's root-level tasksche.exe /
+    # @WanaDecryptor@.exe — no item emitted, so the IOC rescorer had nothing to
+    # boost to critical. Catalog-named files now signal anywhere on the disk,
+    # with letter boundaries so substrings like "conti" can't hit "continue.exe".
+    from src.wrappers.tsk_wrapper import _file_signal
+
+    assert _file_signal("/tasksche.exe") == ("medium", "Known-malware filename")
+    assert _file_signal("/@WanaDecryptor@.exe") == ("medium", "Known-malware filename")
+    assert _file_signal("/Tools/mimikatz.exe") == ("medium", "Known-malware filename")
+    # boundary: catalog token inside a longer word must not match
+    assert _file_signal("/Windows/System32/continue.exe") is None
+    assert _file_signal("/Windows/taskscheduler.dll") is None
+    # plain executables outside staging dirs stay un-flagged
+    assert _file_signal("/Program Files/app/setup.exe") is None
+
+
 # ─────────────────────────────────────────────────────────────
 # Volatility parser regression tests (issues 3.1 / 3.3)
 # ─────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import json
 import tempfile
 from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
 from src.data.threat_intel import RANSOM_EXTENSIONS, EXECUTABLE_EXTENSIONS
+from src.aggregator.ioc_rescorer import load_ioc_catalog
 
 
 # EXECUTABLE_EXTENSIONS are notable only inside a staging dir (or deleted) — extension alone flooded
@@ -29,17 +30,32 @@ def _in_staging_dir(lower_path: str) -> bool:
     return any(seg in lower_path for seg in STAGING_DIRS)
 
 
+# Catalog-named files (tasksche.exe, mimikatz, …) are notable ANYWHERE: the staging gate hid the
+# fixture's root-level droppers, and the rescorer can only boost items that actually get emitted.
+_NAME_RULE_CATEGORIES = ("known_malware", "ransomware_marker", "attacker_tooling")
+# Boundary-aware like volatility's marker regex (B-9b) — a letter on either side disqualifies the
+# hit, so "conti" never matches "continue.exe" nor "tasksche" a "taskscheduler" component.
+_KNOWN_BAD_NAME_RE = re.compile("|".join(
+    f"(?<![a-z]){re.escape(tok)}(?![a-z])"
+    for rule in load_ioc_catalog().get("indicators", [])
+    if rule.get("category") in _NAME_RULE_CATEGORIES
+    for tok in rule.get("match", [])
+) or "(?!x)x")
+
+
 def _file_signal(filepath: str):
-    """Return (severity, label) if the path is a notable file artifact by extension + location,
-    else None. Payload/encrypted extensions count anywhere; executable/script extensions count
-    only inside a staging directory. Deleted- file handling stays in the caller (it needs the fls
-    deletion flag)."""
+    """Return (severity, label) if the path is a notable file artifact by extension + location or
+    catalog-known name, else None. Payload/encrypted extensions and catalog names count anywhere;
+    executable/script extensions count only inside a staging directory. Deleted- file handling
+    stays in the caller (it needs the fls deletion flag)."""
     lower = filepath.lower()
     base = lower.rsplit("/", 1)[-1]
     if base.endswith(RANSOM_EXTENSIONS):
         return "high", "Payload/encrypted file"
     if base.endswith(EXECUTABLE_EXTENSIONS) and _in_staging_dir(lower):
         return "medium", "Executable in staging directory"
+    if _KNOWN_BAD_NAME_RE.search(base):
+        return "medium", "Known-malware filename"
     # PowerShell transcripts: deliberately LOW — GPO transcription is often fleet-wide, so existence
     # alone is weak; correlation is the lift. Scoring by filename/location would flood or overfit to
     # one image (B-6/B-7, N5).
