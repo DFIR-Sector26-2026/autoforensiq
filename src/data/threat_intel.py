@@ -26,20 +26,36 @@ SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 LATERAL_MOVEMENT_PORTS = frozenset({3389, 5900, 5985, 5986})
 
 
-# Known-good infrastructure, substring match on the full lowercased domain (a random subdomain under
-# cloudfront etc. is still legitimate). Shared by the tshark DNS gating and the aggregator's B1
-# co-occurrence pass.
+# Known-good infrastructure, exact-or-subdomain match (D7: the old substring rule allowlisted
+# lookalikes — "counter-google.com" matched "google"). Shared by the tshark DNS gating and the
+# aggregator's B1 co-occurrence pass via is_allowlisted_dns().
 DNS_ALLOWLIST = (
     "apple.com", "icloud.com", "aaplimg.com", "apple-dns.net",
-    "apple-cloudkit", "cdn-apple.com", "mzstatic.com",
-    "akamai", "akamaized.net", "akadns.net",
-    "cloudflare", "fastly", "google", "gstatic", "googleapis", "ggpht",
-    "amazonaws", "cloudfront", "azureedge", "microsoft", "windows.com",
-    "windowsupdate", "msftncsi", "msftconnecttest", "mshome.net", "mozilla",
-    "ubuntu.com", "debian.org", "fedoraproject.org", "digicert", "verisign",
+    "apple-cloudkit.com", "cdn-apple.com", "mzstatic.com",
+    "akamai.net", "akamai.com", "akamaiedge.net", "akamaihd.net",
+    "akamaized.net", "akadns.net",
+    "cloudflare.com", "cloudflare.net", "cloudflare-dns.com",
+    "fastly.net", "fastlylb.net",
+    "google.com", "googleusercontent.com", "googlevideo.com", "googlemail.com",
+    "gstatic.com", "googleapis.com", "ggpht.com",
+    "amazonaws.com", "amazonaws.com.cn", "cloudfront.net", "azureedge.net",
+    "microsoft.com", "microsoft.net", "microsoftonline.com", "windows.com",
+    "windowsupdate.com", "msftncsi.com", "msftconnecttest.com", "mshome.net",
+    "mozilla.org", "mozilla.com", "mozilla.net",
+    "ubuntu.com", "debian.org", "fedoraproject.org", "digicert.com", "verisign.com",
 )
 # Suffixes that are always local/non-routable noise.
 DNS_ALLOWLIST_SUFFIXES = (".local", ".arpa", ".lan", ".internal", ".home")
+
+
+def is_allowlisted_dns(domain: str) -> bool:
+    """True when `domain` is one of DNS_ALLOWLIST or a sub-domain of one (lookalike-safe), or ends
+    in a local/non-routable suffix."""
+    d = domain.lower().rstrip(".")
+    return (
+        any(d == good or d.endswith("." + good) for good in DNS_ALLOWLIST)
+        or d.endswith(DNS_ALLOWLIST_SUFFIXES)
+    )
 
 
 # Benign infrastructure dropped at source by the volatility string sweep (D3): a dump carries ~22k

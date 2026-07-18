@@ -15,7 +15,7 @@ import jsonschema
 from referencing import Registry, Resource
 
 from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
-from src.data.threat_intel import DNS_ALLOWLIST, DNS_ALLOWLIST_SUFFIXES, SEVERITY_ORDER, is_lan_ipv4
+from src.data.threat_intel import SEVERITY_ORDER, is_allowlisted_dns, is_lan_ipv4
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
@@ -369,8 +369,7 @@ _COOCCURRENCE_TYPES = {"dns_query", "http_request"}
 
 
 def _is_allowlisted_domain(domain: str) -> bool:
-    d = domain.lower()
-    return any(good in d for good in DNS_ALLOWLIST) or d.endswith(DNS_ALLOWLIST_SUFFIXES)
+    return is_allowlisted_dns(domain)
 
 
 def _has_bad_host_match(item: dict) -> bool:

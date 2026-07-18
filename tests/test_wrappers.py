@@ -979,6 +979,21 @@ def test_is_benign_domain_is_host_aware():
     assert is_benign_domain("evil-c2-panel.xyz") is False
 
 
+def test_dns_allowlist_is_host_aware_not_substring():
+    # D7 step 2: the old substring rule allowlisted lookalikes seen in real threat feeds
+    # ("counter-google.com" matched "google"). Exact-or-subdomain only, local suffixes kept.
+    from src.data.threat_intel import is_allowlisted_dns
+    assert is_allowlisted_dns("google.com") is True
+    assert is_allowlisted_dns("safebrowsing.clients.google.com") is True
+    assert is_allowlisted_dns("counterpath.s3.amazonaws.com") is True
+    assert is_allowlisted_dns("host.lan") is True
+    assert is_allowlisted_dns("4.0.0.0.0.0.0.0.ip6.arpa") is True
+    assert is_allowlisted_dns("counter-google.com") is False
+    assert is_allowlisted_dns("support.0ffice-microsoft.com") is False
+    assert is_allowlisted_dns("login-appleid.apple.com.alert-wode.com") is False
+    assert is_allowlisted_dns("khttpswindowsupdates.com") is False
+
+
 def test_extract_strings_registry_key_stops_at_pipe():
     # A pipe is not legal in a registry key path; when the string sweep hits one
     # it has run past the real key into adjacent memory ("...\Services|BatteryLife").

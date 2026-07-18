@@ -4,8 +4,7 @@ import json
 from datetime import datetime, timezone
 from src.wrappers.base_wrapper import BaseWrapper
 from src.data.threat_intel import (
-    C2_PORTS_ALL, c2_port_severity, DNS_ALLOWLIST, DNS_ALLOWLIST_SUFFIXES,
-    is_lan_ipv4,
+    C2_PORTS_ALL, c2_port_severity, is_allowlisted_dns, is_lan_ipv4,
 )
 import hashlib
 
@@ -396,10 +395,7 @@ class TsharkWrapper(BaseWrapper):
         return items
 
     def _dns_is_allowlisted(self, domain: str) -> bool:
-        return (
-            any(good in domain for good in DNS_ALLOWLIST)
-            or domain.endswith(DNS_ALLOWLIST_SUFFIXES)
-        )
+        return is_allowlisted_dns(domain)
 
     def _dns_longest_label(self, domain: str) -> str:
         # Ignore the TLD; score the most-significant remaining label.
