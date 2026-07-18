@@ -17,6 +17,7 @@ RULE_BOOSTS: Dict[int, float] = {
     10: -0.30,   # path_has_exe_in_temp
     11: -0.35,   # keyword_c2_indicator
     12: -0.20,   # keyword_exfil
+    13: -0.35,   # has_ioc_match — a catalog hit is at least as strong as a known-C2 port
 }
 
 # Severity score (feature 13) amplifier
@@ -25,9 +26,9 @@ SEVERITY_AMPLIFIER = -0.25   # maximum penalty at severity=1.0 (critical)
 ANOMALY_THRESHOLD = -0.10    # scores below this → anomaly
 
 # ── Distance weights ──────────────────────────────────────────────────────────
-# Severity (feature 13) is excluded from the distance: SEVERITY_AMPLIFIER already prices it, and
+# Severity (feature 14) is excluded from the distance: SEVERITY_AMPLIFIER already prices it, and
 # the harvester admits only low-severity records so it carries no baseline variance anyway.
-SEVERITY_IDX = 13
+SEVERITY_IDX = 14
 # Penalty per feature lit in the evidence but not in the nearest baseline profile.
 NOVEL_FEATURE_PENALTY = 0.12
 # Lacking a feature the profile has is only mildly unusual, not threatening.
@@ -66,8 +67,8 @@ class AnomalyDetector:
         boosts = np.zeros(len(X))
         for feat_idx, penalty in RULE_BOOSTS.items():
             boosts += X[:, feat_idx] * penalty
-        # Severity amplifier (feature 13 already in [0,1])
-        boosts += X[:, 13] * SEVERITY_AMPLIFIER
+        # Severity amplifier (already in [0,1])
+        boosts += X[:, SEVERITY_IDX] * SEVERITY_AMPLIFIER
         return boosts
 
     def score_components(self, X: np.ndarray) -> Dict[str, np.ndarray]:

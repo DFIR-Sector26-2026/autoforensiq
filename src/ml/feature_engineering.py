@@ -1,7 +1,7 @@
 """Converts both baseline_normal.json and unified_evidence.json records into a
 COMMON, fixed-width numeric feature vector.
 
-Feature vector layout (14 dimensions):
+Feature vector layout (15 dimensions):
   [0]  is_system_process      – known Windows system binary
   [1]  is_suspicious_process  – known malware/LOLBin name
   [2]  suspicious_parent      – parent is cmd/powershell/wscript etc.
@@ -15,7 +15,8 @@ Feature vector layout (14 dimensions):
   [10] path_has_exe_in_temp   – .exe dropped in Temp/Downloads
   [11] keyword_c2_indicator   – value has C2/shell/beacon/reverse keywords
   [12] keyword_exfil          – value has exfil/upload/POST/data keywords
-  [13] severity_score         – critical=1.0, high=0.75, medium=0.5, low=0.25, none=0.0
+  [13] has_ioc_match          – IOC engine matched the item against the threat catalog
+  [14] severity_score         – critical=1.0, high=0.75, medium=0.5, low=0.25, none=0.0
 """
 
 import re
@@ -118,7 +119,7 @@ def _record_value(record: Dict[str, Any]) -> str:
 # ── Core extractor ────────────────────────────────────────────────────────────
 
 def extract_features(record: Dict[str, Any]) -> List[float]:
-    """Accept either a baseline record or a unified-evidence record. Always returns a 14-element
+    """Accept either a baseline record or a unified-evidence record. Always returns a 15-element
     list of floats in [0, 1]."""
 
     # ── Pull raw fields, tolerating missing keys ──────────────────────────────
@@ -171,9 +172,12 @@ def extract_features(record: Dict[str, Any]) -> List[float]:
     f10 = 1.0 if EXE_IN_TEMP.search(value) else 0.0
     f11 = 1.0 if C2_KEYWORDS.search(value) else 0.0
     f12 = 1.0 if EXFIL_KEYWORDS.search(value) else 0.0
-    f13 = SEVERITY_MAP.get(severity_raw, 0.0)
+    # ioc_match is the ioc_engine's catalog-hit list; baseline records never carry the key, so the
+    # feature is 0 across every baseline profile and a hit always reads as novel.
+    f13 = 1.0 if record.get("ioc_match") else 0.0
+    f14 = SEVERITY_MAP.get(severity_raw, 0.0)
 
-    return [f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13]
+    return [f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14]
 
 
 FEATURE_NAMES = [
@@ -190,6 +194,7 @@ FEATURE_NAMES = [
     "path_has_exe_in_temp",
     "keyword_c2_indicator",
     "keyword_exfil",
+    "has_ioc_match",
     "severity_score",
 ]
 

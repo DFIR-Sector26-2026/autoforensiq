@@ -106,6 +106,8 @@ FEATURE_MEANINGS = {
         "The text contains remote-control malware terms (beacon, shell, remote-access tool).",
     "keyword_exfil":
         "The text contains signs of data being stolen.",
+    "has_ioc_match":
+        "The value matched a known indicator of compromise in the threat catalog.",
     "severity_score":
         "The evidence item's own severity raised the anomaly score.",
 }
@@ -137,6 +139,8 @@ REVIEW_ACTIONS = {
         "Search for repeated beaconing, reverse shells, or remote-access tooling.",
     "keyword_exfil":
         "Review outbound transfer volume, destination, and sensitive data access.",
+    "has_ioc_match":
+        "Review the matched IOC rule and hunt for the indicator across the other evidence sources.",
     "severity_score":
         "Correlate with the original evidence source that assigned severity.",
 }

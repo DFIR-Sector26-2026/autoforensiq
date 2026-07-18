@@ -11,11 +11,11 @@ from src.ml.anomaly_detector import (
 
 
 def _vec(lit=(), severity=0.25):
-    """14-feature vector with the given binary indices lit (severity is feature 13)."""
-    v = [0.0] * 14
+    """15-feature vector with the given binary indices lit (severity is feature 14)."""
+    v = [0.0] * 15
     for i in lit:
         v[i] = 1.0
-    v[13] = severity
+    v[14] = severity
     return v
 
 
@@ -84,3 +84,23 @@ def test_severity_is_excluded_from_the_distance():
     pred = _fitted().predict(np.array([_vec(lit=(5, 7), severity=1.0)]))[0]
     assert pred["model_score"] == 0.0
     assert pred["rule_score"] < 0
+
+
+def test_ioc_matched_low_severity_item_flags():
+    # Regression: the wannacry .onion C2 domains and killswitch are catalog IOC hits but carry
+    # low severity and zero other features — pre-has_ioc_match they scored -0.0625 and passed.
+    from src.ml.feature_engineering import extract_features, FEATURE_NAMES
+    item = {"evidence_type": "suspicious_domain", "severity": "low",
+            "value": "gx7ekbenv2riucmf.onion",
+            "ioc_match": ["tor_hidden_service", "wannacry_c2"]}
+    features = extract_features(item)
+    assert features[FEATURE_NAMES.index("has_ioc_match")] == 1.0
+    baseline_twin = dict(item)
+    del baseline_twin["ioc_match"]
+    assert extract_features(baseline_twin)[FEATURE_NAMES.index("has_ioc_match")] == 0.0
+
+    d = AnomalyDetector()
+    # Baseline contains the item's exact binary shape minus the IOC hit — the hit alone must flag.
+    d.fit(np.array([extract_features(baseline_twin)]))
+    pred = d.predict(np.array([features]))[0]
+    assert pred["is_anomaly"] and pred["score"] < ANOMALY_THRESHOLD
