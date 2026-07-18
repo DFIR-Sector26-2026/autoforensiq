@@ -10,7 +10,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from src.data.threat_intel import C2_PORTS_HIGH, C2_PORTS_WATCH, LATERAL_MOVEMENT_PORTS, SEVERITY_ORDER
+from src.data.threat_intel import (
+    C2_PORTS_HIGH, C2_PORTS_WATCH, LATERAL_MOVEMENT_PORTS, SEVERITY_ORDER, matching_base,
+)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 _DEFAULT_CATALOG_PATH = ROOT_DIR / "src" / "data" / "ioc_patterns.json"
@@ -151,9 +153,9 @@ def _match_reputation(rule: dict, hosts: set[str], ips: set[str]) -> str | None:
             return ip
     bad_domains = rule.get("hosts", ())
     for host in hosts:
-        for bad in bad_domains:
-            if host == bad or host.endswith("." + bad):
-                return bad
+        bad = matching_base(host, bad_domains)
+        if bad:
+            return bad
     return None
 
 
@@ -234,8 +236,7 @@ def _domain_corroborated(value: str, corroborated: set[str]) -> bool:
     (`host == c` or `host.endswith("." + c)`), matching the reputation rule's host-aware
     semantics."""
     for raw in _HOST_TOKEN_RE.findall(value):
-        h = _norm_host(raw)
-        if any(h == c or h.endswith("." + c) for c in corroborated):
+        if matching_base(_norm_host(raw), corroborated) is not None:
             return True
     return False
 

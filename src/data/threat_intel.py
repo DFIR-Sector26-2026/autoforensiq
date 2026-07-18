@@ -52,10 +52,7 @@ def is_allowlisted_dns(domain: str) -> bool:
     """True when `domain` is one of DNS_ALLOWLIST or a sub-domain of one (lookalike-safe), or ends
     in a local/non-routable suffix."""
     d = domain.lower().rstrip(".")
-    return (
-        any(d == good or d.endswith("." + good) for good in DNS_ALLOWLIST)
-        or d.endswith(DNS_ALLOWLIST_SUFFIXES)
-    )
+    return matching_base(d, DNS_ALLOWLIST) is not None or d.endswith(DNS_ALLOWLIST_SUFFIXES)
 
 
 # Benign infrastructure dropped at source by the volatility string sweep (D3): a dump carries ~22k
@@ -96,14 +93,19 @@ BENIGN_DOMAIN_SUFFIXES = {
 }
 
 
+def matching_base(host: str, bases) -> str | None:
+    """Return the base domain `host` equals or is a sub-domain of, else None. The one
+    exact-or-subdomain primitive — lookalikes ("microsoft.com.evil.tld") never match."""
+    for base in bases:
+        if host == base or host.endswith("." + base):
+            return base
+    return None
+
+
 def is_benign_domain(host: str) -> bool:
     """True when `host` equals one of BENIGN_DOMAIN_SUFFIXES or is a sub-domain of one. Host-aware,
     so a lookalike like "microsoft.com.evil.tld" is NOT treated as benign."""
-    host = host.lower().rstrip(".")
-    for base in BENIGN_DOMAIN_SUFFIXES:
-        if host == base or host.endswith("." + base):
-            return True
-    return False
+    return matching_base(host.lower().rstrip("."), BENIGN_DOMAIN_SUFFIXES) is not None
 
 
 # Ransomware / encrypted-payload extensions — a strong signal anywhere. One list shared by tsk_fls
