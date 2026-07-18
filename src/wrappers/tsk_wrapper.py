@@ -32,14 +32,25 @@ def _in_staging_dir(lower_path: str) -> bool:
 
 # Catalog-named files (tasksche.exe, mimikatz, …) are notable ANYWHERE
 _NAME_RULE_CATEGORIES = ("known_malware", "ransomware_marker", "attacker_tooling")
-# Boundary-aware like volatility's marker regex (B-9b) — a letter on either side disqualifies the
-# hit, so "conti" never matches "continue.exe" nor "tasksche" a "taskscheduler" component.
-_KNOWN_BAD_NAME_RE = re.compile("|".join(
-    f"(?<![a-z]){re.escape(tok)}(?![a-z])"
-    for rule in load_ioc_catalog().get("indicators", [])
+
+# Bundled library trees are name-collision farms — never name-flag inside them.
+_LIBRARY_DIRS = ("/node_modules/",)
+
+_catalog_name_tokens = [
+    tok for rule in load_ioc_catalog().get("indicators", [])
     if rule.get("category") in _NAME_RULE_CATEGORIES
     for tok in rule.get("match", [])
+]
+# Filename-shaped tokens (tasksche.exe, @wanadecryptor@) match anywhere in the basename,
+# boundary-aware like volatility's marker regex (B-9b): a letter on either side disqualifies.
+_KNOWN_BAD_NAME_RE = re.compile("|".join(
+    f"(?<![a-z]){re.escape(tok)}(?![a-z])"
+    for tok in _catalog_name_tokens if "." in tok or "@" in tok
 ) or "(?!x)x")
+# Bare family/tool names ("maze", "mimikatz") only flag as the exact stem of an executable
+_KNOWN_BAD_STEMS = frozenset(
+    tok for tok in _catalog_name_tokens if "." not in tok and "@" not in tok
+)
 
 
 def _file_signal(filepath: str):
@@ -54,8 +65,12 @@ def _file_signal(filepath: str):
         return "high", "Payload/encrypted file"
     if base.endswith(EXECUTABLE_EXTENSIONS) and _in_staging_dir(lower):
         return "medium", "Executable in staging directory"
-    if _KNOWN_BAD_NAME_RE.search(base):
-        return "medium", "Known-malware filename"
+    if not any(seg in lower for seg in _LIBRARY_DIRS):
+        if _KNOWN_BAD_NAME_RE.search(base):
+            return "medium", "Known-malware filename"
+        stem, _, ext = base.rpartition(".")
+        if "." + ext in EXECUTABLE_EXTENSIONS and stem in _KNOWN_BAD_STEMS:
+            return "medium", "Known-malware filename"
     # PowerShell transcripts: deliberately LOW — GPO transcription is often fleet-wide, so existence
     # alone is weak; correlation is the lift. Scoring by filename/location would flood or overfit to
     # one image (B-6/B-7, N5).

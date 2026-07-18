@@ -236,6 +236,13 @@ def test_tsk_known_malware_filename_flagged_outside_staging_dir():
     assert _file_signal("/Windows/taskscheduler.dll") is None
     # plain executables outside staging dirs stay un-flagged
     assert _file_signal("/Program Files/app/setup.exe") is None
+    # dev01 FP class (BUGS 1.2): bundled-library collisions and bare tokens as mere substrings
+    assert _file_signal("/Kibana/node_modules/brace/mode/maze.js") is None
+    assert _file_signal("/Kibana/node_modules/evil/tasksche.exe") is None
+    assert _file_signal("/icons/material/svg/bitcoin.svg") is None
+    assert _file_signal("/rules/credential_access_mimikatz_memory.json") is None
+    # a bare family name as the exact stem of an executable still flags outside libraries
+    assert _file_signal("/Users/bob/maze.js") == ("medium", "Known-malware filename")
 
 
 # ─────────────────────────────────────────────────────────────
