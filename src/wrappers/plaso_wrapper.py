@@ -66,7 +66,7 @@ class PlasoWrapper(BaseWrapper):
         # STEP 1 — log2timeline
         print("  [PLASO] Running log2timeline (this may take a few minutes)...")
 
-        stdout, stderr, code = self.run_command(
+        _, stderr, code = self.run_command(
             [
                 LOG2TIMELINE,
                 "--status_view", "none",
@@ -110,7 +110,7 @@ class PlasoWrapper(BaseWrapper):
         # STEP 2 — psort export
         print("  [PLASO] Running psort (exporting timeline to CSV)...")
 
-        stdout, stderr, code = self.run_command(
+        _, stderr, code = self.run_command(
             [
                 PSORT,
                 "-o",

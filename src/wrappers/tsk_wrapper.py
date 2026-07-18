@@ -109,7 +109,7 @@ class TSKWrapper(BaseWrapper):
             if len(parts) < 2:
                 continue
             try:
-                filepath = parts[1].strip() if len(parts) > 1 else line
+                filepath = parts[1].strip()
                 # Field 3 is the type/mode string; skip directory nodes ("d/...") — the signal is
                 # the files inside, on their own rows (B3).
                 mode = parts[3].strip() if len(parts) > 3 else ""
@@ -211,8 +211,8 @@ class TSKWrapper(BaseWrapper):
                 continue
             try:
                 timestamp = parts[0].strip()
-                filepath  = parts[3].strip() if len(parts) > 3 else ""
-                activity  = parts[2].strip() if len(parts) > 2 else ""
+                filepath  = parts[3].strip()
+                activity  = parts[2].strip()
 
                 signal = _file_signal(filepath)
                 if signal:

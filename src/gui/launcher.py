@@ -25,10 +25,9 @@ from src.gui.theme import (
 )
 from src.gui.widgets import ArtifactRow
 
-# Extension → artifact type (mirrors _map_evidence_files in autoforensiq.py). Also the single
-# source for the evidence-dialog filter groups below — add new extensions here, not there.
+# Extension: artifact type (mirrors _map_evidence_files in autoforensiq.py). The single source for the evidence-dialog filter groups below
 _EXT_MAP: dict[str, str] = {
-    ".dmp": "memory_dump", ".mem": "memory_dump", ".raw": "memory_dump",
+    ".dmp": "memory_dump", ".mem": "memory_dump", ".raw": "memory_dump", ".vmem": "memory_dump",
     ".pcap": "pcap", ".pcapng": "pcap",
     ".img": "disk_image", ".dd": "disk_image", ".e01": "disk_image", ".dmg": "disk_image",
     ".dat": "registry_hive", ".hiv": "registry_hive",
