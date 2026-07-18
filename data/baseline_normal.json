@@ -1358,5 +1358,1505 @@
     "severity": "low",
     "confidence": 0.5,
     "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_949a6cd951f993f6",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "01/01/1970 00:00:01",
+    "value": "[01/01/1970 00:00:01] [Firefox Cache] Fetched 68419584 time(s) \"\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_003_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_60bf1422886c09e4",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "00/00/0000 --:--:--",
+    "value": "[00/00/0000 --:--:--] [OLECF Document Summary Info] Company: Federal Communications Commission Shared document: False Application version: 11.9999 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/5DC2034Cd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_e5f21261e17230fa",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "00/00/0000 --:--:--",
+    "value": "[00/00/0000 --:--:--] [OLECF Document Summary Info] Company: The MITRE Corporation Shared document: False Application version: 8.5425 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/DDF5F31Ad01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_5968bbed9d158f38",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "00/00/0000 --:--:--",
+    "value": "[00/00/0000 --:--:--] [OLECF Document Summary Info] Number of bytes: 1083865 Number of paragraphs: 113 Number of slides: 14 Number of notes: 14 Number of hidden slides: 0 Number of multi-media clips: 0 Company:  Manager: Fernando Burbano Shared document: False Application version: 9.4402 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/DDF5F35Ad01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_49de06d1d4b19778",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "00/00/0000 --:--:--",
+    "value": "[00/00/0000 --:--:--] [OLECF Document Summary Info] Number of bytes: 9437734 Number of paragraphs: 76 Number of slides: 12 Number of notes: 3 Number of hidden slides: 0 Number of multi-media clips: 0 Company: Federal Trade Commission Shared document: False Application version: 11.9999 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/DDF5F62Ad01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_73fdfece383a5190",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "03/19/1998 14:35:17",
+    "value": "[03/19/1998 14:35:17] [OLECF Summary Info] Title: CIP Day Keynote Address Author:  Template: C:\\Program Files\\Microsoft Office\\Templates\\Presentations\\Project Overview (Standard).pot Revision number: 187 Last saved by: Booz Allen User Total edit time (secs): <dfdatetime.filetime.Filetime object at 0x7fdfc42f7200> Number of words: 606 Application: Microsoft PowerPoint 7.0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/DDF5F35Ad01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_62242acc18af99da",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "03/19/1998 14:35:17",
+    "value": "[03/19/1998 14:35:17] [OLECF Summary Info] Title: CIP Day Keynote Address Author:  Template: C:\\Program Files\\Microsoft Office\\Templates\\Presentations\\Project Overview (Standard).pot Revision number: 187 Last saved by: Booz Allen User Total edit time (secs): <dfdatetime.filetime.Filetime object at 0x7fdfc42f7290> Number of words: 606 Application: Microsoft PowerPoint 7.0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/DDF5F6DAd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_20f00e0f0245a6f4",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "04/05/2000 16:48:38",
+    "value": "[04/05/2000 16:48:38] [Open XML Metadata] Application: Microsoft PowerPoint 12.0000 Last saved by: MonicaFitzgerald Author: Pete Monaghan Total edit time (secs): 7870 Revision number: 47 Template: Shimmer Number of words: 1185 Number of slides: 27 Number of hidden slides: 0 Number of multi-media clips: 0 Hyperlinks changed: False Links up to date: False Scale: False | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/DDF5F63Ad01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_50427bc3462db73b",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "10/18/2000 14:59:20",
+    "value": "[10/18/2000 14:59:20] [OLECF Summary Info] Author: Paula Hagan Last saved by: ksowell Application: Microsoft Excel Security flags: 0x00000000 [] | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/DDF5F31Ad01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_4f2702d20a41a526",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "06/21/2005 15:08:59",
+    "value": "[06/21/2005 15:08:59] [Open XML Metadata] Application: Microsoft PowerPoint 12.0000 Last saved by: MonicaFitzgerald Author: vacohowarr Total edit time (secs): 16279 Revision number: 652 Number of words: 2986 Number of slides: 42 Number of hidden slides: 0 Number of multi-media clips: 0 Hyperlinks changed: False Links up to date: False Scale: False | File: EXT:/home/ubuntu/Documents/fed privacy/FED_PRIV_SUMMIT_2008_TECHNOLOGY_PRIVACY_PANEL.pptx",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_9c66f4cb730e90c3",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "03/14/2003 20:04:47",
+    "value": "[03/14/2003 20:04:47] [OLECF Summary Info] Title: Slide 1 Author: criley Template:  Revision number: 1021 Last saved by: MonicaFitzgerald Total edit time (secs): <dfdatetime.filetime.Filetime object at 0x7fdfc430ce30> Number of words: 325 Application: Microsoft PowerPoint | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/DDF5F62Ad01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_c03323d176fc925b",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "03/14/2003 20:04:47",
+    "value": "[03/14/2003 20:04:47] [OLECF Summary Info] Title: Slide 1 Author: criley Template:  Revision number: 1021 Last saved by: MonicaFitzgerald Total edit time (secs): <dfdatetime.filetime.Filetime object at 0x7fdfc430cc80> Number of words: 325 Application: Microsoft PowerPoint | File: EXT:/home/ubuntu/Documents/fed privacy/FED_PRIV_SUMMIT_2008_TECH_PROFESSIONALS_PANEL.ppt.part",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_45de21b7c6dd30f5",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "06/01/2007 08:45:06",
+    "value": "[06/01/2007 08:45:06] [Firefox History] Mozilla Firefox | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_33aaa3f1b2ce0d38",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "06/01/2007 08:45:06",
+    "value": "[06/01/2007 08:45:06] [Firefox History] Ubuntu and Free Software links | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_349b4f4691c58f70",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "07/12/2005 12:15:35",
+    "value": "[07/12/2005 12:15:35] [OLECF Summary Info] Title: Privacy Rule Overview Subject: for federal audience Author: L Sanches Comments: 2008 Federal Privacy Summit  October 23breakout session HIntroduction to HIPAA Template:  Revision number: 536 Last saved by: MonicaFitzgerald Total edit time (secs): <dfdatetime.filetime.Filetime object at 0x7fdfc430d430> Number of words: 1828 Application: Microsoft PowerPoint | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/DDF5F60Ad01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_99a69fa941ff76d7",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "07/12/2005 12:15:35",
+    "value": "[07/12/2005 12:15:35] [OLECF Summary Info] Title: Privacy Rule Overview Subject: for federal audience Author: L Sanches Comments: 2008 Federal Privacy Summit  October 23breakout session HIntroduction to HIPAA Template:  Revision number: 536 Last saved by: MonicaFitzgerald Total edit time (secs): <dfdatetime.filetime.Filetime object at 0x7fdfc430d7f0> Number of words: 1828 Application: Microsoft PowerPoint | File: EXT:/home/ubuntu/Documents/fed privacy/FED_PRIV_SUMMIT_2008_INTRO_HIPPA_PANEL.ppt",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_56a5b1ad27176c21",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "06/06/2007 11:38:27",
+    "value": "[06/06/2007 11:38:27] [Firefox History] Bookmark URL Free Software Foundation (http://www.fsf.org/) [www.fsf.org] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_ee870dcc881e5737",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "06/06/2007 11:38:27",
+    "value": "[06/06/2007 11:38:27] [Firefox History] Bookmark URL Ubuntu (http://www.ubuntulinux.org/) [www.ubuntulinux.org] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_dc0b113f196f02bb",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "06/06/2007 11:38:27",
+    "value": "[06/06/2007 11:38:27] [Firefox History] Bookmark URL Debian (Ubuntu is based on Debian) (http://www.debian.org/) [www.debian.org] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_c88d9aad063aee7c",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "06/06/2007 11:38:27",
+    "value": "[06/06/2007 11:38:27] [Firefox History] Bookmark URL Ubuntu Wiki (community-edited website) (http://www.ubuntulinux.org/wiki/FrontPage) [FrontPage] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_65330875ef38ce39",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "06/06/2007 11:38:27",
+    "value": "[06/06/2007 11:38:27] [Firefox History] Bookmark URL Make a Support Request to the Ubuntu Community (https://launchpad.net/distros/ubuntu/+addticket) [+addticket] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_73b3a3de01c55315",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "06/06/2007 11:38:27",
+    "value": "[06/06/2007 11:38:27] [Firefox History] Bookmark URL Ubuntu Support Home (http://www.ubuntu.com/support) [support] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_f32ed21056365f15",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "05/13/2008 15:11:22",
+    "value": "[05/13/2008 15:11:22] [OLECF Summary Info] Author: Evan.Baranoff Last saved by: Vanessa.Stallings Application: Microsoft Excel Security flags: 0x00000000 [] | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/5DC3034Cd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_62b1bf673da57fae",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "11/17/2008 17:55:32",
+    "value": "[11/17/2008 17:55:32] [OLECF Item] Name: Root Entry | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/DDF5F60Ad01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_42dc9f04f37067f9",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "11/17/2008 17:55:32",
+    "value": "[11/17/2008 17:55:32] [OLECF Document Summary Info] Number of bytes: 663456 Number of paragraphs: 308 Number of slides: 27 Number of notes: 24 Number of hidden slides: 0 Number of multi-media clips: 0 Company: DHHS OCR Shared document: False Application version: 11.9999 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/DDF5F60Ad01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_6a1b11857e328139",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/16/2008 16:05:22",
+    "value": "[12/16/2008 16:05:22] [OLECF Summary Info] Author: RD Weller Last saved by: Vanessa.Stallings Application: Microsoft Excel Security flags: 0x00000000 [] | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/5DC2034Cd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_80bd007bee172322",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/23/2008 16:43:00",
+    "value": "[12/23/2008 16:43:00] [OLECF Summary Info] Title: _ Subject:  Author:  Keywords:  Comments:  Template: Orders TOC by Paragraph Revision number: 4 Last saved by:  Number of pages: 3 Number of words: 7967 Number of characters: 44063 Application: Microsoft Office Word Security flags: 0x00000000 [] | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/5DC11F6Cd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_aa8d8cbd1c5e9d9a",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/24/2008 16:25:00",
+    "value": "[12/24/2008 16:25:00] [OLECF Summary Info] Title: _ Subject:  Author:  Keywords:  Comments:  Template: Normal Revision number: 3 Last saved by:  Number of pages: 1 Number of words: 431 Number of characters: 2339 Application: Microsoft Office Word Security flags: 0x00000000 [] | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/5DC41F6Cd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_a47f009488e53478",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/24/2008 16:26:00",
+    "value": "[12/24/2008 16:26:00] [OLECF Summary Info] Title: _ Subject:  Author:  Keywords:  Comments:  Template: Normal Revision number: 3 Last saved by:  Number of pages: 1 Number of words: 325 Number of characters: 1913 Application: Microsoft Office Word Security flags: 0x00000000 [] | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/5DC51F6Cd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_98a59b9ef056d0d9",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/24/2008 16:27:00",
+    "value": "[12/24/2008 16:27:00] [OLECF Summary Info] Title: _ Subject:  Author:  Keywords:  Comments:  Template: Normal Revision number: 3 Last saved by:  Number of pages: 1 Number of words: 494 Number of characters: 2697 Application: Microsoft Office Word Security flags: 0x00000000 [] | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/5DC61F6Cd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_857a01780ad16d71",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/24/2008 16:36:32",
+    "value": "[12/24/2008 16:36:32] [OLECF Document Summary Info] Number of bytes: 179200 Number of lines: 688 Number of paragraphs: 193 Company:  Manager:  Shared document: False Application version: 11.9999 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/5DC11F6Cd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_343c648dfe559525",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/24/2008 16:37:39",
+    "value": "[12/24/2008 16:37:39] [OLECF Document Summary Info] Number of bytes: 31744 Number of lines: 36 Number of paragraphs: 7 Company:  Manager:  Shared document: False Application version: 11.9999 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/5DC41F6Cd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_f5cfc642e76e13dc",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/24/2008 16:37:54",
+    "value": "[12/24/2008 16:37:54] [OLECF Document Summary Info] Number of bytes: 30208 Number of lines: 30 Number of paragraphs: 7 Company:  Manager:  Shared document: False Application version: 11.9999 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/5DC51F6Cd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_df81012c5d372a2e",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/24/2008 16:38:09",
+    "value": "[12/24/2008 16:38:09] [OLECF Document Summary Info] Number of bytes: 32256 Number of lines: 42 Number of paragraphs: 8 Company:  Manager:  Shared document: False Application version: 11.9999 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/5DC61F6Cd01",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_52418b9e95e95740",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Unsorted Bookmarks | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_6ab690093c5a2092",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Tags | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_5740b59c921a5376",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmark URL Most Visited (place:queryType=0&sort=8&maxResults=10) [queryType=0&sort=8&maxResults=10] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_9284dd995faf9a51",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmark URL Recently Bookmarked (place:folder=BOOKMARKS_MENU&folder=UNFILED_BOOKMARKS&folder=TOOLBAR&queryType=1&sort=12&excludeItemIfParentHasAnnotation=livemark%2FfeedURI&maxResults=10&excludeQueries=1) [folder=BOOKMARKS_MENU&folder=UNFILED_BOOKMARKS&folder=TOOLBAR&queryType=1&sort=12&excludeItemIfParentHasAnnotation=livemark%2FfeedURI&maxResults=10&excludeQueries=1] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_ecb1cbfadb78acec",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmark URL Recent Tags (place:type=6&sort=14&maxResults=10) [type=6&sort=14&maxResults=10] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_bb6c2b17bbb64ce9",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmark URL Get Bookmark Add-ons (https://en-us.add-ons.mozilla.com/en-US/firefox/bookmarks/) [/en-US/firefox/bookmarks/] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_514770d6460cdedb",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmark URL Help and Tutorials (http://en-us.www.mozilla.com/en-US/firefox/help/) [/en-US/firefox/help/] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_4551bf7b19c6355b",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmark URL Customize Firefox (http://en-us.www.mozilla.com/en-US/firefox/customize/) [/en-US/firefox/customize/] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_960e561ce40914e1",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmark URL Get Involved (http://en-us.www.mozilla.com/en-US/firefox/community/) [/en-US/firefox/community/] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_d4a263f73f5b6134",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmark URL About Us (http://en-us.www.mozilla.com/en-US/firefox/about/) [/en-US/firefox/about/] visit count 0 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_eb2d6bef51e2be19",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:09",
+    "value": "[12/28/2008 21:27:09] [Firefox Cache] Fetched 8 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.google.com/logos/Logo_25wht.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_880313233afbe6b4",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:09",
+    "value": "[12/28/2008 21:27:09] [Firefox Cache] Fetched 12 time(s) [HTTP/1.0 200 OK] GET \"HTTP:http://start.ubuntu.com/favicon.ico\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_108fcc89220082b2",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmark Annotation: [MostVisited] to bookmark [Most Visited] (place:queryType=0&sort=8&maxResults=10) | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_e07fac3d919542f2",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmark Annotation: [RecentTags] to bookmark [Recent Tags] (place:type=6&sort=14&maxResults=10) | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_00f794f4af315728",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmark Annotation: [RecentlyBookmarked] to bookmark [Recently Bookmarked] (place:folder=BOOKMARKS_MENU&folder=UNFILED_BOOKMARKS&folder=TOOLBAR&queryType=1&sort=12&excludeItemIfParentHasAnnotation=livemark%2FfeedURI&maxResults=10&excludeQueries=1) | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_1a07821cac99be56",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmarks Menu | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_757d63ef89f98521",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] Bookmarks Toolbar | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_5b4d6fddb99858bc",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:06",
+    "value": "[12/28/2008 21:27:06] [Firefox History] N/A | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_3d25f5bf98f1e441",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:11",
+    "value": "[12/28/2008 21:27:11] [Firefox History] http://start.ubuntu.com/8.10/ (Ubuntu Start Page) [count: 9] Host: start.ubuntu.com visited from:  (URL not typed directly) Transition: LINK | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_4eb326a0b508ba71",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:34",
+    "value": "[12/28/2008 21:27:34] [Firefox History] http://www.nist.gov/ (National Institute of Standards and Technology) [count: 1] Host: www.nist.gov visited from:  (URL not typed directly) Transition: TYPED | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_f3c06fee009a8029",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:45",
+    "value": "[12/28/2008 21:27:45] [Firefox History] http://www.nist.gov/public_affairs/general2.htm (NIST General Information) [count: 1] Host: www.nist.gov visited from: http://www.nist.gov/ (www.nist.gov) (URL not typed directly) Transition: LINK | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_232c4a17ad10379e",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:27:58",
+    "value": "[12/28/2008 21:27:58] [Firefox History] http://www.nist.gov/public_affairs/budget.htm (NIST budget  planning and economic analysis) [count: 1] Host: www.nist.gov visited from: http://www.nist.gov/ (www.nist.gov) (URL not typed directly) Transition: LINK | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_1a5e4a876bbc0b86",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:28:05",
+    "value": "[12/28/2008 21:28:05] [Firefox History] http://www.nist.gov/public_affairs/confpage/conffutr.htm (NIST Conference Program home page) [count: 1] Host: www.nist.gov visited from: http://www.nist.gov/ (www.nist.gov) (URL not typed directly) Transition: LINK | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_6ddc9e1ed529ea82",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:28:13",
+    "value": "[12/28/2008 21:28:13] [Firefox History] http://www.nist.gov/public_affairs/visitor/visitor.htm (Visitor Information) [count: 1] Host: www.nist.gov visited from: http://www.nist.gov/ (www.nist.gov) (URL not typed directly) Transition: LINK | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_bf6ff97065cdc268",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:28:24",
+    "value": "[12/28/2008 21:28:24] [Firefox History] http://www.nist.gov/public_affairs/contact.htm (Contacting NIST) [count: 1] Host: www.nist.gov visited from: http://www.nist.gov/ (www.nist.gov) (URL not typed directly) Transition: LINK | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_c4383208d4abaf87",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:28:38",
+    "value": "[12/28/2008 21:28:38] [Firefox History] http://www.nist.gov/public_affairs/overview_video/overview_video.html (What is NIST? NIST Video Overview) [count: 1] Host: www.nist.gov visited from: http://www.nist.gov/ (www.nist.gov) (URL not typed directly) Transition: LINK | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_9cea78a509c903fb",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:28:50",
+    "value": "[12/28/2008 21:28:50] [Firefox History] Bookmark URL National Institute of Standards and Technology (http://www.nist.gov/) [National Institute of Standards and Technology] visit count 1 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_941c93883d08761f",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:28:50",
+    "value": "[12/28/2008 21:28:50] [Firefox History] Bookmark Annotation: [The National Institute of Standards and Technology is a federal technology agency that develops and promotes measurement  standards  and technology.] to bookmark [National Institute of Standards and Technology] (http://www.nist.gov/) | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_f8dbe894553da299",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:29:29",
+    "value": "[12/28/2008 21:29:29] [Firefox History] http://www.fcc.gov/ (Federal Communications Commission (FCC) Home Page) [count: 1] Host: www.fcc.gov visited from:  (URL not typed directly) Transition: TYPED | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_130c992662a7b5a3",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:29:50",
+    "value": "[12/28/2008 21:29:50] [Firefox History] http://www.fcc.gov/aboutus.html (About the Federal Communications Commission) [count: 1] Host: www.fcc.gov visited from: http://www.fcc.gov/ (www.fcc.gov) (URL not typed directly) Transition: LINK | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_5a0a86b884da64cc",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:29:57",
+    "value": "[12/28/2008 21:29:57] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://wireless.fcc.gov/images/global/dropdownFooterLeft.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_9c21a1fa23ac904d",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:29:57",
+    "value": "[12/28/2008 21:29:57] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://wireless.fcc.gov/images/global/dropdownFooterRight.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_7199276021775eb0",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:29:57",
+    "value": "[12/28/2008 21:29:57] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://wireless.fcc.gov/images/arrow-up.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_13288403b3c86fec",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:29:56",
+    "value": "[12/28/2008 21:29:56] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://wireless.fcc.gov/auctions/images/arrow_gold.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_0cd4b40e06de8e6a",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:29:58",
+    "value": "[12/28/2008 21:29:58] [Firefox Cache] Fetched 4 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://wireless.fcc.gov/favicon.ico\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_0fe9fd911f56a68a",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:29:57",
+    "value": "[12/28/2008 21:29:57] [Firefox History] http://wireless.fcc.gov/auctions/ () [count: 1] Host: wireless.fcc.gov visited from: http://www.fcc.gov/ (www.fcc.gov) (URL not typed directly) Transition: LINK | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_b2b4d12b7b282b0d",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:29:57",
+    "value": "[12/28/2008 21:29:57] [Firefox History] http://wireless.fcc.gov/auctions/default.htm?job=auctions_home (FCC Auctions Home) [count: 1] Host: wireless.fcc.gov visited from: http://www.fcc.gov/ (www.fcc.gov) (URL not typed directly) Transition: LINK | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_d6072c39ab38187c",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:30:26",
+    "value": "[12/28/2008 21:30:26] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_a_7921-8000;7921-7922 7925-7926 7928-7932 7934-7947 7949-7955 7957-7964 7966-7967 7969-7985 7987-7988 7990-7999;7923-7924 7927 7933 7948 7956 7965 7968 7986 7989 8000:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_f6a81246bb2cb06d",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:30:03",
+    "value": "[12/28/2008 21:30:03] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A1.doc\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_68c68c543046baeb",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:30:03",
+    "value": "[12/28/2008 21:30:03] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A1.doc (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A1.DOC). Received: 157696 bytes out of: 157696 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_fbfa9fd6e84c8d0c",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:30:28",
+    "value": "[12/28/2008 21:30:28] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_a_8001-8080;8001-8003 8005-8010 8012-8015 8017-8021 8023-8024 8026 8028-8029 8031-8040 8042-8048 8051-8053 8055-8060 8062-8068 8071-8074 8076-8078 8080;8004 8011 8016 8022 8025 8027 8030 8041 8049-8050 8054 8061 8069-8070 8075 8079:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_86327c2e1266a60f",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:30:29",
+    "value": "[12/28/2008 21:30:29] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_a_8081-8160;8081-8083 8085-8101 8103-8108 8110-8132 8134-8136 8138-8145 8147-8158 8160;8084 8102 8109 8133 8137 8146 8159:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_f969471641a02595",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:30:31",
+    "value": "[12/28/2008 21:30:31] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_a_8161-8320;8161 8163-8165 8167-8171 8173-8179 8181-8192 8194-8196 8198-8201 8203 8205-8210 8212-8239 8242-8256 8258-8261 8263-8268 8270-8281;8162 8166 8172 8180 8193 8197 8202 8204 8211 8240-8241 8257 8262 8269 8282-8320:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_b1f8f57b89aa2859",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:13",
+    "value": "[12/28/2008 21:31:13] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A1.pdf\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_455f76ddf56ae3b7",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:08",
+    "value": "[12/28/2008 21:31:08] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A1.pdf (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A1.PDF). Received: 207263 bytes out of: 207263 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_e76a87e5eb6a631a",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:26",
+    "value": "[12/28/2008 21:31:26] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A2.xls\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_48abe299617fc30a",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:27",
+    "value": "[12/28/2008 21:31:27] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A2.xls (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A2.XLS). Received: 82432 bytes out of: 82432 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_011c7add2773b149",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:33",
+    "value": "[12/28/2008 21:31:33] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_a_40161-40320;40161-40169 40171-40180 40182-40191 40194-40195 40198-40199 40201-40207 40210 40212-40216 40218-40235 40238-40240 40243-40266 40269-40272 40274-40302 40304-40318 40320;40170 40181 40192-40193 40196-40197 40200 40208-40209 40211 40217 40236-40237 40241-40242 40267-40268 40273 40303 40319:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_16f1bc144996ba41",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:33",
+    "value": "[12/28/2008 21:31:33] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_a_40001-40160;40001-40032 40034-40039 40041-40043 40047-40050 40052-40056 40058-40061 40063-40067 40069-40072 40074-40078 40080 40082 40084-40087 40089-40102 40104 40106 40109-40110 40112-40121 40123-40138 40140-40151 40153-40160;40033 40040 40044-40046 40051 40057 40062 40068 40073 40079 40081 40083 40088 40103 40105 40107-40108 40111 40122 40139 40152:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_6fbb5d4ba6c7b276",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:33",
+    "value": "[12/28/2008 21:31:33] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_s_32961-33120;32961-33120;:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_8d2749d86eef4b9e",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:33",
+    "value": "[12/28/2008 21:31:33] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_s_32881-32960;32881-32960;:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_d7d5fde35ccda5ee",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:33",
+    "value": "[12/28/2008 21:31:33] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_s_33121-33280;33121-33234;33235-33280:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_360614ea2835d0f4",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:33",
+    "value": "[12/28/2008 21:31:33] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_a_39841-40000;39841-39866 39871-39872 39875-39923 39925-39942 39944-39977 39979-40000;39867-39870 39873-39874 39924 39943 39978:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_e8c2dcc6e527606d",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:34",
+    "value": "[12/28/2008 21:31:34] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_a_40321-40480;40321-40331 40333-40341 40343 40345-40353 40355-40380 40382-40400 40409-40446 40448-40455 40457-40480;40332 40342 40344 40354 40381 40401-40408 40447 40456:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_f71090b66d42518c",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:34",
+    "value": "[12/28/2008 21:31:34] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_a_40481-40640;40481-40498;40499-40640:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_faf3c58f9685ee10",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:39",
+    "value": "[12/28/2008 21:31:39] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A2.pdf\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_64dacfd7fe3491cc",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:37",
+    "value": "[12/28/2008 21:31:37] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A2.pdf (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A2.PDF). Received: 91750 bytes out of: 91750 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_71697e627a9cba0c",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:49",
+    "value": "[12/28/2008 21:31:49] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A3.xls\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_144bcb25cfdf7c9b",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:46",
+    "value": "[12/28/2008 21:31:46] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A3.xls (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A3.XLS). Received: 45568 bytes out of: 45568 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_74e64540f1de56c9",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:57",
+    "value": "[12/28/2008 21:31:57] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A3.pdf\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_219c209a321d893d",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:31:55",
+    "value": "[12/28/2008 21:31:55] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A3.pdf (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A3.PDF). Received: 73025 bytes out of: 73025 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_89dce59d8037f705",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:07",
+    "value": "[12/28/2008 21:32:07] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A4.doc\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_9b3025d85aacb14c",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:04",
+    "value": "[12/28/2008 21:32:04] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A4.doc (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A4.DOC). Received: 23040 bytes out of: 23040 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_66a9fd3e039acc00",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:13",
+    "value": "[12/28/2008 21:32:13] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A4.pdf\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_c12f1b1a64827846",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:14",
+    "value": "[12/28/2008 21:32:14] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A4.pdf (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A4.PDF). Received: 58239 bytes out of: 58239 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_0d6b41c6a70963f0",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:24",
+    "value": "[12/28/2008 21:32:24] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A5.doc\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_5765667509849313",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:22",
+    "value": "[12/28/2008 21:32:22] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A5.doc (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A5.DOC). Received: 22528 bytes out of: 22528 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_214c3b7969a71975",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:32",
+    "value": "[12/28/2008 21:32:32] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A5.pdf\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_70629d1b0bd1b073",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:30",
+    "value": "[12/28/2008 21:32:30] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A5.pdf (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A5.PDF). Received: 55634 bytes out of: 55634 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_cc055a4c6c9be653",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:41",
+    "value": "[12/28/2008 21:32:41] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A6.doc\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_648900f7e045993e",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:39",
+    "value": "[12/28/2008 21:32:39] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A6.doc (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A6.DOC). Received: 24576 bytes out of: 24576 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_7fcb1e82b9ad2de2",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:55",
+    "value": "[12/28/2008 21:32:55] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A6.pdf\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_1705771cd6d17ab9",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:32:54",
+    "value": "[12/28/2008 21:32:54] [Firefox History] http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A6.pdf (file:///home/ubuntu/Desktop/MyStuff/FCC-08-281A6.pdf). Received: 57856 bytes out of: 57856 bytes. | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/downloads.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_40265ec48ab3116b",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:33:02",
+    "value": "[12/28/2008 21:33:02] [Firefox History] Bookmark URL Federal Communications Commission (FCC) Home Page (http://www.fcc.gov/) [Federal Communications Commission (FCC) Home Page] visit count 1 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_d7b1e8b5801c4331",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/28/2008 21:33:02",
+    "value": "[12/28/2008 21:33:02] [Firefox History] Bookmark Annotation: [The Federal Communications Commission (FCC) is an independent US government agency  directly responsible to Congress  and regulates interstate and international communications by radio  television  wire  satellite and cable. FCC website resources include Public Notices  News Releases  Orders  Notices of Proposed Rulemaking  FactSheets  databases  and audio recordings] to bookmark [Federal Communications Commission (FCC) Home Page] (http://www.fcc.gov/) | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_9c0c121023cea40e",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:46",
+    "value": "[12/29/2008 05:27:46] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_dde80cf648f7f130",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:46",
+    "value": "[12/29/2008 05:27:46] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/include/cellswitch.js\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_1aa5e28662faf9bb",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/arrowright_dkblue.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_117e67fa8e63074f",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/news/press/coxvideo125.jpg\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_1cbc04d093714ff4",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/rss-feed-icon-14x14.png\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_6caf19b73e9268e6",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/tips-complaints.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_359432e7d41f8a00",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/idea_logo.jpg\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_beaa894221b3bb5d",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/bannerSealRMain.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_b93626b013d5879b",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/bannerSealBotFrontC.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_04a9d35401cabe52",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/stripedbgMain.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_571d55c41c87a7e7",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/bannerTitleMain.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_7ec5b00247b3c7e5",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/dot_orange.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_d18abd3af95b0625",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/bannerSealBotFrontA.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_af30e64e46e129b9",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/bannerFlagMain.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_37ac2bf156558147",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/spotlight.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_8de4cb7dac98970b",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:48",
+    "value": "[12/29/2008 05:27:48] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://www.sec.gov/images/dots_red.gif\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_d605be008c76fe7f",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:29:55",
+    "value": "[12/29/2008 05:29:55] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_s_8061-8080;8061-8080;:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_063537e8bed1e958",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:27:51",
+    "value": "[12/29/2008 05:27:51] [Firefox History] http://www.sec.gov/ (U.S. Securities and Exchange Commission (Home Page)) [count: 1] Host: www.sec.gov visited from:  (URL not typed directly) Transition: TYPED | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_c040a930e3e15390",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:29:56",
+    "value": "[12/29/2008 05:29:56] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_s_8081-8160;8081-8090 8092-8160;8091:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_6ec275a80d7a020c",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:29:58",
+    "value": "[12/29/2008 05:29:58] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_s_8161-8240;8161-8240;:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_f36647e48e746969",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:30:00",
+    "value": "[12/29/2008 05:30:00] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_s_8241-8320;8241-8320;:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_7629e140a4769e08",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:31:01",
+    "value": "[12/29/2008 05:31:01] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_s_8321-8400;8321-8400;:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_8196dd8a9d0bcb39",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:31:02",
+    "value": "[12/29/2008 05:31:02] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_s_8401-8480;8401-8480;:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_1a0b39535e237720",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:31:03",
+    "value": "[12/29/2008 05:31:03] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_s_8481-8560;8481-8560;:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_c3ecc0ab61387bd9",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:31:04",
+    "value": "[12/29/2008 05:31:04] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_s_8561-8600;8561-8600;:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_9dcfcf97c8edc817",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:31:05",
+    "value": "[12/29/2008 05:31:05] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_s_9061-9080;9061-9071;9072-9080:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_85442d61d542b606",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:31:06",
+    "value": "[12/29/2008 05:31:06] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_a_7441-7520;7442-7450 7452-7467 7469-7473 7477-7480 7482-7483 7486-7487 7489 7491-7496 7499 7502-7506 7510-7511 7513 7515 7517 7520;7441 7451 7468 7474-7476 7481 7484-7485 7488 7490 7497-7498 7500-7501 7507-7509 7512 7514 7516 7518-7519:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_6a8a9a19d33a205e",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:32:08",
+    "value": "[12/29/2008 05:32:08] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_a_7521-7680;7521 7523-7524 7526-7528 7531-7532 7535-7537 7539-7540 7543-7544 7546 7548 7550 7554-7555 7557-7560 7563-7566 7568-7569 7572-7573 7576-7578 7580-7581 7584-7589 7591-7595 7597-7599 7601-7602 7604 7606 7608-7613 7615-7621 7623-7624 7627-7628 7631-7632 7634 7636 7638-7644 7646-7647 7649-7654 7657 7659 7661-7663 7665-7666 7668-7675 7677 7679-7680;7522 7525 7529-7530 7533-7534 7538 7541-7542 7545 7547 7549 7551-7553 7556 7561-7562 7567 7570-7571 7574-7575 7579 7582-7583 7590 7596 7600 7603 7605 7607 7614 7622 7625-7626 7629-7630 7633 7635 7637 7645 7648 7655-7656 7658 7660 7664 7667 7676 7678:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_a4e1cbb0ea063274",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:32:10",
+    "value": "[12/29/2008 05:32:10] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_a_7681-7840;7681-7686 7689-7691 7693 7695 7698-7706 7708 7710-7711 7713-7714 7716-7720 7722 7725-7728 7730-7734 7736-7741 7743-7745 7747 7749-7750 7753-7754 7756-7760 7762 7766 7768-7771 7773-7782 7784 7787-7788 7791-7792 7794-7795 7797 7799 7801-7805 7807-7812 7814-7818 7820-7826 7829-7835 7837 7839-7840;7687-7688 7692 7694 7696-7697 7707 7709 7712 7715 7721 7723-7724 7729 7735 7742 7746 7748 7751-7752 7755 7761 7763-7765 7767 7772 7783 7785-7786 7789-7790 7793 7796 7798 7800 7806 7813 7819 7827-7828 7836 7838:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_9f6bcd840f0770e4",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:32:13",
+    "value": "[12/29/2008 05:32:13] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_a_7841-7880;7841 7843 7845-7849 7851-7852 7854-7858 7860-7863 7865-7880;7842 7844 7850 7853 7859 7864:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_ba61fa268db258e5",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:32:27",
+    "value": "[12/29/2008 05:32:27] [Firefox History] Bookmark URL U.S. Securities and Exchange Commission (Home Page) (http://www.sec.gov/) [U.S. Securities and Exchange Commission (Home Page)] visit count 1 | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_d9bf96bbace28e57",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:32:27",
+    "value": "[12/29/2008 05:32:27] [Firefox History] Bookmark Annotation: [U.S. Securities and Exchange Commission: official Federal Agency website  including news  legal and other releases and reports  investor education material  and the EDGAR database of corporate disclosure reports] to bookmark [U.S. Securities and Exchange Commission (Home Page)] (http://www.sec.gov/) | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_518d0097fd5b184d",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:33:14",
+    "value": "[12/29/2008 05:33:14] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-malware-shavar_a_8281-8320;8281-8283 8285-8287;8284 8288-8320:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_2906c1730412cd7c",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:33:15",
+    "value": "[12/29/2008 05:33:15] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_a_39681-39840;39681-39755 39757-39772 39774-39793 39797-39807 39809-39840;39756 39773 39794-39796 39808:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_7c4a458515b48b6e",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:32:40",
+    "value": "[12/29/2008 05:32:40] [Firefox History] http://www.sec.gov/news/speech/2008/spch121708cc-idata.wmv (spch121708cc-idata.wmv (video/x-ms-wmv Object)) [count: 1] Host: www.sec.gov visited from: http://www.sec.gov/ (www.sec.gov) (URL not typed directly) Transition: LINK | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/places.sqlite",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_87501a0a16930674",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:33:15",
+    "value": "[12/29/2008 05:33:15] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_a_39361-39520;39361-39362 39364 39366-39367 39369 39371-39373 39375 39377-39378 39380-39382 39384-39409 39411-39478 39480 39482-39486 39490-39494 39496-39497 39499-39502 39504-39516 39518-39520;39363 39365 39368 39370 39374 39376 39379 39383 39410 39479 39481 39487-39489 39495 39498 39503 39517:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_5f126369e68de81f",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:33:15",
+    "value": "[12/29/2008 05:33:15] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_s_33241-33280;33241-33246;33247-33280:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_dcd0ee8ae649716a",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:33:15",
+    "value": "[12/29/2008 05:33:15] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_a_39521-39680;39521-39533 39535-39539 39541 39543-39612 39614-39623 39625-39628 39630-39640 39642-39680;39534 39540 39542 39613 39624 39629 39641:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_f491cc1cbf5cedf6",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:33:15",
+    "value": "[12/29/2008 05:33:15] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_s_32481-32640;32481-32640;:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_305fcdfdd9e686d7",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:33:15",
+    "value": "[12/29/2008 05:33:15] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_s_33231-33240;33231-33240;:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
+  },
+  {
+    "artifact_id": "plaso_16914c5c6018997e",
+    "source_tool": "plaso",
+    "evidence_type": "timeline_event",
+    "timestamp": "12/29/2008 05:33:15",
+    "value": "[12/29/2008 05:33:15] [Firefox Cache] Fetched 1 time(s) [HTTP/1.1 200 OK] GET \"HTTP:http://static.cache.l.google.com/safebrowsing/rd/goog-phish-shavar_a_40481-40640;40481-40522;40523-40640:\" | File: EXT:/home/ubuntu/.mozilla/firefox/ylaw3s7x.default/Cache/_CACHE_001_",
+    "severity": "low",
+    "confidence": 0.5,
+    "linked_artifacts": []
   }
 ]
