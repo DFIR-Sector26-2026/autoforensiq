@@ -846,6 +846,34 @@ def test_same_file_links_memory_and_disk_views_by_filename():
     assert signals["reg_1"]["file_keys"] == []
 
 
+def test_date_and_http_version_fragments_are_not_file_keys():
+    """Plaso values embed dates ("12/29/2008") and "HTTP/1.1" mid-token; the
+    unboundaried unix-path regex turned them into same_file keys ("\\29\\2008",
+    "1.1") that grouped up to 145 unrelated artifacts on the ubnist1 image."""
+    items = [
+        {"artifact_id": f"tl_{i}", "evidence_type": "timeline_event",
+         "source_tool": "plaso", "severity": "medium",
+         "value": f"[12/29/2008 05:29:5{i}] [Firefox Cache] Fetched 1 time(s) "
+                  "[HTTP/1.1 200 OK] POST http://safebrowsing.clients.google.com/x"}
+        for i in range(2)
+    ] + [
+        # A genuine unix path in a timeline value must still key.
+        {"artifact_id": "tl_real", "evidence_type": "timeline_event",
+         "source_tool": "plaso", "severity": "medium",
+         "value": "mtime 12/29/2008 /home/ubuntu/.mozilla/places.sqlite"},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "X"})
+    _, findings = build_correlations(enriched, signals)
+
+    for aid in ("tl_0", "tl_1"):
+        junk = [k for k in signals[aid]["file_keys"]
+                if k in ("\\29\\2008", "\\1.1", "1.1", "\\2008")]
+        assert junk == [], f"{aid} grew junk file keys: {junk}"
+    assert "places.sqlite" in signals["tl_real"]["file_keys"]
+    same_file = [f for f in findings if f["correlation_type"] == "same_file"]
+    assert not any(f.get("signal") in ("\\29\\2008", "1.1", "\\1.1") for f in same_file)
+
+
 def test_domain_correlation_links_pcap_dns_to_memory_string():
     """Issue B1 / P4-DOMAIN: a memory-recovered `suspicious_domain` carries no
     IP/path/PID, so before the domain signal it had zero correlation keys and

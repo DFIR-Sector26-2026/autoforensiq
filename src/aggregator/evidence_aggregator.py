@@ -204,7 +204,9 @@ WINDOWS_PATH_RE = re.compile(
     r"|\\\\[^|<>\"\r\n\t]+"
     r"|(?<![A-Za-z0-9])\\[^\\|<>\"\r\n\t]+(?:\\[^|<>\"\r\n\t]+)+)"
 )
-UNIX_PATH_RE = re.compile(r"(?:/(?:[^\s\"'<>|]+))")
+# Same left boundary as the root-relative branch above: without it dates ("12/29/2008") and
+# "HTTP/1.1" matched mid-token and flooded same_file with junk keys on plaso runs.
+UNIX_PATH_RE = re.compile(r"(?<![A-Za-z0-9])/[^\s\"'<>|]+")
 BYTES_RE = re.compile(r"(\d[\d,]*)\s+bytes", re.IGNORECASE)
 DESTINATION_RE = re.compile(
     r"(?P<dst>(?:\d{1,3}\.){3}\d{1,3})(?::(?P<port>\d+))?\s*(?:\(|$)"
