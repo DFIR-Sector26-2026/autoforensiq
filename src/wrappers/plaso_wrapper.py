@@ -35,6 +35,9 @@ SUSPICIOUS_SOURCES = [
     "download"
 ]
 
+# Non-matching rows are sampled at low severity so benign-image runs give the baseline harvester timeline material
+ROUTINE_SAMPLE_CAP = 150
+
 class PlasoWrapper(BaseWrapper):
     # The orchestrator feeds plaso the disk image; display layers formerly mislabelled it log_files
     # (D2).
@@ -142,6 +145,8 @@ class PlasoWrapper(BaseWrapper):
         print("  [PLASO] Parsing CSV timeline...")
 
         items = []
+        routine_items = []
+        routine_seen = set()
 
         # evtx "Strings" blobs exceed csv's 128 KB field limit; the csv.Error silently truncated the
         # dev01 CSV at ~row 360k of 633k.
@@ -185,6 +190,20 @@ class PlasoWrapper(BaseWrapper):
                                     timestamp=timestamp
                                 )
                             )
+                        elif len(routine_items) < ROUTINE_SAMPLE_CAP:
+                            key = (source, desc)
+                            if key not in routine_seen:
+                                routine_seen.add(key)
+                                routine_items.append(
+                                    self.make_evidence_item(
+                                        artifact_id=stable_artifact_id("plaso", timestamp, desc),
+                                        evidence_type="timeline_event",
+                                        value=f"[{timestamp}] [{source}] {desc} | File: {filename}",
+                                        severity="low",
+                                        confidence=0.5,
+                                        timestamp=timestamp
+                                    )
+                                )
 
                     except Exception:
                         continue
@@ -192,9 +211,10 @@ class PlasoWrapper(BaseWrapper):
         except Exception as e:
             print(f"  [ERROR] Failed to parse CSV: {e}")
 
-        print(f"  [PLASO] Timeline → {len(items)} suspicious events")
+        print(f"  [PLASO] Timeline → {len(items)} suspicious events "
+              f"+ {len(routine_items)} routine sample")
 
-        return items
+        return items + routine_items
 
 
 if __name__ == "__main__":

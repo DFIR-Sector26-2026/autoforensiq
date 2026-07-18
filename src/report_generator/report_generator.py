@@ -715,12 +715,15 @@ def _item_indicators(item):
             label = "Onion Address" if dom.lower().endswith(".onion") else "Domain"
             out.append((label, dom))
     elif etype == "timeline_event":
-        m = _BARE_URL_RE.search(val)
-        if m:
-            out.append(("URL", m.group(0).rstrip(").,;")))
-        m = _HOST_RE.search(val)
-        if m:
-            out.append(("Domain", m.group(1).rstrip(".")))
+        # Skip plaso's low-severity routine sample (baseline-harvest material)
+        if (_SEVERITY_RANK.get(str(item.get("severity", "low")).lower(), 0)
+                >= _SEVERITY_RANK["medium"] or item.get("ioc_match")):
+            m = _BARE_URL_RE.search(val)
+            if m:
+                out.append(("URL", m.group(0).rstrip(").,;")))
+            m = _HOST_RE.search(val)
+            if m:
+                out.append(("Domain", m.group(1).rstrip(".")))
     elif etype == "suspicious_crypto":
         # Fall back to the bare value when the legacy-BTC regex misses, so a bech32/ETH wallet added
         # later isn't silently dropped.

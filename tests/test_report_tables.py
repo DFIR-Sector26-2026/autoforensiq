@@ -265,6 +265,10 @@ def test_item_indicators_extracts_url_and_host_from_timeline_event():
           "severity": "low", "artifact_id": "tl_2"}
     assert _item_indicators(fs) == []
 
+    # plaso's low-severity routine sample must not feed the IOC table even when URL-bearing
+    routine = dict(ev, severity="low", artifact_id="tl_3")
+    assert _item_indicators(routine) == []
+
 
 def test_finding_sort_key_ranks_ioc_bearing_above_indicatorless():
     # Within the same severity tier, an item carrying a concrete IOC (a .onion

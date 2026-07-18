@@ -1135,13 +1135,38 @@ def test_plaso_parse_csv_reads_l2tcsv_columns(tmp_path):
 
     items = PlasoWrapper()._parse_csv(csv_path)
 
-    assert len(items) == 1  # only the Run-key row matches SUSPICIOUS_SOURCES
+    # Run-key row matches SUSPICIOUS_SOURCES at medium; the benign row survives
+    # as a low-severity routine sample (baseline-harvest material).
+    assert [i["severity"] for i in items] == ["medium", "low"]
     item = items[0]
     assert "evil.exe" in item["value"]
     assert item["timestamp"] == "01/27/2023 19:04:11"
-    # medium, not high: the keyword filter is a lead generator (7,734 mostly
-    # benign keeps on the dev01 CSV) — it must not flood Key Findings.
-    assert item["severity"] == "medium"
+
+
+def test_plaso_routine_sample_low_severity_capped_and_deduped(tmp_path, monkeypatch):
+    # Benign-image runs formerly yielded 0 harvestable plaso items (all medium). Non-matching
+    # rows are sampled at low severity, deduped by (source, desc) and capped.
+    from src.wrappers import plaso_wrapper
+    monkeypatch.setattr(plaso_wrapper, "ROUTINE_SAMPLE_CAP", 2)
+    header = ("date,time,timezone,MACB,source,sourcetype,type,user,host,"
+              "short,desc,version,filename,inode,notes,format,extra")
+    def routine(ts, desc):
+        return (f'01/27/2023,{ts},UTC,M...,REG,Registry Key,Content Modification Time,'
+                f'-,-,short,"{desc}",2,NTFS:\\SOFTWARE,1,-,winreg,-')
+    rows = [
+        routine("10:00:00", "[HKLM\\Classes\\A] ok"),
+        routine("10:00:01", "[HKLM\\Classes\\A] ok"),   # duplicate (source, desc) — dropped
+        routine("10:00:02", "[HKLM\\Classes\\B] ok"),
+        routine("10:00:03", "[HKLM\\Classes\\C] ok"),   # beyond the cap — dropped
+    ]
+    csv_path = tmp_path / "timeline.csv"
+    csv_path.write_text("\n".join([header] + rows) + "\n")
+
+    items = plaso_wrapper.PlasoWrapper()._parse_csv(csv_path)
+
+    assert [i["severity"] for i in items] == ["low", "low"]
+    assert all(i["confidence"] == 0.5 for i in items)
+    assert "Classes\\A" in items[0]["value"] and "Classes\\B" in items[1]["value"]
 
 
 def test_plaso_and_regripper_artifact_ids_stable_and_distinct(tmp_path):
