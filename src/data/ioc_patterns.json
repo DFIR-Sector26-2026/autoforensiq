@@ -49,6 +49,13 @@
       "category": "ransomware_marker"
     },
     {
+      "id": "r2d2_bundestrojaner",
+      "_comment": "R2D2/Bundestrojaner published IOCs (0zapftis case, BUGS 1.1): mfc42ul.dll injected module (name-squats the legit mfc42.dll), winsys32.sys kernel driver, hard-coded C2 IP.",
+      "match": ["mfc42ul.dll", "winsys32.sys", "207.158.22.134"],
+      "severity": "critical",
+      "category": "known_malware"
+    },
+    {
       "id": "ransomware_family",
       "match": ["ryuk", "lockbit", "revil", "sodinokibi", "conti", "blackcat", "alphv", "maze", "egregor", "darkside", "cl0p", "clop"],
       "severity": "critical",

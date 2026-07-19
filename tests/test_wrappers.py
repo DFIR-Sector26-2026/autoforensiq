@@ -540,6 +540,103 @@ def test_memprocfs_classify_flags_random_name_as_medium():
         assert _classify_process(benign)[0] == "low", benign
 
 
+class _FakeModule:
+    def __init__(self, name, fullname):
+        self.name, self.fullname = name, fullname
+
+
+class _FakeProc:
+    def __init__(self, pid, name, modules):
+        self.pid, self.name, self._modules = pid, name, modules
+
+    def module_list(self):
+        return self._modules
+
+
+def test_memprocfs_module_items_signal_gated():
+    # BUGS 1.1: modules emit only on a catalog-name or staging-dir signal — the R2D2
+    # injected mfc42ul.dll (catalog IOC) must surface, benign system dlls must not.
+    from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
+    w = MemProcFSWrapper()
+    procs = [_FakeProc(1956, "explorer.exe", [
+        _FakeModule("kernel32.dll", "C:\\WINDOWS\\system32\\kernel32.dll"),
+        _FakeModule("mfc42ul.dll", "C:\\WINDOWS\\system32\\mfc42ul.dll"),
+        _FakeModule("evil.dll", "C:\\Users\\bob\\AppData\\Roaming\\evil.dll"),
+    ])]
+    items = w._module_items(procs)
+    assert [i["severity"] for i in items] == ["medium", "medium"]
+    assert "Known-malware filename" in items[0]["value"]
+    assert "mfc42ul.dll" in items[0]["value"] and "PID 1956" in items[0]["value"]
+    assert "Executable in staging directory" in items[1]["value"]
+    # deterministic ids: rebuilding the same input yields the same artifact_ids
+    assert [i["artifact_id"] for i in w._module_items(procs)] == \
+           [i["artifact_id"] for i in items]
+
+
+def test_memprocfs_service_items_hostile_name_gated():
+    # The R2D2 driver registers a service literally named "malware" — flagged high.
+    # Boundary-aware: Antimalware/Malwarebytes never hit; staging-dir image paths flag medium.
+    from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
+
+    class _FakeMaps:
+        def service(self):
+            return {
+                1: {"name": "Abiosdsk", "name-display": "Abiosdsk", "path": "",
+                    "path-image": "", "dwServiceType": 1},
+                2: {"name": "malware", "name-display": "malware2",
+                    "path": "\\Driver\\malware", "path-image": "", "dwServiceType": 1},
+                3: {"name": "MBAMService", "name-display": "Malwarebytes Service",
+                    "path": "", "path-image": "C:\\Program Files\\Malwarebytes\\mbam.exe",
+                    "dwServiceType": 16},
+                4: {"name": "WinDefend", "name-display": "Microsoft Antimalware Service",
+                    "path": "", "path-image": "C:\\Program Files\\Windows Defender\\MsMpEng.exe",
+                    "dwServiceType": 16},
+                5: {"name": "updsvc", "name-display": "Update Service", "path": "",
+                    "path-image": "C:\\Users\\bob\\AppData\\Local\\Temp\\upd.exe",
+                    "dwServiceType": 16},
+            }
+
+    class _FakeVmm:
+        maps = _FakeMaps()
+
+    w = MemProcFSWrapper()
+    items = w._service_items(_FakeVmm())
+    assert len(items) == 2
+    assert items[0]["severity"] == "high"
+    assert "Hostile-named service" in items[0]["value"]
+    assert "kernel-driver service 'malware'" in items[0]["value"]
+    assert items[1]["severity"] == "medium"
+    assert "upd.exe" in items[1]["value"]
+
+
+def test_memprocfs_network_items_mirror_netstat():
+    # Net-map entries become network_connection items in the volatility netstat value
+    # format, port-tiered via c2_port_severity; entries without any IP are skipped.
+    from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
+
+    class _FakeMaps:
+        def net(self):
+            return [
+                {"proto": "TCPv4", "src-ip": "10.0.0.5", "src-port": 49152,
+                 "dst-ip": "165.245.215.18", "dst-port": 4444, "pid": 1234},
+                {"proto": "TCPv4", "src-ip": "10.0.0.5", "src-port": 49153,
+                 "dst-ip": "10.0.0.9", "dst-port": 445, "pid": 4},
+                {"proto": "TCPv4", "src-ip": "", "src-port": "",
+                 "dst-ip": "", "dst-port": "", "pid": 0},
+            ]
+
+    class _FakeVmm:
+        maps = _FakeMaps()
+
+    w = MemProcFSWrapper()
+    items = w._network_items(_FakeVmm())
+    assert len(items) == 2
+    assert items[0]["severity"] == "high"            # 4444 ∈ C2_PORTS_HIGH
+    assert items[0]["value"] == "TCPv4 10.0.0.5:49152 -> 165.245.215.18:4444 (PID:1234)"
+    assert items[1]["severity"] == "low"
+    assert items[0]["evidence_type"] == "network_connection"
+
+
 def test_parse_filescan():
     wrapper = VolatilityWrapper()
 

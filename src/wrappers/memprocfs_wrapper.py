@@ -5,7 +5,9 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from src.wrappers.base_wrapper import BaseWrapper
+from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
+from src.wrappers.tsk_wrapper import _file_signal
+from src.data.threat_intel import c2_port_severity
 from src.utils.audit_log import log_action
 
 
@@ -29,6 +31,12 @@ _MALICIOUS_NAME_TOKENS = (
     "@wana", "decrypt0r", "ransom", "locker", "cryptor", "mimikatz",
     "cobaltstrike", "beacon", "meterpreter", "payload", "njrat", "darkcomet",
 )
+
+# Self-descriptive hostile service names never hit.
+_HOSTILE_SERVICE_RE = re.compile("|".join(
+    f"(?<![a-z]){w}(?![a-z])"
+    for w in ("malware", "backdoor", "rootkit", "keylogger", "trojan")
+))
 
 
 def _looks_like_random_name(name):
@@ -192,7 +200,8 @@ class MemProcFSWrapper(BaseWrapper):
         items = []
 
         try:
-            for proc in vmm.process_list():
+            procs = vmm.process_list()
+            for proc in procs:
 
                 severity, confidence, note = _classify_process(proc.name)
                 items.append(
@@ -208,6 +217,11 @@ class MemProcFSWrapper(BaseWrapper):
                     )
                 )
 
+            # Modules, services and network objects reach exactly the IOC class vol3 misses on pre-Vista images where MemProcFS still parses.
+            items.extend(self._module_items(procs))
+            items.extend(self._service_items(vmm))
+            items.extend(self._network_items(vmm))
+
         finally:
             try:
                 vmm.close()
@@ -217,6 +231,116 @@ class MemProcFSWrapper(BaseWrapper):
         if not items:
             items.append(self._no_artifacts_item())
 
+        return items
+
+    def _module_items(self, procs):
+        """Loaded modules with a disk-style signal"""
+        items = []
+        for proc in procs:
+            try:
+                modules = proc.module_list()
+            except Exception:
+                continue
+            for mod in modules:
+                # Attribute reads hit the native binding lazily — a corrupt in-memory
+                # module entry can raise (UnicodeDecodeError on Windows_RAM.mem).
+                try:
+                    path = mod.fullname or mod.name
+                except Exception:
+                    continue
+                if not path:
+                    continue
+                signal = _file_signal(path.replace("\\", "/"))
+                if not signal:
+                    continue
+                severity, label = signal
+                items.append(self.make_evidence_item(
+                    artifact_id=stable_artifact_id(
+                        "memprocfs_mod", proc.pid, path.lower()
+                    ),
+                    evidence_type="suspicious_dll",
+                    value=(
+                        f"{label}: {path} loaded in "
+                        f"{proc.name} (PID {proc.pid})"
+                    ),
+                    severity=severity,
+                    confidence=0.75,
+                ))
+        if items:
+            print(f"[MemProcFS] modules → {len(items)} suspicious item(s)")
+        return items
+
+    def _service_items(self, vmm):
+        """Windows services, emitted only on a hostile name or a disk-style image-path signal
+        (a bare XP box already carries 253 services)."""
+        try:
+            services = vmm.maps.service()
+        except Exception:
+            return []
+        items = []
+        for svc in services.values():
+            name = str(svc.get("name") or "")
+            display = str(svc.get("name-display") or "")
+            path = str(svc.get("path") or "")
+            image = str(svc.get("path-image") or "")
+            signal = _file_signal(image.replace("\\", "/")) if image else None
+            if _HOSTILE_SERVICE_RE.search(f"{name} {display} {path} {image}".lower()):
+                severity, label = "high", "Hostile-named service"
+            elif signal:
+                severity, label = signal
+            else:
+                continue
+            kind = ("kernel-driver service"
+                    if svc.get("dwServiceType") in (1, 2) else "service")
+            items.append(self.make_evidence_item(
+                artifact_id=stable_artifact_id("memprocfs_svc", name, path, image),
+                evidence_type="service",
+                value=(
+                    f"{label}: {kind} '{name}' ({display}) "
+                    f"path={path or image or 'n/a'}"
+                ),
+                severity=severity,
+                confidence=0.75,
+            ))
+        if items:
+            print(f"[MemProcFS] services → {len(items)} suspicious item(s)")
+        return items
+
+    def _network_items(self, vmm):
+        """Network object map → network_connection items, value/severity mirroring the
+        volatility netstat parser so downstream port/peer heuristics apply uniformly."""
+        try:
+            net = vmm.maps.net()
+        except Exception:
+            return []
+        items = []
+        for entry in (net.values() if isinstance(net, dict) else net):
+            src_ip = entry.get("src-ip", "")
+            dst_ip = entry.get("dst-ip", "")
+            if not (src_ip or dst_ip):
+                continue
+            src_port = entry.get("src-port", "")
+            dst_port = entry.get("dst-port", "")
+            pid = entry.get("pid", "")
+            proto = entry.get("proto", "?")
+            port_sevs = [s for s in (c2_port_severity(src_port),
+                                     c2_port_severity(dst_port)) if s]
+            severity = ("high" if "high" in port_sevs
+                        else "medium" if port_sevs else "low")
+            items.append(self.make_evidence_item(
+                artifact_id=stable_artifact_id(
+                    "memprocfs_net", proto, src_ip, src_port, dst_ip, dst_port, pid
+                ),
+                evidence_type="network_connection",
+                value=(
+                    f"{proto} {src_ip}:{src_port} -> "
+                    f"{dst_ip}:{dst_port} (PID:{pid})"
+                ),
+                severity=severity,
+                confidence=0.75,
+            ))
+        if items:
+            print(f"[MemProcFS] network → {len(items)} connection item(s)")
         return items
 
     def _find_pagefile(self, image_path):
