@@ -215,9 +215,8 @@ class TsharkWrapper(BaseWrapper):
             uri  = parts[3] if len(parts) > 3 else ""
             user_agent = parts[4] if len(parts) > 4 else ""
 
-            # A non-browser UA on outbound HTTP is a strong automation/malware signal — surface it
-            # in the value and raise severity (issue B2).
-            suspicious_ua = any(
+            # surface non-browser UA on outbound HTTP in the value and raise severity (B2). Loopback never left the machine 
+            suspicious_ua = not src.startswith("127.") and any(
                 tok in user_agent.lower() for tok in SUSPICIOUS_USER_AGENTS
             )
             value = f"HTTP {src} → {host}{uri}"

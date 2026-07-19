@@ -1315,6 +1315,26 @@ def test_suspicious_ports_single_pass_groups_by_port(monkeypatch):
     assert by_id["suspport_6667"]["severity"] == "medium"   # watch tier
 
 
+def test_http_scripted_ua_not_elevated_on_loopback(monkeypatch):
+    """BUGS 1.2b: a scripted UA on loopback traffic is local tooling, not C2 beaconing —
+    capture.pcap's okhttp → 127.0.0.1:9200 flooded 22 high items. LAN/WAN peers still elevate."""
+    w = TsharkWrapper()
+    rows = "\n".join([
+        "1781000001.005\t127.0.0.1\tlocalhost:9200\t/_search\tokhttp/4.9.0",
+        "1781000002.005\t10.0.0.5\tevil.example\t/gate.php\tokhttp/4.9.0",
+        "1781000003.005\t10.0.0.5\tintranet.local\t/page\tMozilla/5.0",
+    ])
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: (rows, "", 0))
+
+    items = w._get_http_requests("x.pcap")
+    assert [i["severity"] for i in items] == [
+        "medium",   # loopback okhttp: elevation gated
+        "high",     # real peer + scripted UA: still elevated
+        "medium",   # browser UA: baseline, unchanged
+    ]
+    assert "[UA: okhttp/4.9.0]" in items[0]["value"]     # UA still surfaced in the value
+
+
 def test_epoch_to_iso_conversion_and_passthrough():
     from src.wrappers.tshark_wrapper import _epoch_to_iso
     assert _epoch_to_iso("1781000001.005") == "2026-06-09T10:13:21Z"
