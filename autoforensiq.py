@@ -237,8 +237,9 @@ def _load_bulk_manifest(manifest_path: str) -> tuple[dict[str, dict], str, str]:
             "output_path": spec.get("output_path"),
         }
 
-    output_root = manifest.get("output_root", str(ROOT_DIR / "output" / "bulk")) if isinstance(manifest, dict) else str(ROOT_DIR / "output" / "bulk")
-    summary_path = manifest.get("summary_path", str(ROOT_DIR / "output" / "bulk_summary.json")) if isinstance(manifest, dict) else str(ROOT_DIR / "output" / "bulk_summary.json")
+    top = manifest if isinstance(manifest, dict) else {}
+    output_root = top.get("output_root", str(ROOT_DIR / "output" / "bulk"))
+    summary_path = top.get("summary_path", str(ROOT_DIR / "output" / "bulk_summary.json"))
     return machine_runs, output_root, summary_path
 
 
@@ -417,7 +418,8 @@ def parse_args():
 
     parser.add_argument(
         "--mock",
-        action="store_true"
+        action="store_true",
+        help="Build the final report from data without calling an LLM."
     )
 
     parser.add_argument(
@@ -429,7 +431,8 @@ def parse_args():
 
     parser.add_argument(
         "--skip-tools",
-        action="store_true"
+        action="store_true",
+        help="Stop after classification; do not select or run analysis tools."
     )
 
     parser.add_argument(

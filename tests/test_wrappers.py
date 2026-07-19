@@ -387,6 +387,18 @@ def test_collect_corroborated_pids():
     assert pids == {"1234", "620"}
 
 
+def test_collect_corroborated_pids_includes_suspicious_lineage():
+    # 2.5: a suspicious parent-child relation implicates both endpoints, so a
+    # JIT-named process (e.g. svchost spawned by cmd) escapes the down-rank.
+    wrapper = VolatilityWrapper()
+    items = [
+        {"artifact_id": "relation_808_1416", "evidence_type": "process_relation",
+         "value": "Suspicious parent-child relationship: cmd.exe -> svchost.exe",
+         "severity": "critical"},
+    ]
+    assert wrapper._collect_corroborated_pids(items) == {"808", "1416"}
+
+
 def test_dedupe_items_collapses_repeats_keeping_strongest():
     # Regression for 3.3-F: the string sweep runs over two corpora, so the same
     # IOC can be emitted twice. Identical (type, value) items collapse to one,
@@ -1410,6 +1422,32 @@ def test_suspicious_ports_single_pass_groups_by_port(monkeypatch):
     assert by_id["suspport_4444"]["timestamp"] == "2026-06-09T10:13:21Z"
     assert by_id["suspport_4444"]["severity"] == "high"     # C2_PORTS_HIGH
     assert by_id["suspport_6667"]["severity"] == "medium"   # watch tier
+
+
+def test_upload_volume_anomaly_flags_asymmetric_lan_to_wan_only(monkeypatch):
+    """BUGS 2.3: a large upload-dominant LAN→WAN transfer flags on volume alone; downloads,
+    LAN-internal transfers and sub-threshold uploads stay silent."""
+    w = TsharkWrapper()
+
+    def rows(src, dst, port, nbytes, n=10):
+        per = nbytes // n
+        return [f"{src}\t{dst}\t{port}\t{per}\t1000.{i}" for i in range(n)]
+
+    lines = (
+        rows("10.0.0.5", "203.0.113.7", "443", 6_000_000)     # exfil: 6MB out
+        + rows("203.0.113.7", "10.0.0.5", "49152", 200_000)   # ...only 200KB back
+        + rows("10.0.0.5", "142.250.1.1", "443", 500_000)     # sub-threshold upload
+        + rows("142.250.1.1", "10.0.0.5", "49153", 9_000_000) # download-dominant: fine
+        + rows("10.0.0.5", "10.0.0.9", "445", 50_000_000)     # LAN→LAN: fine
+    )
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: ("\n".join(lines), "", 0))
+
+    items = w._get_conversations("x.pcap")
+    anomalies = [i for i in items if i["evidence_type"] == "volume_anomaly"]
+    assert len(anomalies) == 1
+    a = anomalies[0]
+    assert a["severity"] == "medium"
+    assert "10.0.0.5 sent 6,000,000 bytes to 203.0.113.7" in a["value"]
 
 
 def test_host_identity_maps_victim_mac_from_comma_joined_src(monkeypatch):

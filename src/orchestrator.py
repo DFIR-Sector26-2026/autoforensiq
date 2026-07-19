@@ -39,6 +39,7 @@ def run_tools(execution_plan: dict, evidence_files: dict):
     tools = sorted(execution_plan["tools"], key=lambda t: t["order"])
     all_raw_outputs = {}
     merged_items = []
+    os.makedirs("output/raw", exist_ok=True)
 
     for tool_spec in tools:
         name = tool_spec["name"]
@@ -81,7 +82,6 @@ def run_tools(execution_plan: dict, evidence_files: dict):
         merged_items.extend(items)
 
         # save raw tool output (combined across artifacts)
-        os.makedirs("output/raw", exist_ok=True)
         out_path = f"output/raw/{name}_output.json"
         with open(out_path, "w") as f:
             json.dump({"tool": name, "items": items}, f, indent=2)
@@ -95,7 +95,6 @@ def run_tools(execution_plan: dict, evidence_files: dict):
     print(f"  [IOC] Extracted {len(ioc_items)} IOC items")
     merged_items.extend(ioc_items)
 
-    os.makedirs("output/raw", exist_ok=True)
     with open("output/raw/ioc_output.json", "w") as f:
         json.dump({"tool": "ioc_engine", "items": ioc_items}, f, indent=2)
     print(f"  [SAVED] {len(ioc_items)} IOC items → output/raw/ioc_output.json")

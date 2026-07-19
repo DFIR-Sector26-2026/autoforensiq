@@ -14,7 +14,17 @@ const NET_TYPES = [
   "dns_query",
   "http_request",
   "suspicious_port",
+  "beacon_pattern",
 ];
+
+// no src→dst pair, so hosts extracted from the URL hang off a synthetic "imaged host" subject node 
+const URL_TYPES = ["timeline_event", "suspicious_url"];
+const DISK_SUBJECT = "imaged host";
+
+const urlHost = (text) => {
+  const m = String(text || "").match(/https?:\/\/([^/\s:?#]+)/i);
+  return m ? m[1] : null;
+};
 
 const rankToSev = (rank) =>
   rank >= 4 ? "critical" : rank >= 3 ? "high" : rank >= 2 ? "medium" : "low";
@@ -41,26 +51,37 @@ function buildGraph(evidence) {
     return nodes[id];
   };
 
-  evidence
-    .filter((e) => NET_TYPES.includes(e.evidence_type))
-    .forEach((e) => {
+  evidence.forEach((e) => {
 
-      const parts = String(e.value || "").split("→");
-      if (parts.length < 2) return;
+    if (URL_TYPES.includes(e.evidence_type)) {
+      const h = urlHost(e.value);
+      if (!h) return;
+      touch(DISK_SUBJECT).isSource = true;
+      const n = touch(h);
+      n.sevRank = Math.max(n.sevRank, SEVERITY_RANK[e.severity] || 0);
+      links[`${DISK_SUBJECT}->${h}`] = { source: DISK_SUBJECT, target: h };
+      return;
+    }
 
-      const src = host(parts[0].trim().split(/\s+/).pop());
-      const dst = host(parts[1].trim().split(/\s+/)[0]);
-      if (!src || !dst) return;
+    if (!NET_TYPES.includes(e.evidence_type)) return;
 
-      const r = SEVERITY_RANK[e.severity] || 0;
-      [src, dst].forEach((id) => {
-        const n = touch(id);
-        if (isLan(id)) n.isSource = true;         // internal subject
-        else n.sevRank = Math.max(n.sevRank, r);  // external host: worst severity
-      });
+    // Both arrow styles: tshark values use "→", volatility/memprocfs netstat uses "->".
+    const parts = String(e.value || "").split(/→|->/);
+    if (parts.length < 2) return;
 
-      links[`${src}->${dst}`] = { source: src, target: dst };
+    const src = host(parts[0].trim().split(/\s+/).pop());
+    const dst = host(parts[1].trim().split(/\s+/)[0]);
+    if (!src || !dst) return;
+
+    const r = SEVERITY_RANK[e.severity] || 0;
+    [src, dst].forEach((id) => {
+      const n = touch(id);
+      if (isLan(id)) n.isSource = true;         // internal subject
+      else n.sevRank = Math.max(n.sevRank, r);  // external host: worst severity
     });
+
+    links[`${src}->${dst}`] = { source: src, target: dst };
+  });
 
   Object.values(nodes).forEach((n) => {
     n.severity = rankToSev(n.sevRank);

@@ -124,6 +124,32 @@ SUSPICIOUS_RELATIONSHIPS = {
     ("explorer.exe", "powershell.exe"),
 }
 
+SUSPICIOUS_CMDLINE_KEYWORDS = [
+    "-enc",
+    "-encodedcommand",
+    "invoke-",
+    "downloadstring",
+    "iex",
+    "bypass",
+    "hidden",
+    "frombase64"
+]
+
+# Processes where RWX is commonly benign (browser/JIT/.NET hosts
+JIT_ALLOWLIST = {
+    "explorer.exe",
+    "chrome.exe",
+    "firefox.exe",
+    "msedge.exe",
+    "iexplore.exe",
+    "opera.exe",
+    "brave.exe",
+    "svchost.exe",
+    "wmiprvse.exe",
+    "dllhost.exe",
+    "msmpeng.exe",
+}
+
 # URL/network-context anchors — THE GATE for string-swept domains (D3): only domains sitting in URL
 # grammar are emitted; bare tokens are noise (a real C2 still arrives via its actual connection/DNS
 # artifact). Grammar-fixed, not image-tuned.
@@ -559,9 +585,8 @@ class VolatilityWrapper(BaseWrapper):
         # avoids volatility's internal strings collector returning empty results when no strings
         # source is set.
         strings_path = None
-        strings_cleanup = None
         try:
-            strings_path, strings_cleanup = self._build_strings_file(image_path)
+            strings_path = self._build_strings_file(image_path)
             if strings_path and Path(strings_path).exists():
                 plugin = "windows.strings"
                 print(f"\n  [VOL] Running {plugin} with generated strings file...")
@@ -595,9 +620,9 @@ class VolatilityWrapper(BaseWrapper):
                 except Exception as exc:
                     print(f"  [VOL] raw strings extraction failed: {exc}")
         finally:
-            if strings_cleanup is not None:
+            if strings_path is not None:
                 try:
-                    strings_cleanup.cleanup()
+                    os.unlink(strings_path)
                 except Exception:
                     pass
 
@@ -681,7 +706,7 @@ class VolatilityWrapper(BaseWrapper):
 
     def _build_strings_file(self, image_path: str):
         """Run system `strings` over the image into a tempfile for windows.strings
-        --strings-file. Returns (path, cleanup-object) or (None, None) on failure."""
+        --strings-file. Returns the path, or None on failure; caller unlinks."""
 
         try:
             stdout, stderr, code = self.run_command(
@@ -690,10 +715,10 @@ class VolatilityWrapper(BaseWrapper):
                 timeout=120,
             )
         except Exception:
-            return None, None
+            return None
 
         if code != 0 or not stdout.strip():
-            return None, None
+            return None
 
         tmp = tempfile.NamedTemporaryFile(delete=False, prefix="af_strings_", suffix=".txt", mode="w", encoding="utf-8")
         try:
@@ -705,20 +730,9 @@ class VolatilityWrapper(BaseWrapper):
                 os.unlink(tmp.name)
             except Exception:
                 pass
-            return None, None
+            return None
 
-        class _Cleanup:
-            def __init__(self, path):
-                self._path = path
-
-            def cleanup(self):
-                try:
-                    if os.path.exists(self._path):
-                        os.unlink(self._path)
-                except Exception:
-                    pass
-
-        return tmp.name, _Cleanup(tmp.name)
+        return tmp.name
 
     def _parse_pslist(self, lines: list) -> list:
 
@@ -751,10 +765,7 @@ class VolatilityWrapper(BaseWrapper):
 
                 severity = (
                     "high"
-                    if any(
-                        s in name.lower()
-                        for s in SUSPICIOUS_PARENTS
-                    )
+                    if name.lower() in SUSPICIOUS_PARENTS
                     else "low"
                 )
 
@@ -884,17 +895,6 @@ class VolatilityWrapper(BaseWrapper):
 
         items = []
 
-        suspicious_keywords = [
-            "-enc",
-            "-encodedcommand",
-            "invoke-",
-            "downloadstring",
-            "iex",
-            "bypass",
-            "hidden",
-            "frombase64"
-        ]
-
         for line in lines:
 
             line = line.strip()
@@ -953,7 +953,7 @@ class VolatilityWrapper(BaseWrapper):
                 "high"
                 if any(
                     kw in lower
-                    for kw in suspicious_keywords
+                    for kw in SUSPICIOUS_CMDLINE_KEYWORDS
                 )
                 else "low"
             )
@@ -1058,10 +1058,10 @@ class VolatilityWrapper(BaseWrapper):
 
         return items
     def _collect_corroborated_pids(self, items: list) -> set:
-        """PIDs flagged by a *behavioral* IOC (high/critical commandline or network connection) —
-        the "corroborated by another IOC" escape from the malfind JIT down-rank. Name-based
-        heuristics deliberately excluded to keep corroboration independent."""
-        corroborating_types = {"commandline", "network_connection"}
+        """PIDs flagged by a *behavioral* IOC (high/critical commandline, network connection, or
+        suspicious lineage) — the "corroborated by another IOC" escape from the malfind JIT
+        down-rank. Name-based heuristics deliberately excluded to keep corroboration independent."""
+        corroborating_types = {"commandline", "network_connection", "process_relation"}
         pids = set()
 
         for it in items:
@@ -1074,6 +1074,12 @@ class VolatilityWrapper(BaseWrapper):
             m = re.match(r"(?:cmdline|netstat)_(\d+)", aid)
             if m:
                 pids.add(m.group(1))
+
+            # Suspicious lineage implicates both endpoints: the parent (likely injected spawner)
+            # and the child (payload).
+            m = re.match(r"relation_(\d+)_(\d+)", aid)
+            if m:
+                pids.update(m.groups())
 
             for m in re.finditer(r"pid[:=]?\s*(\d+)", str(it.get("value", "")), re.IGNORECASE):
                 pids.add(m.group(1))
@@ -1218,32 +1224,15 @@ class VolatilityWrapper(BaseWrapper):
                 confidence = 0.70
                 reasons = ["Injected regions detected (no RWX/PE signature)"]
 
-            # Processes where RWX is commonly benign (browser/JIT/.NET hosts; Defender's MsMpEng — a
-            # universal malfind FP): down-ranked unless corroborated. Core system processes
-            # (csrss/lsass/…) deliberately NOT here — RWX there is a strong signal.
-            jit_allowlist = {
-                "explorer.exe",
-                "chrome.exe",
-                "firefox.exe",
-                "msedge.exe",
-                "iexplore.exe",
-                "opera.exe",
-                "brave.exe",
-                "svchost.exe",
-                "wmiprvse.exe",
-                "dllhost.exe",
-                "msmpeng.exe",
-            }
-
             # Corroboration: either malfind itself saw RWX *and* a PE/shellcode signature, or
             # another tool independently flagged this PID.
             is_corroborated = corroborated or (str(pid) in corroborated_pids)
 
-            if name.lower() in jit_allowlist and not is_corroborated and severity in {"critical", "high"}:
+            if name.lower() in JIT_ALLOWLIST and not is_corroborated and severity in {"critical", "high"}:
                 severity = "medium"
                 confidence = 0.65
                 reasons.append("Injection in JIT-capable process without corroborating IOC: down-ranked")
-            elif name.lower() in jit_allowlist and is_corroborated:
+            elif name.lower() in JIT_ALLOWLIST and is_corroborated:
                 reasons.append("Corroborated by another IOC; down-rank skipped")
 
             items.append(

@@ -59,9 +59,6 @@ def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
         return all_outputs
 
     raw_path = Path(raw_dir)
-    if not raw_path.exists():
-        return all_outputs
-
     for filename in sorted([p.name for p in raw_path.iterdir() if p.is_file()]):
         if not filename.endswith("_output.json"):
             continue
@@ -91,7 +88,7 @@ def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
 def deduplicate_items(all_items: list[dict]) -> tuple[list[dict], int]:
     """Deduplicate evidence items by artifact_id. Keeps first occurrence, removes duplicates.
     Returns (deduplicated_list, count_removed)."""
-    seen = {}
+    seen = set()
     deduplicated = []
     removed_count = 0
 
@@ -103,7 +100,7 @@ def deduplicate_items(all_items: list[dict]) -> tuple[list[dict], int]:
             continue
         if artifact_id not in seen:
             deduplicated.append(item)
-            seen[artifact_id] = True
+            seen.add(artifact_id)
         else:
             removed_count += 1
 
@@ -1016,33 +1013,10 @@ def aggregate_evidence(
     # Step 1: Load all raw outputs
     all_by_tool = load_raw_outputs(raw_outputs_dir)
     
+    # No raw outputs: fall through with zero items — the normal pipeline produces the empty shape from the same Step-7 builder
     if not all_by_tool:
         print(f"  [WARN] No raw outputs found. Writing empty unified_evidence.json")
-        unified = {
-            "case_id": case_context.get("case_id", "unknown"),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "tools_aggregated": [],
-            "total_items": 0,
-            "deduplication_stats": {
-                "raw_items_before": 0,
-                "duplicates_removed": 0
-            },
-            "evidence_items": [],
-            "evidence_by_type": {},
-            "evidence_by_tool": {},
-            "evidence_by_machine": {},
-            "findings": [],
-            "exfiltration_findings": [],
-            "bulk_summary": {
-                "machines_analyzed": 0,
-                "machine_ids": [],
-                "findings_detected": 0,
-                "exfiltration_findings": 0,
-            }
-        }
-        write_json(output_path, unified)
-        return unified
-    
+
     # Step 2: Flatten all items into one list
     all_items = []
     raw_count = 0

@@ -89,6 +89,62 @@ _ARTIFACT_KEYWORDS = {
     "browser_history":["browser", "chrome", "firefox", "history", "cookies"],
 }
 
+# Per-case-type hypotheses / summary sentence for the mock classifier's context.
+_HYPOTHESES_MAP = {
+    "ransomware":        [
+        "Ransomware binary executed via phishing attachment or RDP brute force",
+        "File encryption process spawned from a suspicious parent process",
+        "C2 beacon established prior to encryption to exfiltrate data",
+        "Persistence mechanism installed in registry run keys before detonation",
+    ],
+    "apt_intrusion":     [
+        "Initial access via spear-phishing or supply chain compromise",
+        "Lateral movement using stolen credentials or pass-the-hash",
+        "Long-dwell persistence established via scheduled tasks or WMI subscriptions",
+        "Data staging and exfiltration to attacker-controlled C2 infrastructure",
+    ],
+    "data_exfiltration": [
+        "Sensitive data accessed and staged in a temporary directory",
+        "Exfiltration via encrypted channel to external IP or cloud storage",
+        "Credential theft used to escalate privileges before data access",
+        "Unusual outbound network volume at off-hours indicating transfer",
+    ],
+    "insider_threat":    [
+        "Privileged user accessed data outside normal business hours",
+        "Bulk download or copy of sensitive files to removable media",
+        "Attempts to cover tracks via log clearing or file deletion",
+        "Unusual authentication patterns prior to resignation or termination",
+    ],
+    "malware_infection": [
+        "Malware injected into a legitimate process to evade detection",
+        "Suspicious DLL loaded by a trusted process (DLL hijacking or sideloading)",
+        "Persistence mechanism established in registry or scheduled tasks",
+        "C2 communication established from infected host to attacker infrastructure",
+    ],
+    "phishing":          [
+        "Malicious email link or attachment opened by target user",
+        "Credential harvesting page used to steal user login credentials",
+        "Payload downloaded and executed following link click",
+        "Lateral movement initiated from compromised user account",
+    ],
+    "unknown":           [
+        "Investigate all available artifacts for signs of compromise",
+        "Baseline system state against known-good to identify anomalies",
+        "Review authentication logs for unusual access patterns",
+    ],
+}
+
+_SUMMARIES = {
+    "ransomware":        "Ransomware incident where files were encrypted and a ransom demand was made.",
+    "apt_intrusion":     "Advanced persistent threat intrusion with signs of long-dwell lateral movement.",
+    "data_exfiltration": "Suspected data exfiltration incident with unauthorised access to sensitive files.",
+    "insider_threat":    "Insider threat incident involving unauthorised data access by a privileged user.",
+    "malware_infection": "Malware infection detected with signs of process injection and C2 communication.",
+    "phishing":          "Phishing-initiated compromise resulting in credential theft or payload execution.",
+    "unknown":           "Incident of unknown type requiring broad forensic investigation across all artifacts.",
+}
+
+
 def _mock_classify(report_text: str) -> dict:
     """Deterministic keyword-based classifier — no LLM/API key needed."""
     text_lower = report_text.lower()
@@ -113,51 +169,6 @@ def _mock_classify(report_text: str) -> dict:
     if not artifact_types:
         artifact_types = ["memory_dump"]  # safe default
 
-    # Build hypotheses from case type
-    hypotheses_map = {
-        "ransomware":        [
-            "Ransomware binary executed via phishing attachment or RDP brute force",
-            "File encryption process spawned from a suspicious parent process",
-            "C2 beacon established prior to encryption to exfiltrate data",
-            "Persistence mechanism installed in registry run keys before detonation",
-        ],
-        "apt_intrusion":     [
-            "Initial access via spear-phishing or supply chain compromise",
-            "Lateral movement using stolen credentials or pass-the-hash",
-            "Long-dwell persistence established via scheduled tasks or WMI subscriptions",
-            "Data staging and exfiltration to attacker-controlled C2 infrastructure",
-        ],
-        "data_exfiltration": [
-            "Sensitive data accessed and staged in a temporary directory",
-            "Exfiltration via encrypted channel to external IP or cloud storage",
-            "Credential theft used to escalate privileges before data access",
-            "Unusual outbound network volume at off-hours indicating transfer",
-        ],
-        "insider_threat":    [
-            "Privileged user accessed data outside normal business hours",
-            "Bulk download or copy of sensitive files to removable media",
-            "Attempts to cover tracks via log clearing or file deletion",
-            "Unusual authentication patterns prior to resignation or termination",
-        ],
-        "malware_infection": [
-            "Malware injected into a legitimate process to evade detection",
-            "Suspicious DLL loaded by a trusted process (DLL hijacking or sideloading)",
-            "Persistence mechanism established in registry or scheduled tasks",
-            "C2 communication established from infected host to attacker infrastructure",
-        ],
-        "phishing":          [
-            "Malicious email link or attachment opened by target user",
-            "Credential harvesting page used to steal user login credentials",
-            "Payload downloaded and executed following link click",
-            "Lateral movement initiated from compromised user account",
-        ],
-        "unknown":           [
-            "Investigate all available artifacts for signs of compromise",
-            "Baseline system state against known-good to identify anomalies",
-            "Review authentication logs for unusual access patterns",
-        ],
-    }
-
     # Extract affected systems (simple heuristic: look for hostnames/IPs)
     ip_pattern   = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', report_text)
     host_pattern = re.findall(r'\b[A-Z][A-Z0-9\-]{3,}\b', report_text)
@@ -172,26 +183,15 @@ def _mock_classify(report_text: str) -> dict:
     ]
     affected_systems = list(dict.fromkeys(ip_pattern + host_pattern[:3]))[:5]
 
-    # Summary sentence
-    summaries = {
-        "ransomware":        "Ransomware incident where files were encrypted and a ransom demand was made.",
-        "apt_intrusion":     "Advanced persistent threat intrusion with signs of long-dwell lateral movement.",
-        "data_exfiltration": "Suspected data exfiltration incident with unauthorised access to sensitive files.",
-        "insider_threat":    "Insider threat incident involving unauthorised data access by a privileged user.",
-        "malware_infection": "Malware infection detected with signs of process injection and C2 communication.",
-        "phishing":          "Phishing-initiated compromise resulting in credential theft or payload execution.",
-        "unknown":           "Incident of unknown type requiring broad forensic investigation across all artifacts.",
-    }
-
     return {
         "case_id":              str(uuid.uuid4()),
         "case_type":            case_type,
         "artifact_types":       artifact_types,
-        "hypotheses":           hypotheses_map.get(case_type, hypotheses_map["unknown"]),
+        "hypotheses":           _HYPOTHESES_MAP.get(case_type, _HYPOTHESES_MAP["unknown"]),
         "affected_systems":     affected_systems,
         "classifier_confidence": round(confidence, 2),
         "generated_at":         datetime.now(timezone.utc).isoformat(),
-        "raw_incident_summary": summaries.get(case_type, summaries["unknown"]),
+        "raw_incident_summary": _SUMMARIES.get(case_type, _SUMMARIES["unknown"]),
     }
 
 

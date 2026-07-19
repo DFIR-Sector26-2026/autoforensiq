@@ -129,14 +129,12 @@ def reconcile_evidence(case_context: dict, unified_evidence: dict) -> dict:
     divergence = score < _DIVERGENCE_THRESHOLD
 
     if divergence:
-        # Lower proportionally to how far below the support threshold we are.
+        # Lower proportionally to how far below the support threshold we ares
         factor = _NO_SUPPORT_FLOOR + (1.0 - _NO_SUPPORT_FLOOR) * (score / _DIVERGENCE_THRESHOLD)
         reconciled = round(classifier_confidence * factor, 2)
     else:
         # Adequately corroborated → keep the classifier's confidence as-is.
         reconciled = round(classifier_confidence, 2)
-    # Lower-only: never inflate the classifier's self-reported confidence.
-    reconciled = min(reconciled, round(classifier_confidence, 2))
 
     block["evidence_support_score"] = round(score, 2)
     block["reconciled_confidence"] = reconciled

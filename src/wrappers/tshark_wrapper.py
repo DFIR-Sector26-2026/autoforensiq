@@ -1,7 +1,9 @@
 import os
 import re
 import json
+import math
 import statistics
+from collections import Counter
 from datetime import datetime, timezone
 from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
 from src.data.threat_intel import (
@@ -27,6 +29,10 @@ BEACON_MIN_COUNT = 8
 BEACON_MIN_INTERVAL_S = 5.0     # faster = retries/scanning, not beaconing
 BEACON_MAX_INTERVAL_S = 3600.0
 BEACON_MAX_CV = 0.45            # stdev/mean of inter-arrival deltas; allows deliberate jitter
+
+# Upload-volume anomaly (BUGS 2.3): browsing uploads run ~KB and download-dominant; 
+EXFIL_MIN_UPLOAD_BYTES = 1_000_000
+EXFIL_MIN_ASYMMETRY = 5
 
 
 
@@ -192,6 +198,30 @@ class TsharkWrapper(BaseWrapper):
                 ))
             except Exception:
                 continue
+
+        # a large upload-dominant transfer from a LAN host to a non-LAN peer flags on volume/asymmetry alone 
+        direction_bytes = {}
+        for (src, dst, _dport), agg in aggregates.items():
+            direction_bytes[(src, dst)] = direction_bytes.get((src, dst), 0) + agg["bytes"]
+        for (src, dst), sent in direction_bytes.items():
+            if sent < EXFIL_MIN_UPLOAD_BYTES:
+                continue
+            if not is_lan_ipv4(src) or is_lan_ipv4(dst) or dst.startswith("127."):
+                continue
+            received = direction_bytes.get((dst, src), 0)
+            if sent < EXFIL_MIN_ASYMMETRY * max(received, 1):
+                continue
+            items.append(self.make_evidence_item(
+                artifact_id=stable_artifact_id("volanom", src, dst),
+                evidence_type="volume_anomaly",
+                value=(
+                    f"Upload-volume anomaly: {src} sent {sent:,} bytes to {dst} "
+                    f"(received {received:,})"
+                ),
+                severity="medium",
+                confidence=0.65,
+            ))
+
         print(f"  [TSHARK] Conversations → {len(items)} items")
         return items
 
@@ -447,7 +477,7 @@ class TsharkWrapper(BaseWrapper):
                     artifact_id=f"suspport_{port}",
                     evidence_type="suspicious_port",
                     value=f"Traffic on suspicious port {port}: {src} → {dst} ({len(lines)} packets)",
-                    severity=c2_port_severity(port) or "high",
+                    severity=c2_port_severity(port),
                     confidence=0.88,
                     timestamp=_epoch_to_iso(timestamp)
                 ))
@@ -465,8 +495,6 @@ class TsharkWrapper(BaseWrapper):
         return max(labels, key=len) if labels else ""
 
     def _string_entropy(self, s: str) -> float:
-        import math
-        from collections import Counter
         if not s:
             return 0
         counts = Counter(s)
