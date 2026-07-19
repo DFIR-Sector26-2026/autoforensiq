@@ -443,6 +443,18 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--known-bad",
+        nargs="*",
+        default=[],
+        metavar="HOST",
+        help=(
+            "Per-case known-bad domains/IPs (e.g. from an advisory or TI feed). Folded into "
+            "case_context.known_bad_hosts: evidence touching these hosts is boosted and "
+            "IOC-tagged by the reputation match. Example: --known-bad evil.example 203.0.113.7"
+        )
+    )
+
+    parser.add_argument(
         "--gui",
         action="store_true",
         help="Force the GUI even when other flags are provided."
@@ -643,6 +655,15 @@ def main(args=None):
         config_override=config_override,
         provided_artifact_types=provided_artifact_types,
     )
+
+    # Analyst-supplied per-case threat intel (BUGS 2.1) — joins the P4 reputation match;
+    # re-persisted so the saved context records what intel the verdict was based on.
+    known_bad = [t.strip() for t in (args.known_bad or []) if t.strip()]
+    if known_bad:
+        case_context["known_bad_hosts"] = known_bad
+        with open(ROOT_DIR / "output" / "case_context.json", "w") as f:
+            json.dump(case_context, f, indent=2)
+        print(f"  [TI] {len(known_bad)} per-case known-bad host(s) will join the reputation match")
 
     if args.skip_tools:
         print("\n[SKIP] --skip-tools enabled")

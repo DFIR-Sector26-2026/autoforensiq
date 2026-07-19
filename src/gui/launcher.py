@@ -104,6 +104,7 @@ class AutoForensiqGUI(ctk.CTk):
         self._model = ctk.StringVar(value="claude-sonnet-4-6")
         self._mock_mode = ctk.BooleanVar(value=True)
         self._skip_tools = ctk.BooleanVar(value=False)
+        self._known_bad = ctk.StringVar()
         self._tool_vars: dict[str, ctk.BooleanVar] = {
             name: ctk.BooleanVar(value=True) for name, _ in _TOOLS
         }
@@ -444,6 +445,28 @@ class AutoForensiqGUI(ctk.CTk):
         )
         self._all_tools_btn.pack(side="left")
 
+        # Row 4 — per-case known-bad hosts (BUGS 2.1: analyst threat intel → reputation match)
+        row4 = ctk.CTkFrame(body, fg_color="transparent")
+        row4.pack(fill="x", pady=(14, 0))
+
+        ctk.CTkLabel(
+            row4, text="Known-bad",
+            font=(FONT_FAMILY, 12), text_color=TEXT_SECONDARY, width=68,
+        ).pack(side="left")
+
+        self._known_bad_entry = ctk.CTkEntry(
+            row4,
+            textvariable=self._known_bad,
+            placeholder_text="Per-case bad domains / IPs, space- or comma-separated (optional)…",
+            font=(FONT_FAMILY, 12),
+            fg_color=INPUT_BG,
+            border_color=BORDER,
+            text_color=TEXT_PRIMARY,
+            placeholder_text_color=TEXT_MUTED,
+            height=34,
+        )
+        self._known_bad_entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
+
     def _select_all_tools(self) -> None:
         for var in self._tool_vars.values():
             var.set(True)
@@ -558,6 +581,10 @@ class AutoForensiqGUI(ctk.CTk):
         selected_tools = [name for name, _ in _TOOLS if self._tool_vars[name].get()]
         if selected_tools and len(selected_tools) < len(_TOOLS):
             cmd += ["--tools"] + selected_tools
+
+        known_bad = self._known_bad.get().replace(",", " ").split()
+        if known_bad:
+            cmd += ["--known-bad"] + known_bad
 
         if not self._mock_mode.get():
             provider = self._provider.get()
