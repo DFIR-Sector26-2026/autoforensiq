@@ -24,6 +24,9 @@ def _is_benign_record(item: dict) -> bool:
         return False
     if str(item.get("evidence_type", "")).endswith("_status"):
         return False
+    # Strings-fallback domains are truncated/garbage-prone ("ick.net")
+    if item.get("evidence_type") == "suspicious_domain":
+        return False
     # A record lighting any rule-penalized feature is never certifiably benign — it would teach
     # the detector that rule-punished deviations are normal (the rundll32/cmd.exe poisoning).
     features = extract_features(item)

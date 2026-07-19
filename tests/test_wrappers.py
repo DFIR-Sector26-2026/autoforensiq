@@ -1412,6 +1412,53 @@ def test_suspicious_ports_single_pass_groups_by_port(monkeypatch):
     assert by_id["suspport_6667"]["severity"] == "medium"   # watch tier
 
 
+def test_host_identity_maps_victim_mac_from_comma_joined_src(monkeypatch):
+    """BUGS 3.2: the macOS victim rows carry comma-joined ip.src (tunneled dual IP layer) —
+    the LAN address must still map to its MAC; WAN-only rows produce nothing."""
+    w = TsharkWrapper()
+    rows = "\n".join([
+        "1781000001.0\t10.5.11.101,142.251.116.94\t1c:f6:4c:57:46:99",
+        "1781000002.0\t104.16.79.73\t20:e5:2a:b6:93:f1",       # WAN src: no identity
+        "1781000003.0\t10.5.11.1\t20:e5:2a:b6:93:f1",
+    ])
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: (rows, "", 0))
+
+    items = w._get_host_identities("x.pcap")
+    values = sorted(i["value"] for i in items)
+    assert values == [
+        "Host 10.5.11.1 has MAC 20:e5:2a:b6:93:f1",
+        "Host 10.5.11.101 has MAC 1c:f6:4c:57:46:99",
+    ]
+
+
+def test_beacon_cadence_flags_regular_remote_flows_only(monkeypatch):
+    """BUGS 2.3: steady session-initiation cadence to a remote peer is C2-shaped without any
+    catalog hit; bursty flows, loopback, and short runs stay silent; LAN heartbeats stay low."""
+    w = TsharkWrapper()
+
+    def syn_rows(src, dst, port, stamps):
+        return [f"{t}\t{src}\t{dst}\t{port}" for t in stamps]
+
+    regular = [1000.0 + i * 50 for i in range(10)]           # ~50s, cv=0
+    bursty = [1000.0, 1001.0, 1002.0, 1500.0, 1501.0, 1502.0, 2900.0, 2901.0]
+    rows = (
+        syn_rows("10.5.11.101", "94.232.249.129", "80", regular)
+        + syn_rows("10.5.11.101", "10.0.0.9", "1514", regular)      # LAN agent heartbeat
+        + syn_rows("127.0.0.1", "127.0.0.1", "1514", regular)       # loopback: skipped
+        + syn_rows("10.5.11.101", "165.245.215.18", "80", bursty)   # irregular: skipped
+        + syn_rows("10.5.11.101", "8.8.8.8", "443", regular[:5])    # below min count
+    )
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: ("\n".join(rows), "", 0))
+
+    items = w._get_beacon_patterns("x.pcap")
+    by_dst = {i["value"].split("→ ")[1].split(":")[0]: i for i in items}
+    assert set(by_dst) == {"94.232.249.129", "10.0.0.9"}
+    assert by_dst["94.232.249.129"]["severity"] == "medium"
+    assert by_dst["10.0.0.9"]["severity"] == "low"
+    assert "every ~50s" in by_dst["94.232.249.129"]["value"]
+    assert by_dst["94.232.249.129"]["evidence_type"] == "beacon_pattern"
+
+
 def test_http_scripted_ua_not_elevated_on_loopback(monkeypatch):
     """BUGS 1.2b: a scripted UA on loopback traffic is local tooling, not C2 beaconing —
     capture.pcap's okhttp → 127.0.0.1:9200 flooded 22 high items. LAN/WAN peers still elevate."""

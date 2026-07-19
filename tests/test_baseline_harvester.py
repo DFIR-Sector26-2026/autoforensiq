@@ -54,6 +54,21 @@ def test_rule_penalized_features_never_enter_the_baseline(tmp_path):
     assert [r["artifact_id"] for r in records] == ["ok"]
 
 
+def test_strings_fallback_domains_never_enter_the_baseline(tmp_path):
+    # Strings-derived suspicious_domain items are truncated/garbage-prone ("ick.net")
+    unified = tmp_path / "unified.json"
+    baseline = tmp_path / "baseline.json"
+    unified.write_text(json.dumps(_unified([
+        _item(artifact_id="dom", source_tool="volatility3",
+              evidence_type="suspicious_domain", value="ick.net"),
+        _item(artifact_id="ok"),
+    ])))
+    added = harvest_baseline(str(unified), str(baseline))
+    records = json.loads(baseline.read_text())
+    assert added == {"network": 1}
+    assert [r["artifact_id"] for r in records] == ["ok"]
+
+
 def test_harvest_dedupes_against_existing_baseline_across_runs(tmp_path):
     unified = tmp_path / "unified.json"
     baseline = tmp_path / "baseline.json"

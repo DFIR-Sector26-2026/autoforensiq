@@ -1,16 +1,15 @@
 import os
 import re
 import json
+import statistics
 from datetime import datetime, timezone
-from src.wrappers.base_wrapper import BaseWrapper
+from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
 from src.data.threat_intel import (
     C2_PORTS_ALL, c2_port_severity, is_allowlisted_dns, is_lan_ipv4,
 )
 import hashlib
 
-# Non-browser HTTP User-Agents typical of malware droppers and C2 clients. A scripted UA on outbound
-# web traffic is a strong signal (issue B2: the macOS stealer beaconed with curl/8.7.1). Matched
-# case-insensitively as substrings.
+# A scripted UA on outbound web traffic is a strong signal
 SUSPICIOUS_USER_AGENTS = (
     "curl/", "wget/", "python-requests", "python-urllib", "go-http-client",
     "libwww-perl", "powershell", "okhttp", "java/", "axios/", "winhttp",
@@ -22,6 +21,12 @@ BODY_TEXT_CONTENT_TYPES = ("json", "text", "urlencoded", "xml", "javascript")
 BODY_MAX_BYTES = 8192
 _BODY_URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 _BODY_HEXID_RE = re.compile(r"\b[0-9a-f]{32,64}\b")
+
+# a flow whose session initiations recur at a steady interval is C2-shaped even with an empty catalog
+BEACON_MIN_COUNT = 8
+BEACON_MIN_INTERVAL_S = 5.0     # faster = retries/scanning, not beaconing
+BEACON_MAX_INTERVAL_S = 3600.0
+BEACON_MAX_CV = 0.45            # stdev/mean of inter-arrival deltas; allows deliberate jitter
 
 
 
@@ -68,7 +73,63 @@ class TsharkWrapper(BaseWrapper):
         all_items.extend(self._get_http_bodies(pcap_path))
         all_items.extend(self._get_host_identities(pcap_path))
         all_items.extend(self._get_suspicious_ports(pcap_path))
+        all_items.extend(self._get_beacon_patterns(pcap_path))
         return all_items
+
+    def _get_beacon_patterns(self, pcap_path: str) -> list:
+        """Catalog-free C2 heuristic (BUGS 2.3): flag flows whose TCP session initiations (bare
+        SYNs) recur at a steady interval. Loopback never left the machine (1.2b) and is skipped;
+        a LAN destination stays low (agent heartbeats), a public one is medium."""
+        print("  [TSHARK] Checking beacon cadence...")
+        stdout, _, code = self.run_command([
+            "tshark", "-r", pcap_path,
+            "-Y", "tcp.flags.syn==1 && tcp.flags.ack==0",
+            "-T", "fields",
+            "-e", "frame.time_epoch",
+            "-e", "ip.src",
+            "-e", "ip.dst",
+            "-e", "tcp.dstport",
+        ], input_files=[pcap_path], timeout=120)
+
+        items = []
+        if code != 0 or not stdout.strip():
+            return items
+
+        flows = {}
+        for line in stdout.strip().splitlines():
+            parts = line.split("\t")
+            if len(parts) < 4 or not parts[1] or not parts[2]:
+                continue
+            try:
+                ts = float(parts[0])
+            except ValueError:
+                continue
+            flows.setdefault((parts[1], parts[2], parts[3]), []).append(ts)
+
+        for (src, dst, dport), stamps in flows.items():
+            if len(stamps) < BEACON_MIN_COUNT or dst.startswith("127."):
+                continue
+            stamps.sort()
+            deltas = [b - a for a, b in zip(stamps, stamps[1:])]
+            mean = statistics.mean(deltas)
+            if not BEACON_MIN_INTERVAL_S <= mean <= BEACON_MAX_INTERVAL_S:
+                continue
+            cv = statistics.pstdev(deltas) / mean
+            if cv >= BEACON_MAX_CV:
+                continue
+            items.append(self.make_evidence_item(
+                artifact_id=stable_artifact_id("beacon", src, dst, dport),
+                evidence_type="beacon_pattern",
+                value=(
+                    f"Beacon pattern: {src} → {dst}:{dport} — {len(stamps)} connections "
+                    f"every ~{mean:.0f}s (cv={cv:.2f})"
+                ),
+                severity="low" if is_lan_ipv4(dst) else "medium",
+                confidence=0.70,
+                timestamp=_epoch_to_iso(str(stamps[0])),
+            ))
+        print(f"  [TSHARK] Beacon cadence → {len(items)} flow(s)")
+        return items
 
     def _get_conversations(self, pcap_path: str) -> list:
         print("  [TSHARK] Extracting conversations...")

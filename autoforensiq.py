@@ -599,6 +599,14 @@ def preflight_check(evidence_files: dict, execution_plan: dict):
             print(f"    [--]  {label}")
             print(f"          Hint: {hint}")
 
+    # VMware snapshot memory without its .vmss/.vmsn sidecar: MemProcFS carries the analysis instead of volatility
+    for mem in evidence_files.get("memory_dump", []):
+        p = Path(mem)
+        if p.suffix.lower() == ".vmem" and not any(
+                p.with_suffix(s).exists() for s in (".vmss", ".vmsn")):
+            print(f"  [WARN] {p.name}: VMware .vmem without a .vmss/.vmsn sidecar — "
+                  "volatility3 may fail on pre-Vista guests; MemProcFS results will carry.")
+
     print("─" * 60)
 
 
