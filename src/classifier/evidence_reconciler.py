@@ -129,7 +129,7 @@ def reconcile_evidence(case_context: dict, unified_evidence: dict) -> dict:
     divergence = score < _DIVERGENCE_THRESHOLD
 
     if divergence:
-        # Lower proportionally to how far below the support threshold we ares
+        # Lower proportionally to how far below the support threshold we are
         factor = _NO_SUPPORT_FLOOR + (1.0 - _NO_SUPPORT_FLOOR) * (score / _DIVERGENCE_THRESHOLD)
         reconciled = round(classifier_confidence * factor, 2)
     else:

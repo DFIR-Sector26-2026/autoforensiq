@@ -6,9 +6,9 @@ llm:
   # Options: "anthropic" | "openai" | "deepseek"
   provider: "anthropic"
 
-  # Model to use per provider.
-  # Anthropic options: "claude-sonnet-4-6", "claude-haiku-4-5-20251001"
-  # OpenAI options:    "gpt-4o", "gpt-4o-mini"
+  # Model to use per provider (same lists the GUI offers).
+  # Anthropic options: "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-7"
+  # OpenAI options:    "gpt-4o", "gpt-4o-mini", "gpt-4-turbo"
   # DeepSeek options:  "deepseek-chat", "deepseek-reasoner"
   anthropic_model: "claude-sonnet-4-6"
   openai_model: "gpt-4o"
@@ -32,17 +32,5 @@ llm:
   temperature: 0.0
 
 paths:
-  # Where the classifier writes its output
+  # Where the classifier writes its output. All other pipeline outputs are fixed under output/
   case_context_output: "output/case_context.json"
-
-  # Where the tool selector writes its plan (P2 owns this)
-  execution_plan_output: "output/execution_plan.json"
-
-  # Where raw tool outputs land (P3 owns this)
-  raw_outputs_dir: "output/raw"
-
-  # Final report output (P1 report generator writes here)
-  final_report_output: "output/final_report.md"
-
-  # Audit log (P3 owns this)
-  audit_log_output: "output/audit_log.json"

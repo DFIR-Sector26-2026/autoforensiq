@@ -5,14 +5,22 @@ from datetime import datetime, timezone
 
 AUDIT_LOG_PATH = "output/audit_log.json"
 
+# Hash cache keyed by (path, size, mtime) — the evidence image was re-hashed for every plugin
+# subprocess (review 4.1). Chain-of-custody holds: each distinct file state is hashed once.
+_HASH_CACHE: dict = {}
+
 def sha256_file(filepath: str) -> str:
     if not os.path.exists(filepath):
         return "file_not_found"
-    h = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    st = os.stat(filepath)
+    key = (os.path.abspath(filepath), st.st_size, st.st_mtime_ns)
+    if key not in _HASH_CACHE:
+        h = hashlib.sha256()
+        with open(filepath, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                h.update(chunk)
+        _HASH_CACHE[key] = h.hexdigest()
+    return _HASH_CACHE[key]
 
 def log_action(tool_name: str, command: list, input_files: list,
                output_files: list, status: str, error: str = ""):

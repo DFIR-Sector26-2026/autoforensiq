@@ -23,11 +23,6 @@ def _stage(num: int, name: str):
     print(f"{'=' * 60}")
 
 
-def _stub(stage_name: str, expected_output: str):
-    print(f"  [STUB] {stage_name} not yet integrated.")
-    print(f"         Expected output: {expected_output}")
-
-
 def _ensure_output_dir():
     (ROOT_DIR / "output").mkdir(exist_ok=True)
     (ROOT_DIR / "output" / "raw").mkdir(exist_ok=True)
@@ -139,10 +134,7 @@ def run_orchestrator(execution_plan: dict, evidence_files: dict):
     _stage(3, "Execution Orchestrator")
 
     if not evidence_files:
-        _stub(
-            "Orchestrator (P3)",
-            "output/raw/<tool>_output.json"
-        )
+        print("  [SKIP] No evidence files provided — skipping tool execution.")
         return {}
 
     _clear_stale_outputs()

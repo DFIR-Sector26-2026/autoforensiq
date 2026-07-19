@@ -20,7 +20,7 @@ RULE_BOOSTS: Dict[int, float] = {
     13: -0.35,   # has_ioc_match — a catalog hit is at least as strong as a known-C2 port
 }
 
-# Severity score (feature 13) amplifier
+# Severity score (feature 14) amplifier
 SEVERITY_AMPLIFIER = -0.25   # maximum penalty at severity=1.0 (critical)
 
 ANOMALY_THRESHOLD = -0.10    # scores below this → anomaly

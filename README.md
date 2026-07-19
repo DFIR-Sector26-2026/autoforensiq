@@ -33,7 +33,7 @@
                       │ raw/<tool>_output.json
           ┌───────────▼───────────┐
           │  Evidence Aggregator  │  deduplicates + normalises + MITRE maps
-          │  + Anomaly Detector   │  Isolation Forest anomaly scoring
+          │  + Anomaly Detector   │  baseline-distance anomaly scoring
           │  + XAI (SHAP / LIME)  │  per-finding plain-English explanations
           └───────────┬───────────┘
                       │ unified_evidence.json · shap_explanations.json
@@ -57,12 +57,13 @@
 | **Attack classification** | LLM-powered intent classifier with JSON schema validation |
 | **Dynamic tool selection** | DTSA algorithm selects forensic tools based on artifact types |
 | **8 forensic tool wrappers** | Volatility3, MemProcFS, Tshark, Sleuthkit, RegRipper, Plaso, email & browser parsers |
-| **Anomaly detection** | Isolation Forest on normalised evidence features |
+| **Anomaly detection** | Baseline-distance novelty scoring against a known-good evidence baseline |
 | **Explainability** | SHAP global attributions + LIME local per-finding explanations |
 | **MITRE ATT&CK mapping** | Per-case tactic/technique table in the report, keyed off the classified case type |
 | **Process tree reconstruction** | Parent→child hierarchy rebuilt from process evidence, pruned to flagged lineages |
 | **Per-indicator IOC report** | Standalone `ioc_report.md` with provenance and XAI context per indicator |
 | **Chain-of-custody audit log** | SHA-256 hash log written for every tool invocation |
+| **Web dashboard** | React dashboard (network graph, timeline, process tree) fed by each run |
 | **Mock mode** | Full pipeline runs without any API key for CI and demos |
 
 ---
@@ -70,7 +71,7 @@
 ## Requirements
 
 - Python 3.10+
-- One of: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (optional — mock mode works without either)
+- One of: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY` (optional — mock mode works without any)
 - Python packages from `requirements.txt`:
   - `anthropic`, `openai`, `pyyaml`, `python-dotenv`, `jsonschema`
   - `scikit-learn`, `shap`, `lime`, `numpy`, `pandas`, `volatility3`
@@ -110,6 +111,7 @@ Install these separately if you want the full evidence-processing workflow inste
 | Tool | Why it is needed | Typical install note |
 |---|---|---|
 | Volatility 3 | Memory-dump analysis | Installed via `pip` from `requirements.txt` |
+| MemProcFS | Memory-dump analysis (second opinion) | Install `memprocfs` so the wrapper can mount the image |
 | Tshark | PCAP parsing | Install your Wireshark package (`tshark`) |
 | SleuthKit `fls` | Disk-image triage | Install the SleuthKit package (`fls`) |
 | RegRipper `rip.pl` | Registry hive parsing | Set `REGRIPPER_PATH` or place `rip.pl` in a common location such as `~/regripper/rip.pl` |
@@ -133,7 +135,7 @@ Run with no arguments to open the graphical launcher:
 python autoforensiq.py
 ```
 
-The GUI lets you select an incident report, attach any number of evidence files (type is auto-detected from the extension), optionally reorder artifacts by priority, configure the LLM provider, and launch the full pipeline — all without touching the command line again.
+The GUI lets you select an incident report, attach any number of evidence files (type is auto-detected from the extension), optionally reorder artifacts by priority, configure the LLM provider, and launch the full pipeline — all without touching the command line again. On success it publishes the run to the web dashboard (`dashboard/`) and starts its dev server.
 
 ---
 
@@ -152,10 +154,7 @@ python autoforensiq.py --report tests/incidents/01_ransomware.txt --mock
 export ANTHROPIC_API_KEY=sk-ant-...
 python autoforensiq.py \
   --report   tests/incidents/01_ransomware.txt \
-  --evidence data/test_cases/memory.dmp \
-             data/test_cases/capture.pcap \
-             data/test_cases/disk.img \
-             data/test_cases/NTUSER.DAT
+  --evidence memory.dmp capture.pcap disk.img NTUSER.DAT
 ```
 
 On success the final report is written to `output/final_report.md`.
@@ -170,8 +169,13 @@ On success the final report is written to `output/final_report.md`.
 | `--report <path>` | string | — | Path to the plain-text incident report. Required for CLI mode. |
 | `--evidence <paths…>` | list | _(none)_ | One or more artifact files. Type is auto-detected from extension/name. **Order = priority** — the first file listed is processed first. |
 | `--tools <names…>` | list | all | Restrict which forensic tools run. Names: `volatility3` `tshark` `tsk_fls` `regripper` `plaso` `email` `browser`. Default runs all tools selected by the DTSA. |
-| `--mock` | flag | off | Run without a real API key. The classifier and report generator return deterministic mock output. |
-| `--skip-tools` | flag | off | Stop after Stage 1 (classifier only). No tools are run, no evidence is processed. |
+| `--provider <name>` | string | config | LLM provider override: `anthropic` `openai` `deepseek`. |
+| `--model <name>` | string | config | LLM model override (e.g. `deepseek-chat`). |
+| `--mock` | flag | off | Build the final report from data without calling an LLM. |
+| `--bulk-manifest <path>` | string | — | JSON manifest of per-machine raw output locations; runs bulk aggregation and exits. |
+| `--skip-tools` | flag | off | Stop after classification; do not select or run analysis tools. |
+| `--ti-enrich` | flag | off | Opt-in: query abuse.ch ThreatFox to attribute flagged IOCs to malware families. Discloses case IOCs to a third party; needs `ABUSECH_AUTH_KEY`. |
+| `--known-bad <hosts…>` | list | _(none)_ | Per-case known-bad domains/IPs. Evidence touching these hosts is boosted and IOC-tagged. |
 | `--gui` | flag | off | Force the GUI to open even when other flags are present. |
 
 ---
@@ -182,19 +186,17 @@ All runtime settings live in `config.yaml`. Do **not** paste API keys there — 
 
 ```yaml
 llm:
-  provider: "anthropic"          # "anthropic" | "openai"
+  provider: "anthropic"          # "anthropic" | "openai" | "deepseek"
   anthropic_model: "claude-sonnet-4-6"
   openai_model: "gpt-4o"
+  deepseek_model: "deepseek-chat"
   mock_mode: true                # set false to use a live LLM
   temperature: 0.0               # keep at 0 — outputs are structured JSON
   max_tokens: 1024
 
 paths:
-  case_context_output:   "output/case_context.json"
-  execution_plan_output: "output/execution_plan.json"
-  raw_outputs_dir:       "output/raw"
-  final_report_output:   "output/final_report.md"
-  audit_log_output:      "output/audit_log.json"
+  # All other pipeline outputs are fixed under output/ and not configurable.
+  case_context_output: "output/case_context.json"
 ```
 
 **Switching providers:**
@@ -213,7 +215,7 @@ export OPENAI_API_KEY=sk-...
 
 ## Pipeline stages
 
-All seven stages are live. Each stage writes a JSON handoff file consumed by the next.
+All stages are live. Each stage writes a JSON handoff file consumed by the next.
 
 | # | Stage | Entry point | Output |
 |---|---|---|---|
@@ -221,8 +223,8 @@ All seven stages are live. Each stage writes a JSON handoff file consumed by the
 | 2 | **Dynamic Tool Selector** | `src/agents/tool_selector.py` | `output/execution_plan.json` |
 | 3 | **Execution Orchestrator** | `src/orchestrator.py` | `output/raw/<tool>_output.json` |
 | 4 | **Evidence Aggregator** | `src/aggregator/evidence_aggregator.py` | `output/unified_evidence.json` |
-| 5 | **Anomaly Detector** | `src/ml/anomaly_detector.py` | `output/anomaly_scores.json` |
-| 6 | **XAI Explainer** | `src/ml/xai_explainer.py` | `output/shap_explanations.json` |
+| 4b | **Evidence↔Narrative Reconciler** | `src/classifier/evidence_reconciler.py` | `output/evidence_reconciliation.json` |
+| 5/6 | **Anomaly Detector + XAI Explainer** | `src/ml/pipeline.py` | `output/shap_explanations.json` |
 | 7 | **Report Generator** | `src/report_generator/report_generator.py` | `output/final_report.md` |
 
 Individual stages can be invoked standalone:
@@ -243,28 +245,6 @@ python autoforensiq.py --bulk-manifest bulk_manifest.json
 
 Each manifest entry needs a `machine_name` and `raw_outputs_dir`, and can optionally include a `case_context` plus per-machine `output_path`.
 
-Tool `name` values must exactly match the orchestrator's `WRAPPER_MAP` keys.
-</details>
-
-<details>
-<summary><code>evidence_item</code> — Orchestrator → Aggregator (per item)</summary>
-
-```json
-{
-  "artifact_id": "string",
-  "source_tool": "volatility3 | tshark | tsk_fls | regripper | plaso",
-  "evidence_type": "string",
-  "timestamp": "ISO 8601 or empty string",
-  "value": "string",
-  "severity": "low | medium | high | critical",
-  "confidence": 0.9,
-  "linked_artifacts": ["artifact_id strings"]
-}
-```
-
-Always produced via `BaseWrapper.make_evidence_item()` — never construct manually.
-</details>
-
 ---
 
 ## Forensic tools
@@ -272,6 +252,7 @@ Always produced via `BaseWrapper.make_evidence_item()` — never construct manua
 | Tool | Evidence type | Wrapper |
 |---|---|---|
 | [Volatility3](https://github.com/volatilityfoundation/volatility3) | Memory dump (`.dmp`, `.raw`, `.mem`) | `src/wrappers/volatility_wrapper.py` |
+| [MemProcFS](https://github.com/ufrisk/MemProcFS) | Memory dump (second opinion, reconciled with Volatility3) | `src/wrappers/memprocfs_wrapper.py` |
 | [Tshark](https://www.wireshark.org/docs/man-pages/tshark.html) | Network capture (`.pcap`, `.pcapng`) | `src/wrappers/tshark_wrapper.py` |
 | [SleuthKit `fls`](https://www.sleuthkit.org/) | Disk image (`.img`, `.dd`, `.E01`) | `src/wrappers/tsk_wrapper.py` |
 | [RegRipper](https://github.com/keydet89/RegRipper3.0) | Windows registry hive | `src/wrappers/regripper_wrapper.py` |
@@ -283,63 +264,7 @@ All wrappers inherit from `src/wrappers/base_wrapper.py` and produce a uniform `
 
 ---
 
-## Project structure
-
-```
-autoforensiq/
-├── autoforensiq.py                    # CLI entry point
-├── config.yaml                        # LLM provider, paths, mock mode
-├── requirements.txt
-│
-├── src/
-│   ├── classifier/
-│   │   └── intent_classifier.py       # Stage 1 — LLM → case_context.json
-│   ├── agents/
-│   │   └── tool_selector.py           # Stage 2 — DTSA → execution_plan.json
-│   ├── orchestrator.py                # Stage 3 — subprocess wrappers
-│   ├── wrappers/                      # Stage 3 — one wrapper per tool
-│   │   ├── base_wrapper.py            # make_evidence_item() contract
-│   │   ├── volatility_wrapper.py
-│   │   ├── tshark_wrapper.py
-│   │   ├── tsk_wrapper.py
-│   │   ├── regripper_wrapper.py
-│   │   ├── plaso_wrapper.py
-│   │   ├── email_wrapper.py
-│   │   └── browser_wrapper.py
-│   ├── aggregator/
-│   │   └── evidence_aggregator.py     # Stage 4 — normalise + deduplicate
-│   ├── ml/
-│   │   ├── anomaly_detector.py        # Stage 5 — Isolation Forest
-│   │   └── xai_explainer.py          # Stage 6 — SHAP + LIME
-│   ├── report_generator/
-│   │   └── report_generator.py        # Stage 7 — LLM report + HTML timeline
-│   ├── utils/
-│   │   └── audit_log.py               # SHA-256 chain-of-custody log
-│   └── schemas/
-│       ├── case_context_schema.json
-│       ├── execution_plan.json
-│       ├── evidence_item.json
-│       └── unified_evidence.json
-│
-├── tests/
-│   ├── incidents/                     # 5 sample plain-text incident reports
-│   └── test_wrappers.py
-│
-├── data/
-│   └── test_cases/                    # Sample evidence files (memory.dmp, capture.pcap, …)
-│
-└── output/                            # Runtime output — gitignored
-```
-
----
-
-## Security notes
-
-- **Never commit API keys.** Use environment variables or a `.env` file. `config.yaml` stores only the environment variable *name*, not the key value.
-- **Evidence files may contain sensitive data.** The `output/` directory is gitignored — keep it that way.
-- **Audit log integrity.** `output/audit_log.json` contains SHA-256 hashes of all evidence files at time of processing. Do not modify evidence files after a run if chain-of-custody matters.
-
----
+## Sample incident reports
 
 | Type | Sample report |
 |---|---|
@@ -363,11 +288,12 @@ Everything is written to `output/` (gitignored). A complete run produces:
 | `execution_plan.json` | 2 — Tool Selector | Ordered list of tools with args |
 | `raw/<tool>_output.json` | 3 — Orchestrator | Raw evidence items per tool |
 | `unified_evidence.json` | 4 — Aggregator | Deduplicated, normalised evidence with MITRE ATT&CK mappings |
-| `anomaly_scores.json` | 5 — ML | Isolation Forest anomaly scores per evidence item |
-| `shap_explanations.json` | 6 — XAI | SHAP global weights + LIME plain-English reason per finding |
+| `evidence_reconciliation.json` | 4b — Reconciler | Evidence support for the narrative case type, reconciled confidence |
+| `shap_explanations.json` | 5/6 — ML + XAI | Anomaly scores with SHAP weights + plain-English reason per finding |
 | `audit_log.json` | 3 — Orchestrator | SHA-256 chain-of-custody log for every tool invocation |
 | `final_report.md` | 7 — Report Generator | Full forensic report with process tree, MITRE ATT&CK table, and findings |
 | `ioc_report.md` | 7 — Report Generator | Per-indicator IOC report with provenance and XAI context |
+| `dashboard.json` | 7 — Report Generator | Structured stats + MITRE sidecar consumed by the web dashboard |
 | `dev_report.html` | post-7 — Dev aid | Single tabbed HTML bundling every output artifact (developer convenience) |
 
 ---
@@ -419,7 +345,7 @@ Tool `name` values must exactly match the orchestrator's `WRAPPER_MAP` keys.
 ```json
 {
   "artifact_id": "string",
-  "source_tool": "volatility3 | tshark | tsk_fls | regripper | plaso",
+  "source_tool": "volatility3 | memprocfs | tshark | tsk_fls | regripper | plaso | email | browser",
   "evidence_type": "string",
   "timestamp": "ISO 8601 or empty string",
   "value": "string",
@@ -437,8 +363,8 @@ Always produced via `BaseWrapper.make_evidence_item()` — never construct manua
 ## Running tests
 
 ```bash
-# Wrapper unit tests (P3)
-python -m pytest tests/test_wrappers.py -v
+# Full suite
+python -m pytest tests/ -q
 
 # Classifier round-trip (all 5 incident types)
 for i in 01 02 03 04 05; do
@@ -453,7 +379,7 @@ done
 ```
 autoforensiq/
 ├── autoforensiq.py                    # Entry point — GUI (no args) or CLI (--report …)
-├── config.yaml                        # LLM provider, paths, mock mode
+├── config.yaml                        # LLM provider, mock mode
 ├── requirements.txt
 │
 ├── src/
@@ -462,13 +388,15 @@ autoforensiq/
 │   │   ├── widgets.py                 # ArtifactRow and other reusable widgets
 │   │   └── theme.py                   # Colour palette and font constants
 │   ├── classifier/
-│   │   └── intent_classifier.py       # Stage 1 — LLM → case_context.json
+│   │   ├── intent_classifier.py       # Stage 1 — LLM → case_context.json
+│   │   └── evidence_reconciler.py     # Stage 4b — narrative vs evidence support
 │   ├── agents/
 │   │   └── tool_selector.py           # Stage 2 — DTSA → execution_plan.json
 │   ├── orchestrator.py                # Stage 3 — subprocess wrappers
 │   ├── wrappers/                      # Stage 3 — one wrapper per tool
 │   │   ├── base_wrapper.py            # make_evidence_item() contract
 │   │   ├── volatility_wrapper.py
+│   │   ├── memprocfs_wrapper.py
 │   │   ├── tshark_wrapper.py
 │   │   ├── tsk_wrapper.py
 │   │   ├── regripper_wrapper.py
@@ -478,27 +406,46 @@ autoforensiq/
 │   ├── aggregator/
 │   │   └── evidence_aggregator.py     # Stage 4 — normalise + deduplicate
 │   ├── ml/
-│   │   ├── anomaly_detector.py        # Stage 5 — Isolation Forest
-│   │   └── xai_explainer.py          # Stage 6 — SHAP + LIME
+│   │   ├── pipeline.py                # Stage 5/6 driver → shap_explanations.json
+│   │   ├── anomaly_detector.py        # Baseline-distance novelty scorer
+│   │   ├── baseline_harvester.py      # Builds data/baseline_normal.json from clean runs
+│   │   ├── feature_engineering.py     # Evidence item → feature vector
+│   │   └── xai_explainer.py           # SHAP + LIME
 │   ├── report_generator/
-│   │   └── report_generator.py        # Stage 7 — LLM report + HTML timeline
+│   │   └── report_generator.py        # Stage 7 — LLM report + IOC report + dashboard.json
+│   ├── data/
+│   │   ├── threat_intel.py            # Ports, allowlists, extensions — single source
+│   │   ├── ioc_patterns.json
+│   │   └── tool_ontology.json         # DTSA tool/artifact ontology
 │   ├── utils/
-│   │   └── audit_log.py               # SHA-256 chain-of-custody log
+│   │   ├── audit_log.py               # SHA-256 chain-of-custody log
+│   │   └── dev_report.py              # dev_report.html bundler
 │   └── schemas/
 │       ├── case_context_schema.json
 │       ├── execution_plan.json
 │       ├── evidence_item.json
 │       └── unified_evidence.json
 │
+├── dashboard/                         # React web dashboard (Vite)
+│
 ├── tests/
 │   ├── incidents/                     # 5 sample plain-text incident reports
-│   └── test_wrappers.py
+│   └── test_*.py                      # Full unit suite (pytest)
 │
 ├── data/
+│   ├── baseline_normal.json           # Known-good ML baseline (harvested)
 │   └── test_cases/                    # Sample evidence files (memory.dmp, capture.pcap, …)
 │
 └── output/                            # Runtime output — gitignored
 ```
+
+---
+
+## Security notes
+
+- **Never commit API keys.** Use environment variables or a `.env` file. `config.yaml` stores only the environment variable *name*, not the key value.
+- **Evidence files may contain sensitive data.** The `output/` directory is gitignored — keep it that way.
+- **Audit log integrity.** `output/audit_log.json` contains SHA-256 hashes of all evidence files at time of processing. Do not modify evidence files after a run if chain-of-custody matters.
 
 ---
 

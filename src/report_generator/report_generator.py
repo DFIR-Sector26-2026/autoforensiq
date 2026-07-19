@@ -424,6 +424,31 @@ def _call_deepseek(user_prompt, cfg):
     return resp.choices[0].message.content
 
 
+def _call_anthropic(user_prompt, cfg):
+
+    import anthropic
+
+    api_key = os.environ.get(
+        cfg["llm"].get("anthropic_api_key_env", "ANTHROPIC_API_KEY")
+    )
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    model = cfg["llm"].get("anthropic_model", "claude-sonnet-4-6")
+
+    resp = client.messages.create(
+        model=model,
+        max_tokens=cfg["llm"].get("max_tokens", 2048),
+        temperature=cfg["llm"].get("temperature", 0.2),
+        system=SYSTEM_PROMPT,
+        messages=[
+            {"role": "user", "content": user_prompt},
+        ]
+    )
+
+    return resp.content[0].text
+
+
 # ─────────────────────────────────────────────────────────────
 # MOCK REPORT HELPERS
 # ─────────────────────────────────────────────────────────────
@@ -1776,7 +1801,7 @@ def generate_report(
             if provider == "deepseek":
                 report_text = _call_deepseek(user_prompt, cfg)
             elif provider == "anthropic":
-                report_text = _call_openai(user_prompt, cfg)  # fallback: no Anthropic in report gen yet
+                report_text = _call_anthropic(user_prompt, cfg)
             else:
                 report_text = _call_openai(user_prompt, cfg)
         except Exception as exc:
