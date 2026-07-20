@@ -16,9 +16,7 @@ from src.data.threat_intel import EXECUTABLE_EXTENSIONS
 # ─────────────────────────────────────────────────────────────
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-
 CONFIG_PATH = ROOT_DIR / "config.yaml"
-
 
 # MITRE_BY_CASE / RECOMMENDATIONS_BY_CASE live further down (a duplicate pair here was silently
 # re-bound at import — removed).
@@ -29,15 +27,9 @@ CONFIG_PATH = ROOT_DIR / "config.yaml"
 # ─────────────────────────────────────────────────────────────
 
 def _load_config():
-
     if not CONFIG_PATH.exists():
-
-        raise FileNotFoundError(
-            f"config.yaml not found at {CONFIG_PATH}"
-        )
-
+        raise FileNotFoundError(f"config.yaml not found at {CONFIG_PATH}")
     with open(CONFIG_PATH) as f:
-
         return yaml.safe_load(f)
 
 
@@ -88,10 +80,7 @@ def _score_summary(explanation):
     return {
         "model_score": explanation.get("model_score"),
         "rule_score": explanation.get("rule_score"),
-        "final_score": explanation.get(
-            "final_score",
-            explanation.get("score")
-        ),
+        "final_score": explanation.get("final_score", explanation.get("score")),
         "threshold": explanation.get("threshold"),
         "confidence": explanation.get("confidence"),
         "severity": explanation.get("severity"),
@@ -118,13 +107,10 @@ def _xai_payload(explanation):
 
 def _xai_lookup(shap_explanations, only_anomalies=False):
     lookup = {}
-
     for aid, item in _iter_explanations(shap_explanations):
         if only_anomalies and not item.get("is_anomaly"):
             continue
-
         lookup[aid] = _xai_payload(item)
-
     return lookup
 
 
@@ -244,21 +230,15 @@ def _build_explainability_section(shap_explanations, max_items=8):
                 "",
                 "**Baseline Comparison**",
                 "",
-                _format_baseline_comparison(
-                    exp.get("baseline_comparison", [])
-                ),
+                _format_baseline_comparison(exp.get("baseline_comparison", [])),
                 "",
                 "**Cross-Evidence Correlation**",
                 "",
-                _format_correlation_context(
-                    exp.get("correlation_context", [])
-                ),
+                _format_correlation_context(exp.get("correlation_context", [])),
                 "",
                 "**Recommended Review**",
                 "",
-                _format_recommended_review(
-                    exp.get("recommended_review", [])
-                ),
+                _format_recommended_review(exp.get("recommended_review", [])),
             ])
         )
 
@@ -269,80 +249,36 @@ def _build_explainability_section(shap_explanations, max_items=8):
 # USER PROMPT BUILDER
 # ─────────────────────────────────────────────────────────────
 
-def _build_user_prompt(
-    unified_evidence,
-    shap_explanations,
-    case_context
-):
-
-    xai_lookup = _xai_lookup(
-        shap_explanations,
-        only_anomalies=True
-    )
-
+def _build_user_prompt(unified_evidence, shap_explanations, case_context):
+    xai_lookup = _xai_lookup(shap_explanations, only_anomalies=True)
 
     priority_items = [
-
-        e for e in unified_evidence.get(
-            "evidence_items",
-            []
-        )
-
-        if isinstance(e, dict)
-        and e.get("severity") in (
-            "critical",
-            "high"
-        )
+        e for e in unified_evidence.get("evidence_items", [])
+        if isinstance(e, dict) and e.get("severity") in ("critical", "high")
     ][:20]
-
     if not priority_items:
-
-        priority_items = unified_evidence.get(
-            "evidence_items",
-            []
-        )[:20]
+        priority_items = unified_evidence.get("evidence_items", [])[:20]
 
     for item in priority_items:
-
         if not isinstance(item, dict):
             continue
-
         aid = item.get("artifact_id", "")
-
         if aid in xai_lookup:
-
             item["_xai"] = xai_lookup[aid]
 
     prompt_parts = [
-
         "## Case Context",
-
         json.dumps(case_context, indent=2),
-
         "",
-
         "## Evidence",
-
         json.dumps(priority_items, indent=2),
-
         "",
-
         "## Explainability Analysis",
-
         _build_explainability_section(shap_explanations),
-
         "",
-
         "## Tools",
-
-        ", ".join(
-            unified_evidence.get(
-                "tools_aggregated",
-                []
-            )
-        )
+        ", ".join(unified_evidence.get("tools_aggregated", []))
     ]
-
     return "\n".join(prompt_parts)
 
 
@@ -351,66 +287,29 @@ def _build_user_prompt(
 # ─────────────────────────────────────────────────────────────
 
 def _call_openai(user_prompt, cfg):
-
     from openai import OpenAI
 
-    api_key = os.environ.get(
-        cfg["llm"].get(
-            "openai_api_key_env",
-            "OPENAI_API_KEY"
-        )
-    )
-
+    api_key = os.environ.get(cfg["llm"].get("openai_api_key_env", "OPENAI_API_KEY"))
     client = OpenAI(api_key=api_key)
-
-    model = cfg["llm"].get(
-        "openai_model",
-        "gpt-4o"
-    )
-
+    model = cfg["llm"].get("openai_model", "gpt-4o")
     resp = client.chat.completions.create(
-
         model=model,
-
-        max_tokens=cfg["llm"].get(
-            "max_tokens",
-            2048
-        ),
-
-        temperature=cfg["llm"].get(
-            "temperature",
-            0.2
-        ),
-
+        max_tokens=cfg["llm"].get("max_tokens", 2048),
+        temperature=cfg["llm"].get("temperature", 0.2),
         messages=[
-
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
-
-            {
-                "role": "user",
-                "content": user_prompt
-            }
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
         ]
     )
-
     return resp.choices[0].message.content
 
 
 def _call_deepseek(user_prompt, cfg):
-
     from openai import OpenAI
 
-    api_key = os.environ.get(
-        cfg["llm"].get("deepseek_api_key_env", "DEEPSEEK_API_KEY")
-    )
-
+    api_key = os.environ.get(cfg["llm"].get("deepseek_api_key_env", "DEEPSEEK_API_KEY"))
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-
     model = cfg["llm"].get("deepseek_model", "deepseek-chat")
-
     resp = client.chat.completions.create(
         model=model,
         max_tokens=cfg["llm"].get("max_tokens", 2048),
@@ -420,22 +319,15 @@ def _call_deepseek(user_prompt, cfg):
             {"role": "user",   "content": user_prompt},
         ]
     )
-
     return resp.choices[0].message.content
 
 
 def _call_anthropic(user_prompt, cfg):
-
     import anthropic
 
-    api_key = os.environ.get(
-        cfg["llm"].get("anthropic_api_key_env", "ANTHROPIC_API_KEY")
-    )
-
+    api_key = os.environ.get(cfg["llm"].get("anthropic_api_key_env", "ANTHROPIC_API_KEY"))
     client = anthropic.Anthropic(api_key=api_key)
-
     model = cfg["llm"].get("anthropic_model", "claude-sonnet-4-6")
-
     resp = client.messages.create(
         model=model,
         max_tokens=cfg["llm"].get("max_tokens", 2048),
@@ -445,7 +337,6 @@ def _call_anthropic(user_prompt, cfg):
             {"role": "user", "content": user_prompt},
         ]
     )
-
     return resp.content[0].text
 
 

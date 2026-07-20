@@ -56,62 +56,42 @@ def _publish_to_dashboard():
 
 def run_classifier(report_path: str, config_override: dict = None,
                    provided_artifact_types=None):
-
     _stage(1, "Intent Classifier")
-
     from src.classifier.intent_classifier import classify_file
-
     import yaml
 
     cfg_path = ROOT_DIR / "config.yaml"
-
     with open(cfg_path) as f:
         cfg = yaml.safe_load(f)
-
     output_path = ROOT_DIR / cfg["paths"]["case_context_output"]
-
-    return classify_file(report_path, str(output_path),
-                         config_override=config_override,
+    return classify_file(report_path, str(output_path), config_override=config_override,
                          provided_artifact_types=provided_artifact_types)
 
 
 # STAGE 2 — TOOL SELECTOR
 
 def run_tool_selector(case_context: dict):
-
     _stage(2, "Dynamic Tool Selector")
-
     out_path = ROOT_DIR / "output" / "execution_plan.json"
 
     try:
-
-        from src.agents.tool_selector import (
-            generate_execution_plan,
-            load_json as _load_ontology
-        )
+        from src.agents.tool_selector import generate_execution_plan, load_json as _load_ontology
 
         ontology_path = ROOT_DIR / "src" / "data" / "tool_ontology.json"
-
         ontology = _load_ontology(str(ontology_path))
-
         plan = generate_execution_plan(case_context, ontology)
-
         with open(out_path, "w") as f:
             json.dump(plan, f, indent=2)
-
         print(f"  [LIVE] Execution plan generated → {out_path}")
-
         return plan
 
     except Exception as exc:
-
         # DFIR-safe degradation: over-collect (run every wrapper) rather than risk missing
         # evidence; the plan records the fallback so the audit trail shows DTSA never ran.
         from src.orchestrator import WRAPPER_MAP
 
         print(f"  [WARN] Tool selector failed ({exc}) — "
               f"falling back to running ALL {len(WRAPPER_MAP)} tools")
-
         stub_plan = {
             "tools": [
                 {"name": name, "order": i}
@@ -120,71 +100,45 @@ def run_tool_selector(case_context: dict):
             "fallback": True,
             "fallback_reason": str(exc),
         }
-
         with open(out_path, "w") as f:
             json.dump(stub_plan, f, indent=2)
-
         return stub_plan
 
 
 # STAGE 3 — ORCHESTRATOR
 
 def run_orchestrator(execution_plan: dict, evidence_files: dict):
-
     _stage(3, "Execution Orchestrator")
-
     if not evidence_files:
         print("  [SKIP] No evidence files provided — skipping tool execution.")
         return {}
 
     _clear_stale_outputs()
-
     try:
-
         from src.orchestrator import run_tools
-
         print("  [LIVE] Running orchestrator...")
-
         return run_tools(execution_plan, evidence_files)
-
     except Exception as exc:
-
         print(f"  [ERROR] Orchestrator failed: {exc}")
-
         return {}
 
 
 # STAGE 4 — AGGREGATOR
 
 def run_aggregator(case_context: dict):
-
     _stage(4, "Evidence Aggregator")
-
     unified_path = ROOT_DIR / "output" / "unified_evidence.json"
-
     try:
-
-        from src.aggregator.evidence_aggregator import (
-            aggregate_evidence
-        )
-
+        from src.aggregator.evidence_aggregator import aggregate_evidence
         print("  [LIVE] Running aggregator...")
-
         return aggregate_evidence(
             case_context=case_context,
             raw_outputs_dir=str(ROOT_DIR / "output" / "raw"),
             output_path=str(unified_path)
         )
-
     except Exception as exc:
-
         print(f"  [ERROR] Aggregator failed: {exc}")
-
-        return {
-            "evidence_items": [],
-            "generated_at": "",
-            "total_items": 0
-        }
+        return {"evidence_items": [], "generated_at": "", "total_items": 0}
 
 
 def _load_bulk_manifest(manifest_path: str) -> tuple[dict[str, dict], str, str]:
@@ -236,38 +190,28 @@ def _load_bulk_manifest(manifest_path: str) -> tuple[dict[str, dict], str, str]:
 
 
 def run_bulk_aggregation(manifest_path: str):
-
     _stage(4, "Bulk Evidence Aggregator")
-
     try:
         from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
 
         machine_runs, output_root, summary_path = _load_bulk_manifest(manifest_path)
-
         print(f"  [LIVE] Running bulk aggregation for {len(machine_runs)} machines...")
-
         bulk_summary = aggregate_bulk_evidence(
             machine_runs=machine_runs,
             output_root=output_root,
         )
-
         summary = {
             "generated_at": bulk_summary.get("generated_at", ""),
             "manifest_path": manifest_path,
             "bulk_summary": bulk_summary,
         }
-
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2)
-
         print(f"  [SAVE] Wrote bulk summary → {summary_path}")
-
         return summary
 
     except Exception as exc:
-
         print(f"  [ERROR] Bulk aggregation failed: {exc}")
-
         return {
             "generated_at": "",
             "manifest_path": manifest_path,
@@ -282,77 +226,40 @@ def run_bulk_aggregation(manifest_path: str):
 # STAGE 5/6 — ML + XAI
 
 def run_ml_pipeline():
-
     _stage(5, "Anomaly Detector + XAI Explainer")
-
     shap_path = ROOT_DIR / "output" / "shap_explanations.json"
-
     try:
-
-        from src.ml.pipeline import (
-            run_ml_pipeline as _run_p5
-        )
-
+        from src.ml.pipeline import run_ml_pipeline as _run_p5
         print("  [LIVE] Running P5 ML pipeline...")
-
         result = _run_p5(
             input_path=str(ROOT_DIR / "output" / "unified_evidence.json"),
             output_path=str(shap_path),
             baseline_path=str(ROOT_DIR / "data" / "baseline_normal.json")
         )
-
-        return result if result else {
-            "explanations": [],
-            "generated_at": ""
-        }
-
+        return result if result else {"explanations": [], "generated_at": ""}
     except Exception as exc:
-
         print(f"  [ERROR] ML pipeline failed: {exc}")
-
-        return {
-            "explanations": [],
-            "generated_at": ""
-        }
+        return {"explanations": [], "generated_at": ""}
 
 
 # STAGE 7 — REPORT GENERATOR
 
-def run_report_generator(
-    unified_evidence: dict,
-    shap_explanations: dict,
-    case_context: dict,
-    config_override: dict = None
-):
-
+def run_report_generator(unified_evidence: dict, shap_explanations: dict, case_context: dict,
+                         config_override: dict = None):
     _stage(7, "Report Generator")
-
     try:
-
-        from src.report_generator.report_generator import (
-            generate_report
-        )
-
+        from src.report_generator.report_generator import generate_report
         print("  [LIVE] Running report generator...")
-
-        return generate_report(
-            unified_evidence,
-            shap_explanations,
-            case_context,
-            config_override=config_override
-        )
-
+        return generate_report(unified_evidence, shap_explanations, case_context,
+                               config_override=config_override)
     except Exception as exc:
-
         print(f"  [ERROR] Report generator failed: {exc}")
-
         return ""
 
 
 # ARGUMENTS
 
 def parse_args():
-
     parser = argparse.ArgumentParser(
         description="AutoForensiq — run with no arguments to open the GUI"
     )
@@ -461,7 +368,6 @@ def parse_args():
 # EVIDENCE MAPPING
 
 def _map_evidence_files(paths: list):
-
     # Each evidence type maps to a *list* of paths — two memory images should both be analysed, not
     # silently keep only the last one.
     mapping = {}
@@ -470,9 +376,7 @@ def _map_evidence_files(paths: list):
         mapping.setdefault(key, []).append(path)
 
     for path in paths:
-
         lower = path.lower()
-
         ext = Path(path).suffix.lower()
 
         # MEMORY
@@ -608,7 +512,6 @@ def preflight_check(evidence_files: dict, execution_plan: dict):
 # MAIN
 
 def main(args=None):
-
     if args is None:
         args = parse_args()
 

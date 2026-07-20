@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 export default function useEvidence() {
-
   const [evidence, setEvidence] = useState([]);
   const [summary, setSummary] = useState(null);
   const [mitre, setMitre] = useState([]);
@@ -11,7 +10,6 @@ export default function useEvidence() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-
     // Each fetch falls back to an empty default on a missing file, so one absent artifact can't
     // blank the whole UI — render whatever's available.
     Promise.all([
@@ -27,28 +25,18 @@ export default function useEvidence() {
         .catch(() => null),
     ])
       .then(([unified, dashboard, recon]) => {
-
         setEvidence(unified.evidence_items || unified || []);
-
         setSummary(dashboard.summary || null);
-
         setMitre(dashboard.mitre || []);
-
         setByTool(dashboard.by_tool || {});
-
         setSources(dashboard.evidence_sources || {});
-
         setReconciliation(recon);
-
         setLoading(false);
       })
       .catch((err) => {
-
         console.error(err);
-
         setLoading(false);
       });
-
   }, []);
 
   return { evidence, summary, mitre, byTool, sources, reconciliation, loading };

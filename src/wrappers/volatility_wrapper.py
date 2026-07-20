@@ -41,22 +41,12 @@ def summarise_tree(node, depth=0, max_depth=5):
 
     if not node:
         return ""
-
     if depth > max_depth:
         return ""
 
-    lines = [
-        f"{'  ' * depth}{node.name} (PID:{node.pid})"
-    ]
-
+    lines = [f"{'  ' * depth}{node.name} (PID:{node.pid})"]
     for child in node.children:
-
-        child_text = summarise_tree(
-            child,
-            depth + 1,
-            max_depth
-        )
-
+        child_text = summarise_tree(child, depth + 1, max_depth)
         if child_text:
             lines.append(child_text)
 
@@ -388,44 +378,26 @@ class VolatilityWrapper(BaseWrapper):
         return candidates
 
     def run(self, image_path: str) -> list:
-
         if not Path(image_path).exists():
             print(f"  [ERROR] Memory image not found: {image_path}")
             return []
 
         all_items = []
-
         volatility_commands = self._volatility_command_candidates()
-
         working_command = None
 
         for base_cmd in volatility_commands:
-
             try_cmd = base_cmd + ["-h"]
-
-            stdout, stderr, code = self.run_command(
-                try_cmd,
-                timeout=15
-            )
-
+            stdout, stderr, code = self.run_command(try_cmd, timeout=15)
             if code == 0:
-
                 working_command = base_cmd
                 break
 
         if not working_command:
-
-            print(
-                "  [ERROR] Could not locate "
-                "working Volatility3 installation"
-            )
-
+            print("  [ERROR] Could not locate working Volatility3 installation")
             return []
 
-        print(
-            f"  [VOL] Using command: "
-            f"{' '.join(working_command)}"
-        )
+        print(f"  [VOL] Using command: {' '.join(working_command)}")
 
         combined_output = ""
 
@@ -434,14 +406,8 @@ class VolatilityWrapper(BaseWrapper):
         malfind_output = None
 
         for plugin in PLUGINS:
-
             print(f"\n  [VOL] Running {plugin}...")
-
-            command = (
-                working_command +
-                ["-f", image_path, plugin]
-            )
-
+            command = working_command + ["-f", image_path, plugin]
             stdout, stderr, code = self.run_command(
                 command,
                 input_files=[image_path],
@@ -452,40 +418,22 @@ class VolatilityWrapper(BaseWrapper):
             # GUI streams all of it), so gate them behind VOL_DEBUG — same opt-in style as
             # VOL_ENABLE_DUMPFILES below.
             if os.getenv("VOL_DEBUG", "").lower() in {"1", "true", "yes"}:
-
                 print(f"\n  [DEBUG] Return code: {code}")
-
                 if stderr.strip():
-
-                    print(
-                        f"\n  [DEBUG] STDERR:\n"
-                        f"{stderr[:1000]}"
-                    )
-
+                    print(f"\n  [DEBUG] STDERR:\n{stderr[:1000]}")
                 if stdout.strip():
-
-                    print(
-                        f"\n  [DEBUG] STDOUT:\n"
-                        f"{stdout[:1000]}"
-                    )
+                    print(f"\n  [DEBUG] STDOUT:\n{stdout[:1000]}")
 
             # keep a combined corpus for regex-based extraction
             if stdout:
                 combined_output += "\n" + stdout
 
             if code != 0:
-
                 print(f"  [SKIP] {plugin} failed")
-
                 continue
 
             if not stdout.strip():
-
-                print(
-                    f"  [SKIP] "
-                    f"{plugin} produced empty output"
-                )
-
+                print(f"  [SKIP] {plugin} produced empty output")
                 continue
 
             if plugin == "windows.malfind":
@@ -501,11 +449,7 @@ class VolatilityWrapper(BaseWrapper):
                 print(f"  [SKIP] {plugin} parse failed: {exc}")
                 continue
 
-            print(
-                f"  [VOL] {plugin} → "
-                f"{len(items)} evidence items"
-            )
-
+            print(f"  [VOL] {plugin} → {len(items)} evidence items")
             all_items.extend(items)
 
         # Parse the deferred malfind output now that the other plugins' evidence is available for
@@ -521,10 +465,7 @@ class VolatilityWrapper(BaseWrapper):
                     corroborated_pids=corroborated_pids,
                 )
                 if corroborated_pids:
-                    print(
-                        f"  [VOL] malfind corroborated PIDs: "
-                        f"{sorted(corroborated_pids)}"
-                    )
+                    print(f"  [VOL] malfind corroborated PIDs: {sorted(corroborated_pids)}")
                 print(f"  [VOL] windows.malfind → {len(items)} evidence items")
                 all_items.extend(items)
             except Exception as exc:
@@ -735,11 +676,9 @@ class VolatilityWrapper(BaseWrapper):
         return tmp.name
 
     def _parse_pslist(self, lines: list) -> list:
-
         items = []
 
         for line in lines:
-
             if (
                 "Volatility 3 Framework" in line or
                 ("PID" in line and "PPID" in line)
@@ -747,28 +686,15 @@ class VolatilityWrapper(BaseWrapper):
                 continue
 
             parts = line.split()
-
             if len(parts) < 3:
                 continue
 
             try:
-
                 pid = parts[0]
                 ppid = parts[1]
                 name = parts[2]
-
-                safe_name = (
-                    name.lower()
-                    .replace('.', '_')
-                    .replace('@', '')
-                )
-
-                severity = (
-                    "high"
-                    if name.lower() in SUSPICIOUS_PARENTS
-                    else "low"
-                )
-
+                safe_name = name.lower().replace('.', '_').replace('@', '')
+                severity = "high" if name.lower() in SUSPICIOUS_PARENTS else "low"
                 items.append(
                     self.make_evidence_item(
                         artifact_id=f"proc_{pid}_{safe_name}",
@@ -778,20 +704,16 @@ class VolatilityWrapper(BaseWrapper):
                         confidence=0.75
                     )
                 )
-
             except Exception:
                 continue
 
         return items
 
     def _parse_pstree(self, lines: list) -> list:
-
         items = []
-
         processes = {}
 
         for line in lines:
-
             if (
                 "Volatility 3 Framework" in line or
                 ("PID" in line and "PPID" in line)
@@ -799,58 +721,38 @@ class VolatilityWrapper(BaseWrapper):
                 continue
 
             clean = line.replace("*", "").strip()
-
             parts = clean.split()
-
             if len(parts) < 3:
                 continue
 
             try:
-
                 pid = int(parts[0])
                 ppid = int(parts[1])
                 name = parts[2]
-
                 node = ProcessNode(pid, ppid, name)
-
                 processes[pid] = node
-
             except Exception:
                 continue
 
         relation_items = []
 
         for proc in processes.values():
-
             if proc.ppid in processes:
-
                 parent = processes[proc.ppid]
-
                 parent.children.append(proc)
-
-                pair = (
-                    parent.name.lower(),
-                    proc.name.lower()
-                )
+                pair = (parent.name.lower(), proc.name.lower())
 
                 if pair in SUSPICIOUS_RELATIONSHIPS:
-
                     proc.suspicious = True
-
                     proc.reasons.append(
-                        f"Suspicious lineage: "
-                        f"{parent.name} -> {proc.name}"
+                        f"Suspicious lineage: {parent.name} -> {proc.name}"
                     )
-
                     relation_items.append(
                         self.make_evidence_item(
-                            artifact_id=(
-                                f"relation_{parent.pid}_{proc.pid}"
-                            ),
+                            artifact_id=f"relation_{parent.pid}_{proc.pid}",
                             evidence_type="process_relation",
                             value=(
-                                f"Suspicious parent-child "
-                                f"relationship: "
+                                f"Suspicious parent-child relationship: "
                                 f"{parent.name} -> {proc.name}"
                             ),
                             severity="critical",
@@ -863,16 +765,12 @@ class VolatilityWrapper(BaseWrapper):
                     )
 
         roots = []
-
         for proc in processes.values():
-
             if proc.ppid not in processes:
                 roots.append(proc)
 
         tree_items = []
-
         for root in roots:
-
             tree_item = self.make_evidence_item(
                 artifact_id=f"process_tree_{root.pid}",
                 evidence_type="process_tree",
@@ -1266,7 +1164,6 @@ class VolatilityWrapper(BaseWrapper):
         ]
 
         for line in lines:
-
             lower = line.lower()
 
             # Defender's platform dir under ProgramData (MpOav.dll etc.) trips the "programdata"
@@ -1274,11 +1171,7 @@ class VolatilityWrapper(BaseWrapper):
             if "\\microsoft\\windows defender\\" in lower:
                 continue
 
-            if any(
-                s in lower
-                for s in suspicious_dlls
-            ):
-
+            if any(s in lower for s in suspicious_dlls):
                 items.append(
                     self.make_evidence_item(
                         artifact_id=stable_artifact_id("dll", line.strip()),
@@ -1324,7 +1217,6 @@ class VolatilityWrapper(BaseWrapper):
         staging_parents = {"intel", "programdata"}
 
         def _has_suspicious_staging_path(path: str) -> bool:
-
             lowered = path.lower().replace("/", "\\")
             segments = [segment for segment in lowered.split("\\") if segment]
 
@@ -1494,9 +1386,7 @@ class VolatilityWrapper(BaseWrapper):
         ]
 
         for line in lines:
-
             stripped = line.strip()
-
             if not stripped:
                 continue
 
@@ -1510,7 +1400,6 @@ class VolatilityWrapper(BaseWrapper):
             # Volatility dumpfiles output is tabular:
             # Cache  FileObject  FileName  Result
             cols = re.split(r"\s{2,}", stripped)
-
             if len(cols) < 4:
                 continue
 
@@ -1551,13 +1440,10 @@ class VolatilityWrapper(BaseWrapper):
         return items
 
     def _parse_yarascan(self, lines: list) -> list:
-
         items = []
 
         for line in lines:
-
             cleaned = line.strip()
-
             if (
                 not cleaned or
                 "Volatility 3 Framework" in cleaned or
@@ -1581,15 +1467,11 @@ class VolatilityWrapper(BaseWrapper):
         return items
 
     def _parse_strings(self, lines: list) -> list:
-
         corpus = "\n".join(lines)
-
         return self._extract_strings(corpus)
 
     def _extract_strings(self, corpus: str) -> list:
-
         items = []
-
         if not corpus:
             return items
 
@@ -1615,27 +1497,21 @@ class VolatilityWrapper(BaseWrapper):
         # feed carries dozens of uncontacted families' .onions, which at HIGH manufactured a false
         # verdict (B-8).
         for match in _ONION_RE.finditer(corpus):
-
             _add_item(match.group(0).lower(), "suspicious_domain", "low", 0.6, "ioc")
 
         # Checksum-valid BTC wallets at LOW, same rationale as .onion above; a catalog-known ransom
         # wallet still escalates via the rescorer.
         for match in _BTC_BASE58_RE.finditer(corpus):
-
             candidate = match.group(0)
-
             if _is_valid_btc_address(candidate):
                 _add_item(candidate, "suspicious_crypto", "low", 0.6, "btc")
 
         for match in _BTC_BECH32_RE.finditer(corpus):
-
             candidate = match.group(0)
-
             if _is_valid_bech32_btc_address(candidate):
                 _add_item(candidate.lower(), "suspicious_crypto", "low", 0.6, "btc")
 
         for match in _EMAIL_RE.finditer(corpus):
-
             addr = match.group(0)
             local, _, domain = addr.partition("@")
             labels = domain.split(".")
@@ -1660,9 +1536,7 @@ class VolatilityWrapper(BaseWrapper):
             _add_item(addr, "email_address", "medium", 0.85, "email")
 
         for pattern in _REGISTRY_RES:
-
             for match in pattern.finditer(corpus):
-
                 _add_item(match.group(0), "registry_key", "medium", 0.88, "reg")
 
         # Emit a domain ONLY when anchored in URL/network grammar (_has_network_context): bare
@@ -1674,7 +1548,6 @@ class VolatilityWrapper(BaseWrapper):
         anchored_domains = []
 
         for match in _DOMAIN_RE.finditer(corpus):
-
             value = match.group(0).lower()
             tld = match.group("tld").lower()
 
@@ -1713,37 +1586,19 @@ class VolatilityWrapper(BaseWrapper):
 
 
 if __name__ == "__main__":
-
     if len(sys.argv) < 2:
-
-        print(
-            "Usage: python -m "
-            "src.wrappers.volatility_wrapper "
-            "<memory.dmp>"
-        )
-
+        print("Usage: python -m src.wrappers.volatility_wrapper <memory.dmp>")
         sys.exit(1)
 
     wrapper = VolatilityWrapper()
-
     items = wrapper.run(sys.argv[1])
-
-    output = {
-        "tool": "volatility3",
-        "items": items
-    }
+    output = {"tool": "volatility3", "items": items}
 
     os.makedirs("output/raw", exist_ok=True)
-
-    with open(
-        "output/raw/volatility3_output.json",
-        "w"
-    ) as f:
-
+    with open("output/raw/volatility3_output.json", "w") as f:
         json.dump(output, f, indent=2)
 
     print(
-        f"\n[DONE] {len(items)} "
-        f"evidence items saved to "
+        f"\n[DONE] {len(items)} evidence items saved to "
         f"output/raw/volatility3_output.json"
     )
