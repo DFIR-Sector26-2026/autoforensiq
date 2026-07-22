@@ -80,7 +80,7 @@ function Legend() {
 
 export default function Processes() {
 
-  const { evidence, loading } = useEvidence();
+  const { evidence } = useEvidence();
 
   // D3: memoized — this scans every critical/high item per tree node name, and previously
   // re-ran on every render.
@@ -96,15 +96,6 @@ export default function Processes() {
     () => suspiciousNamesFrom(Array.isArray(evidence) ? evidence : [], processTrees),
     [evidence, processTrees]
   );
-
-  if (loading) {
-
-    return (
-      <div className="text-white p-6">
-        Loading process trees...
-      </div>
-    );
-  }
 
   return (
 

@@ -180,7 +180,7 @@ function TypeFilter({ types, selected, allSelected, onToggle, onToggleAll }) {
 
 export default function Threats() {
 
-  const { evidence, sources, loading } = useEvidence();
+  const { evidence, sources } = useEvidence();
 
   // Multi-select severity filter; Critical + High selected by default.
   const [sevFilter, setSevFilter] = useState(["critical", "high"]);
@@ -196,11 +196,6 @@ export default function Threats() {
     () => Array.from(new Set(findings.map((e) => e.evidence_type))).sort(),
     [findings]
   );
-
-  if (loading) {
-
-    return <div className="text-white">Loading...</div>;
-  }
 
   // null = all types selected; otherwise the explicit list of active types.
   const activeTypes = typeFilters === null ? types : typeFilters;

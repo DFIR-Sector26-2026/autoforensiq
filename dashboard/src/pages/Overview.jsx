@@ -29,12 +29,7 @@ const TOOLTIP_STYLE = {
 
 export default function Overview() {
 
-  const { summary, byTool, reconciliation, loading } = useEvidence();
-
-  if (loading) {
-
-    return <div className="text-white">Loading...</div>;
-  }
+  const { summary, byTool, reconciliation } = useEvidence();
 
   if (!summary) {
 

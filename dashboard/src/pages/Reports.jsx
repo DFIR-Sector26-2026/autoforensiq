@@ -56,12 +56,7 @@ function List({ title, items, tone }) {
 
 export default function Reports() {
 
-  const { summary, reconciliation, loading } = useEvidence();
-
-  if (loading) {
-
-    return <div className="text-white">Loading...</div>;
-  }
+  const { summary, reconciliation } = useEvidence();
 
   if (!summary) {
 

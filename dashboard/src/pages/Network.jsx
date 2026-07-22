@@ -24,7 +24,7 @@ function decorateGraph(graph) {
 
 export default function Network() {
 
-  const { graph, loading } = useEvidence();
+  const { graph } = useEvidence();
   const graphRef = useRef(null);
   // Auto-fit only once, on initial layout. Refitting on every engine stop reset the user's zoom on
   // drag (issue U1) and on each filter change (issue U2).
@@ -73,11 +73,6 @@ export default function Network() {
     didFit.current = true;
     requestAnimationFrame(() => graphRef.current?.zoomToFit(0, 60));
   }, []);
-
-  if (loading) {
-
-    return <div className="text-white">Loading...</div>;
-  }
 
   return (
 

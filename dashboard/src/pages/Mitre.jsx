@@ -7,7 +7,7 @@ import ATTACK_MATRIX from "../data/attackMatrix.json";
 
 export default function Mitre() {
 
-  const { mitre, loading } = useEvidence();
+  const { mitre } = useEvidence();
 
   // Detected technique ids (e.g. "T1486") -> their detection basis, for the cell tooltip. Matrix
   // cells highlight when their id is in this map.
@@ -16,11 +16,6 @@ export default function Mitre() {
     (mitre || []).forEach((m) => { map[m.id] = m; });
     return map;
   }, [mitre]);
-
-  if (loading) {
-
-    return <div className="text-white">Loading...</div>;
-  }
 
   return (
 

@@ -20,7 +20,7 @@ const worse = (a, b) => rank(a) > rank(b);      // a is more severe than b
 
 export default function Files() {
 
-  const { evidence, sources, byTool, loading } = useEvidence();
+  const { evidence, sources, byTool } = useEvidence();
 
   // Highest severity of evidence produced by each tool — used to badge the source file the tool
   // read.
@@ -62,11 +62,6 @@ export default function Files() {
         .sort((a, b) => rank(b.severity) - rank(a.severity)),
     [evidence]
   );
-
-  if (loading) {
-
-    return <div className="text-white">Loading...</div>;
-  }
 
   return (
 
