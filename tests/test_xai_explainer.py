@@ -119,3 +119,32 @@ def test_compute_shap_background_is_capped():
 def test_compute_shap_empty_evidence_returns_empty():
     out = xe.compute_shap_explanations(_StubDetector(), np.zeros((10, len(FEATURE_NAMES))), [])
     assert out == []
+
+
+# ─────────────────────────────────────────────────────────────
+# Feature-prose coverage guard (review-2 F3)
+# ─────────────────────────────────────────────────────────────
+#
+# has_ioc_match was added to two of the three prose tables and forgotten in the
+# third (F2), so catalog hits read as unexplained deviations. The tables now
+# derive from FEATURE_PROSE; these assertions make that bug class impossible.
+
+
+def test_feature_prose_covers_every_feature():
+    assert set(xe.FEATURE_PROSE) == set(FEATURE_NAMES)
+    for name, row in xe.FEATURE_PROSE.items():
+        assert {"meaning", "review"} <= set(row), f"{name} missing meaning/review"
+
+
+def test_indicator_rows_match_declared_exemptions():
+    # Deliberate omissions must be named in NON_INDICATOR_FEATURES, not silent.
+    indicator_features = {
+        name for name, row in xe.FEATURE_PROSE.items() if "weight" in row
+    }
+    assert indicator_features == set(FEATURE_NAMES) - xe.NON_INDICATOR_FEATURES
+    for name in indicator_features:
+        row = xe.FEATURE_PROSE[name]
+        assert {"weight", "label", "indicator"} <= set(row), f"{name} partial indicator row"
+    assert {i[0] for i in xe.INDICATORS} == {
+        FEATURE_NAMES.index(n) for n in indicator_features
+    }

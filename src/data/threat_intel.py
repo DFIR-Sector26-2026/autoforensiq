@@ -55,10 +55,7 @@ def is_allowlisted_dns(domain: str) -> bool:
     return matching_base(d, DNS_ALLOWLIST) is not None or d.endswith(DNS_ALLOWLIST_SUFFIXES)
 
 
-# Benign infrastructure dropped at source by the volatility string sweep (D3): a dump carries ~22k
-# OS/CDN/CA hostnames that flooded the evidence set and P5. Exact-or-subdomain match only
-# (lookalike-safe, unlike DNS_ALLOWLIST's substring rule above — D7); reputation still runs on
-# whatever survives.
+# Dropped AT SOURCE by the volatility string sweep
 BENIGN_DOMAIN_SUFFIXES = {
     # Microsoft / Windows OS + telemetry + update + cloud
     "microsoft.com", "windows.com", "windowsupdate.com", "msftncsi.com",

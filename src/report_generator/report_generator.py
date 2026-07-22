@@ -1679,7 +1679,8 @@ def generate_report(
                 cfg[k] = v
 
     mock_mode = cfg.get("llm", {}).get("mock_mode", False)
-    provider  = cfg.get("llm", {}).get("provider", "openai")
+    # Default matches intent_classifier — a config with no provider used to split the run across two vendors
+    provider  = cfg.get("llm", {}).get("provider", "anthropic")
 
     if mock_mode:
         print("  [MOCK] Building report from data.")

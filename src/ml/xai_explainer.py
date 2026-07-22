@@ -18,133 +18,174 @@ from src.ml.feature_engineering import FEATURE_NAMES
 _MAX_SHAP_BACKGROUND = 64
 
 
-# ── Indicator templates ───────────────────────────────────────────────────────
-# Each entry: (feature_index, weight, short_label, analyst_sentence)
-# Weight controls sort order (higher = more suspicious, appears first).
+# ── Feature prose table ───────────────────────────────────────────────────────
+# One prose row per FEATURE_NAMES entry (coverage-guarded by tests). weight/label/indicator drive
+# explain()'s reason (higher weight leads); meaning/review feed the structured explanation.
 
+FEATURE_PROSE = {
+    "has_ioc_match": {
+        "weight": 10, "label": "Threat-catalog IOC match",
+        "indicator":
+            "The artifact's value matched a named indicator of compromise in the "
+            "threat catalog — the most direct evidence signal the pipeline has.",
+        "meaning":
+            "The value matched a known indicator of compromise in the threat catalog.",
+        "review":
+            "Review the matched IOC rule and hunt for the indicator across the other evidence sources.",
+    },
+    "port_is_known_c2": {
+        "weight": 10, "label": "C2 port",
+        "indicator":
+            "Network connection on a port attackers commonly use to remotely control "
+            "infected machines (a known command-and-control port, used by tools like "
+            "Metasploit and Netcat).",
+        "meaning":
+            "The connection used a port attackers commonly use to control infected machines.",
+        "review":
+            "Check destination IP/domain reputation and related network sessions.",
+    },
+    "path_has_exe_in_temp": {
+        "weight": 9, "label": "EXE dropped in Temp",
+        "indicator":
+            "An executable file was written to a user-writable Temp/AppData folder — "
+            "a common first step when malware installs itself.",
+        "meaning":
+            "An executable appeared in Temp/AppData/Downloads.",
+        "review":
+            "Quarantine or hash the executable and inspect persistence paths.",
+    },
+    "keyword_c2_indicator": {
+        "weight": 9, "label": "C2 keyword in value",
+        "indicator":
+            "The artifact's text contains terms linked to remote-control malware "
+            "(reverse shell, beacon, remote-access tool).",
+        "meaning":
+            "The text contains remote-control malware terms (beacon, shell, remote-access tool).",
+        "review":
+            "Search for repeated beaconing, reverse shells, or remote-access tooling.",
+    },
+    "is_suspicious_process": {
+        "weight": 8, "label": "Suspicious process",
+        "indicator":
+            "The process name is on the watchlist of legitimate tools attackers "
+            "often abuse (e.g., certutil, mshta) or matches a known malware name "
+            "(e.g., mimikatz).",
+        "meaning":
+            "The process name matches a tool attackers commonly abuse, or a known malware name.",
+        "review":
+            "Validate the process hash, command line, and execution location.",
+    },
+    "suspicious_parent": {
+        "weight": 8, "label": "Suspicious parent process",
+        "indicator":
+            "The process was started by a command shell or script host (cmd.exe, "
+            "powershell.exe, wscript.exe) — unusual for legitimate system services.",
+        "meaning":
+            "The parent process is a shell or script host attackers commonly abuse.",
+        "review":
+            "Review parent-child process lineage around the artifact timestamp.",
+    },
+    "keyword_exfil": {
+        "weight": 7, "label": "Data exfiltration indicator",
+        "indicator":
+            "Keywords suggesting data was being stolen were detected "
+            "(e.g., outbound upload, DNS tunnelling, or covert POST request).",
+        "meaning":
+            "The text contains signs of data being stolen.",
+        "review":
+            "Review outbound transfer volume, destination, and sensitive data access.",
+    },
+    "path_in_temp": {
+        "weight": 6, "label": "Temp/AppData path",
+        "indicator":
+            "The file or process lives under Temp or AppData — folders attackers "
+            "favour because any user can write there without special permissions.",
+        "meaning":
+            "The path is in a folder any user can write to (Temp/AppData), often used to hide malware.",
+        "review":
+            "Check whether the path was used for staging or payload execution.",
+    },
+    "port_is_nonstandard": {
+        "weight": 5, "label": "Non-standard port",
+        "indicator":
+            "Network activity on an uncommon port, which can indicate a custom "
+            "protocol or an attempt to slip past firewall rules.",
+        "meaning":
+            "The connection used an uncommon network port.",
+        "review":
+            "Confirm whether the destination port is expected for this host.",
+    },
+    "evidence_is_network": {
+        "weight": 4, "label": "Network evidence type",
+        "indicator":
+            "This is a network connection record; combined with other indicators it "
+            "raises the likelihood of malware check-ins (beaconing) or an attacker "
+            "moving between hosts.",
+        "meaning":
+            "The artifact is network evidence.",
+        "review":
+            "Pivot on source, destination, protocol, and session timing.",
+    },
+    "evidence_is_file": {
+        "weight": 4, "label": "File-system evidence",
+        "indicator":
+            "A suspicious file was observed; it could be a dropped malware payload "
+            "or a way for malware to survive reboots (persistence).",
+        "meaning":
+            "The artifact is filesystem evidence.",
+        "review":
+            "Review file hash, signer, creation time, and adjacent filesystem events.",
+    },
+    "evidence_is_email": {
+        "weight": 4, "label": "Email evidence",
+        "indicator":
+            "Email artifact detected; possible phishing delivery or data theft via "
+            "the mail channel.",
+        "meaning":
+            "The artifact is email evidence.",
+        "review":
+            "Inspect sender, headers, links, attachments, and recipient activity.",
+    },
+    "is_system_process": {
+        "weight": 3, "label": "System process anomaly",
+        "indicator":
+            "A core Windows system process behaved unlike its normal baseline "
+            "(unexpected parent process or network activity).",
+        "meaning":
+            "A core Windows process showed unusual behavior.",
+        "review":
+            "Inspect the process tree and loaded modules for the system process.",
+    },
+    "has_network": {
+        "weight": 2, "label": "Network activity",
+        "indicator":
+            "Network connectivity was recorded; weak evidence on its own, but it "
+            "raises risk when combined with other indicators.",
+        "meaning":
+            "The artifact contains network activity.",
+        "review":
+            "Correlate this artifact with firewall, proxy, and packet-capture logs.",
+    },
+    "severity_score": {
+        "meaning":
+            "The evidence item's own severity raised the anomaly score.",
+        "review":
+            "Correlate with the original evidence source that assigned severity.",
+    },
+}
+
+# No indicator row: severity_score is circular (its value IS the upstream-assigned severity) and,
+# being continuous, would fire on nearly every medium+ item.
+NON_INDICATOR_FEATURES = {"severity_score"}
+
+# Legacy views derived from the single table — every consumer here and in pipeline.py is unchanged.
 INDICATORS = [
-    (4,  10, "C2 port",
-     "Network connection on a port attackers commonly use to remotely control "
-     "infected machines (a known command-and-control port, used by tools like "
-     "Metasploit and Netcat)."),
-
-    (10,  9, "EXE dropped in Temp",
-     "An executable file was written to a user-writable Temp/AppData folder — "
-     "a common first step when malware installs itself."),
-
-    (11,  9, "C2 keyword in value",
-     "The artifact's text contains terms linked to remote-control malware "
-     "(reverse shell, beacon, remote-access tool)."),
-
-    (1,   8, "Suspicious process",
-     "The process name is on the watchlist of legitimate tools attackers "
-     "often abuse (e.g., certutil, mshta) or matches a known malware name "
-     "(e.g., mimikatz)."),
-
-    (2,   8, "Suspicious parent process",
-     "The process was started by a command shell or script host (cmd.exe, "
-     "powershell.exe, wscript.exe) — unusual for legitimate system services."),
-
-    (12,  7, "Data exfiltration indicator",
-     "Keywords suggesting data was being stolen were detected "
-     "(e.g., outbound upload, DNS tunnelling, or covert POST request)."),
-
-    (9,   6, "Temp/AppData path",
-     "The file or process lives under Temp or AppData — folders attackers "
-     "favour because any user can write there without special permissions."),
-
-    (3,   5, "Non-standard port",
-     "Network activity on an uncommon port, which can indicate a custom "
-     "protocol or an attempt to slip past firewall rules."),
-
-    (7,   4, "Network evidence type",
-     "This is a network connection record; combined with other indicators it "
-     "raises the likelihood of malware check-ins (beaconing) or an attacker "
-     "moving between hosts."),
-
-    (6,   4, "File-system evidence",
-     "A suspicious file was observed; it could be a dropped malware payload "
-     "or a way for malware to survive reboots (persistence)."),
-
-    (8,   4, "Email evidence",
-     "Email artifact detected; possible phishing delivery or data theft via "
-     "the mail channel."),
-
-    (0,   3, "System process anomaly",
-     "A core Windows system process behaved unlike its normal baseline "
-     "(unexpected parent process or network activity)."),
-
-    (5,   2, "Network activity",
-     "Network connectivity was recorded; weak evidence on its own, but it "
-     "raises risk when combined with other indicators."),
+    (FEATURE_NAMES.index(name), row["weight"], row["label"], row["indicator"])
+    for name, row in FEATURE_PROSE.items()
+    if name not in NON_INDICATOR_FEATURES
 ]
-
-FEATURE_MEANINGS = {
-    "is_system_process":
-        "A core Windows process showed unusual behavior.",
-    "is_suspicious_process":
-        "The process name matches a tool attackers commonly abuse, or a known malware name.",
-    "suspicious_parent":
-        "The parent process is a shell or script host attackers commonly abuse.",
-    "port_is_nonstandard":
-        "The connection used an uncommon network port.",
-    "port_is_known_c2":
-        "The connection used a port attackers commonly use to control infected machines.",
-    "has_network":
-        "The artifact contains network activity.",
-    "evidence_is_file":
-        "The artifact is filesystem evidence.",
-    "evidence_is_network":
-        "The artifact is network evidence.",
-    "evidence_is_email":
-        "The artifact is email evidence.",
-    "path_in_temp":
-        "The path is in a folder any user can write to (Temp/AppData), often used to hide malware.",
-    "path_has_exe_in_temp":
-        "An executable appeared in Temp/AppData/Downloads.",
-    "keyword_c2_indicator":
-        "The text contains remote-control malware terms (beacon, shell, remote-access tool).",
-    "keyword_exfil":
-        "The text contains signs of data being stolen.",
-    "has_ioc_match":
-        "The value matched a known indicator of compromise in the threat catalog.",
-    "severity_score":
-        "The evidence item's own severity raised the anomaly score.",
-}
-
-REVIEW_ACTIONS = {
-    "is_system_process":
-        "Inspect the process tree and loaded modules for the system process.",
-    "is_suspicious_process":
-        "Validate the process hash, command line, and execution location.",
-    "suspicious_parent":
-        "Review parent-child process lineage around the artifact timestamp.",
-    "port_is_nonstandard":
-        "Confirm whether the destination port is expected for this host.",
-    "port_is_known_c2":
-        "Check destination IP/domain reputation and related network sessions.",
-    "has_network":
-        "Correlate this artifact with firewall, proxy, and packet-capture logs.",
-    "evidence_is_file":
-        "Review file hash, signer, creation time, and adjacent filesystem events.",
-    "evidence_is_network":
-        "Pivot on source, destination, protocol, and session timing.",
-    "evidence_is_email":
-        "Inspect sender, headers, links, attachments, and recipient activity.",
-    "path_in_temp":
-        "Check whether the path was used for staging or payload execution.",
-    "path_has_exe_in_temp":
-        "Quarantine or hash the executable and inspect persistence paths.",
-    "keyword_c2_indicator":
-        "Search for repeated beaconing, reverse shells, or remote-access tooling.",
-    "keyword_exfil":
-        "Review outbound transfer volume, destination, and sensitive data access.",
-    "has_ioc_match":
-        "Review the matched IOC rule and hunt for the indicator across the other evidence sources.",
-    "severity_score":
-        "Correlate with the original evidence source that assigned severity.",
-}
-
+FEATURE_MEANINGS = {name: row["meaning"] for name, row in FEATURE_PROSE.items()}
+REVIEW_ACTIONS   = {name: row["review"]  for name, row in FEATURE_PROSE.items()}
 
 def compute_shap_explanations(
     detector,
