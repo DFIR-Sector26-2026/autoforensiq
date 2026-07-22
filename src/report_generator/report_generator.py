@@ -210,7 +210,7 @@ def _build_explainability_section(shap_explanations, max_items=8):
             "\n".join([
                 f"### Artifact {aid}",
                 "",
-                f"- **Decision:** Anomalous",
+                "- **Decision:** Anomalous",
                 f"- **Severity:** {scores.get('severity', 'N/A')}",
                 f"- **Confidence:** {_format_percent(scores.get('confidence'))}",
                 f"- **Model Scope:** {exp.get('model_scope', 'N/A')}",

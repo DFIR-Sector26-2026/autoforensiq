@@ -134,8 +134,8 @@ def is_lan_ipv4(ip: str) -> bool:
 
 
 def c2_port_severity(port):
-    """Return the severity a C2-indicator port warrants, or None if the port is not a C2
-    indicator. `port` may be an int or a digit string."""
+    """Severity floor a C2 port warrants at item creation — ioc_rescorer may later raise it
+    (HIGH-tier hits become critical). None if not a C2 port; `port` may be int or digit string."""
     try:
         port = int(port)
     except (TypeError, ValueError):

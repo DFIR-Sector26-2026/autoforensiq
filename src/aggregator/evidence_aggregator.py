@@ -723,8 +723,6 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
             shared_keys = set(file_signal.get("file_keys", [])) & set(network_signal.get("file_keys", []))
             # Temporal proximity alone is enough to surface the pair; a shared file name strengthens
             # it but is not required (a TCP connection can't carry one).
-            if not (shared_keys or file_signal.get("paths")):
-                continue
             if shared_keys:
                 filename_matched = True
 
@@ -1015,7 +1013,7 @@ def aggregate_evidence(
     
     # No raw outputs: fall through with zero items — the normal pipeline produces the empty shape from the same Step-7 builder
     if not all_by_tool:
-        print(f"  [WARN] No raw outputs found. Writing empty unified_evidence.json")
+        print("  [WARN] No raw outputs found. Writing empty unified_evidence.json")
 
     # Step 2: Flatten all items into one list
     all_items = []
@@ -1122,7 +1120,7 @@ if __name__ == "__main__":
         output_path=str(ROOT_DIR / "output" / "unified_evidence.json")
     )
 
-    print(f"\n  [DONE] Aggregator complete")
+    print("\n  [DONE] Aggregator complete")
     print(f"        Case ID: {result.get('case_id')}")
     print(f"        Tools: {', '.join(result.get('tools_aggregated', []))}")
     print(f"        Total evidence items: {result.get('total_items')}")

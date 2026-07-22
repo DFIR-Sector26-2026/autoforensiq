@@ -5,7 +5,7 @@ Feature vector layout (15 dimensions):
   [0]  is_system_process      – known Windows system binary
   [1]  is_suspicious_process  – known malware/LOLBin name
   [2]  suspicious_parent      – parent is cmd/powershell/wscript etc.
-  [3]  port_is_nonstandard    – port not in {80,443,0}
+  [3]  port_is_nonstandard    – port not in STANDARD_PORTS {80,443,8080,8443,53,22,21,25,0}
   [4]  port_is_known_c2       – port in common C2 list {4444,1337,8888,9999,...}
   [5]  has_network            – boolean
   [6]  evidence_is_file       – evidence_type == "file"

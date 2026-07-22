@@ -349,8 +349,6 @@ class AutoForensiqGUI(ctk.CTk):
     def _load_sample(self, filename: str) -> None:
         self._report_path.set(str(ROOT_DIR / "tests" / "incidents" / filename))
 
-    # ── Header ────────────────────────────────────────────────────────────────
-
     # ── Configuration section ─────────────────────────────────────────────────
 
     def _build_config_section(self) -> None:

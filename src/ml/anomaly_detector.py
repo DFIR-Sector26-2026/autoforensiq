@@ -81,8 +81,8 @@ class AnomalyDetector:
 
         is_anomaly = final_scores < ANOMALY_THRESHOLD
 
-        # Confidence: distance below threshold, clamped and normalised. At threshold → 0.5; at
-        # threshold-0.5 → ~1.0; above threshold → < 0.5.
+        # Confidence: distance below zero, clamped. At the -0.10 threshold → 0.6; at score -0.5 →
+        # 1.0; benign scores near 0 → ~0.5.
         confidence = np.clip(0.5 - final_scores, 0.0, 1.0)
 
         return {

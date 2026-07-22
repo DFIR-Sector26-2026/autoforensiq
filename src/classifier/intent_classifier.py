@@ -337,7 +337,7 @@ def classify(report_text: str, config_override: dict = None,
 
     # Validate against schema — raises jsonschema.ValidationError on failure
     validate_case_context(result)
-    print(f"[CLASSIFIER] Schema validation passed ✔")
+    print("[CLASSIFIER] Schema validation passed ✔")
     print(f"[CLASSIFIER] case_type={result['case_type']} "
           f"confidence={result['classifier_confidence']} "
           f"artifacts={result['artifact_types']}")
