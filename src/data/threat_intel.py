@@ -6,6 +6,8 @@ WATCH = dual-use (IRC, alt-HTTP, old trojans) surfaced at medium. Predominantly
 legitimate ports (2222/3333/4000/5555/7777) are deliberately excluded as noise.
 """
 
+import re
+
 # Overwhelmingly malicious, rarely legitimate -> severity "high".
 C2_PORTS_HIGH = frozenset({4444, 4445, 1337, 31337})
 
@@ -88,6 +90,20 @@ BENIGN_DOMAIN_SUFFIXES = {
     "adobe.com", "intel.com", "nvidia.com", "amd.com", "dell.com",
     "hp.com", "lenovo.com", "java.com", "oracle.com",
 }
+
+
+# Hostname token, alpha TLD ≥2 so an IPv4 literal never matches (B1) — was maintained as twins in
+# evidence_aggregator.HOST_RE and ioc_rescorer._HOST_TOKEN_RE (review-1 3.2).
+HOST_TOKEN_RE = re.compile(
+    r"\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\b", re.IGNORECASE
+)
+
+
+def normalize_host(host: str) -> str:
+    """Lowercase, strip a trailing dot and a leading `www.` so the `www.`-prefixed memory copy of
+    a host and the bare pcap form collapse to one key (B1: both views of the killswitch)."""
+    host = host.strip().rstrip(".").lower()
+    return host[len("www."):] if host.startswith("www.") else host
 
 
 def matching_base(host: str, bases) -> str | None:

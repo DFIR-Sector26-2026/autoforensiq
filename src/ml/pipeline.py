@@ -21,7 +21,8 @@ log = logging.getLogger(__name__)
 
 
 def _model_scope(record: Dict[str, Any]) -> str:
-    """Collapse wrapper-specific evidence types into ML model families."""
+    """Collapse wrapper-specific evidence types into ML model families. KEEP the substring rules
+    in sync with feature_engineering._canonical_evidence_type (coarser 4-way view, F8a)."""
     evidence_type = str(record.get("evidence_type", "")).lower()
     source_tool = str(record.get("source_tool", "")).lower()
     value = str(record.get("value", "")).lower()

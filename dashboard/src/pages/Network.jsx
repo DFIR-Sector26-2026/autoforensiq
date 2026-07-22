@@ -4,96 +4,27 @@ import ForceGraph2D from "react-force-graph-2d";
 
 import useEvidence from "../hooks/useEvidence";
 
-import { SEVERITY_HEX, SEVERITY_RANK } from "../data/severity";
+import { SEVERITY_HEX } from "../data/severity";
 
 // Severities offered as node filters, in display order (issue U2).
 const SEV_LEVELS = ["critical", "high", "medium", "low"];
 
-const NET_TYPES = [
-  "network_connection",
-  "dns_query",
-  "http_request",
-  "suspicious_port",
-  "beacon_pattern",
-];
-
-// no src→dst pair, so hosts extracted from the URL hang off a synthetic "imaged host" subject node 
-const URL_TYPES = ["timeline_event", "suspicious_url"];
-const DISK_SUBJECT = "imaged host";
-
-const urlHost = (text) => {
-  const m = String(text || "").match(/https?:\/\/([^/\s:?#]+)/i);
-  return m ? m[1] : null;
-};
-
-const rankToSev = (rank) =>
-  rank >= 4 ? "critical" : rank >= 3 ? "high" : rank >= 2 ? "medium" : "low";
-
-// The internal subject is the LAN (RFC1918) endpoint — not "whatever is on the left of the arrow",
-// since reply-direction connections put an external C2 on the left. Only true for a dotted-quad;
-// domains are always external.
-const isLan = (id) =>
-  id.startsWith("10.") ||
-  id.startsWith("192.168.") ||
-  /^172\.(1[6-9]|2\d|3[01])\./.test(id);
-
-// Endpoints parsed from the free-text "src → dst" values (strip :port and /path so one host = one
-// node). A node takes its WORST connecting severity so a host shows once, not per filter (U2);
-// internal endpoints draw cyan.
-function buildGraph(evidence) {
-
-  const nodes = {};
-  const links = {};
-
-  const host = (token) => token.split(/[:/]/)[0];
-  const touch = (id) => {
-    if (!nodes[id]) nodes[id] = { id, isSource: false, sevRank: 0 };
-    return nodes[id];
-  };
-
-  evidence.forEach((e) => {
-
-    if (URL_TYPES.includes(e.evidence_type)) {
-      const h = urlHost(e.value);
-      if (!h) return;
-      touch(DISK_SUBJECT).isSource = true;
-      const n = touch(h);
-      n.sevRank = Math.max(n.sevRank, SEVERITY_RANK[e.severity] || 0);
-      links[`${DISK_SUBJECT}->${h}`] = { source: DISK_SUBJECT, target: h };
-      return;
-    }
-
-    if (!NET_TYPES.includes(e.evidence_type)) return;
-
-    // Both arrow styles: tshark values use "→", volatility/memprocfs netstat uses "->".
-    const parts = String(e.value || "").split(/→|->/);
-    if (parts.length < 2) return;
-
-    const src = host(parts[0].trim().split(/\s+/).pop());
-    const dst = host(parts[1].trim().split(/\s+/)[0]);
-    if (!src || !dst) return;
-
-    const r = SEVERITY_RANK[e.severity] || 0;
-    [src, dst].forEach((id) => {
-      const n = touch(id);
-      if (isLan(id)) n.isSource = true;         // internal subject
-      else n.sevRank = Math.max(n.sevRank, r);  // external host: worst severity
-    });
-
-    links[`${src}->${dst}`] = { source: src, target: dst };
-  });
-
-  Object.values(nodes).forEach((n) => {
-    n.severity = rankToSev(n.sevRank);
-    n.color = n.isSource ? "#38bdf8" : SEVERITY_HEX[n.severity] || "#94a3b8";
-  });
-
-  return { nodes: Object.values(nodes), links: Object.values(links) };
+// D2: nodes/links arrive pre-parsed in dashboard.json (report generator owns the "src → dst"
+// parsing and the RFC1918 subject rule); only colors are assigned client-side.
+function decorateGraph(graph) {
+  const nodes = (graph.nodes || []).map((n) => ({
+    id: n.id,
+    isSource: n.is_source,
+    severity: n.severity,
+    color: n.is_source ? "#38bdf8" : SEVERITY_HEX[n.severity] || "#94a3b8",
+  }));
+  const links = (graph.links || []).map((l) => ({ source: l.source, target: l.target }));
+  return { nodes, links };
 }
 
 export default function Network() {
 
-  const { evidence, loading } = useEvidence();
+  const { graph, loading } = useEvidence();
   const graphRef = useRef(null);
   // Auto-fit only once, on initial layout. Refitting on every engine stop reset the user's zoom on
   // drag (issue U1) and on each filter change (issue U2).
@@ -102,9 +33,9 @@ export default function Network() {
   // Multi-select severity filter for which nodes to draw (issue U2).
   const [sevFilter, setSevFilter] = useState(SEV_LEVELS);
 
-  // Build the full graph once; filtering then selects a subset of the SAME node objects, so
+  // Decorate the full graph once; filtering then selects a subset of the SAME node objects, so
   // positions persist across filter changes (no layout jump).
-  const fullGraph = useMemo(() => buildGraph(evidence), [evidence]);
+  const fullGraph = useMemo(() => decorateGraph(graph), [graph]);
 
   const graphData = useMemo(() => {
     const nodes = fullGraph.nodes.filter(

@@ -798,3 +798,53 @@ def test_correlated_findings_table_strong_types_and_folded_timestamps():
 
 def test_correlated_findings_empty_sentinel():
     assert "_No cross-artifact correlations detected._" in _build_correlated_findings([])
+
+
+# ─────────────────────────────────────────────────────────────
+# Dashboard network graph (review-2 D2 — parsing moved server-side)
+# ─────────────────────────────────────────────────────────────
+
+def _graph(items):
+    from src.report_generator.report_generator import _build_network_graph
+    return _build_network_graph(items)
+
+
+def test_network_graph_parses_both_arrow_styles():
+    items = [
+        {"evidence_type": "network_connection", "severity": "high",
+         "value": "TCP 192.168.1.5:49152 → 93.184.216.34:443"},
+        {"evidence_type": "network_connection", "severity": "medium",
+         "value": "ESTABLISHED 10.0.0.2:5555 -> 4.4.4.4:4444 (svchost.exe)"},
+    ]
+    g = _graph(items)
+    by_id = {n["id"]: n for n in g["nodes"]}
+    assert by_id["192.168.1.5"]["is_source"] and by_id["10.0.0.2"]["is_source"]
+    assert by_id["93.184.216.34"]["severity"] == "high"
+    assert by_id["4.4.4.4"]["severity"] == "medium"
+    assert {(l["source"], l["target"]) for l in g["links"]} == {
+        ("192.168.1.5", "93.184.216.34"), ("10.0.0.2", "4.4.4.4"),
+    }
+
+
+def test_network_graph_url_hosts_hang_off_imaged_host():
+    items = [
+        {"evidence_type": "timeline_event", "severity": "critical",
+         "value": "[2017-05-12] http://evil.example.com/payload.exe fetched"},
+        {"evidence_type": "file_artifact", "severity": "critical",
+         "value": "DELETED file: /tmp/x.exe"},  # non-network: must not appear
+    ]
+    g = _graph(items)
+    by_id = {n["id"]: n for n in g["nodes"]}
+    assert by_id["imaged host"]["is_source"]
+    assert by_id["evil.example.com"]["severity"] == "critical"
+    assert len(g["nodes"]) == 2
+
+
+def test_network_graph_external_node_keeps_worst_severity():
+    items = [
+        {"evidence_type": "dns_query", "severity": "medium", "value": "1.1.1.1 → bad.tld"},
+        {"evidence_type": "http_request", "severity": "critical", "value": "1.1.1.1 → bad.tld/beacon"},
+    ]
+    g = _graph(items)
+    by_id = {n["id"]: n for n in g["nodes"]}
+    assert by_id["bad.tld"]["severity"] == "critical"

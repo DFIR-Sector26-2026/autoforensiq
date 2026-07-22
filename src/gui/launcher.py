@@ -71,7 +71,7 @@ ctk.set_default_color_theme("dark-blue")
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 _PROVIDER_MODELS: dict[str, list[str]] = {
-    "anthropic": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-7"],
+    "anthropic": ["claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-opus-4-8"],
     "openai":    ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
     "deepseek":  ["deepseek-chat", "deepseek-reasoner"],
 }
@@ -102,7 +102,7 @@ class AutoForensiqGUI(ctk.CTk):
         self._report_path = ctk.StringVar()
         self._artifact_rows: list = []
         self._provider = ctk.StringVar(value="anthropic")
-        self._model = ctk.StringVar(value="claude-sonnet-4-6")
+        self._model = ctk.StringVar(value="claude-sonnet-5")
         self._mock_mode = ctk.BooleanVar(value=True)
         self._skip_tools = ctk.BooleanVar(value=False)
         self._known_bad = ctk.StringVar()
@@ -277,6 +277,8 @@ class AutoForensiqGUI(ctk.CTk):
             filetypes=[
                 ("Forensic artifacts", both_cases([e for exts in groups.values() for e in exts])),
                 *[(label, both_cases(exts)) for label, exts in groups.items()],
+                # Name-based like the CLI's "history" route (F8e), so not in _EXT_MAP/_TYPE_LABELS.
+                ("Browser history", "History history History* history*"),
                 ("All files", "*.*"),
             ],
             initialdir=str(ROOT_DIR.parent),

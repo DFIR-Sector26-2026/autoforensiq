@@ -32,6 +32,18 @@ TOOL_EVIDENCE_MAP = {
     if cls.consumes is not None
 }
 
+# How to acquire each evidence type — shown by the CLI pre-flight check and the report's coverage
+# table; was maintained as near-identical twins in both (review-1 3.2).
+ACQUIRE_HINTS = {
+    "memory_dump":    "Acquire a memory dump (.dmp / .mem) using WinPmem, DumpIt, or LiME.",
+    "pcap":           "Capture network traffic (.pcap) via Wireshark or tcpdump.",
+    "disk_image":     "Acquire a disk image (.img / .dd / .e01) using FTK Imager or dd.",
+    "registry_hive":  "Export registry hives (NTUSER.DAT / SYSTEM / SOFTWARE) from the affected host.",
+    "log_files":      "Export Windows event logs (.evtx) via Event Viewer or wevtutil.",
+    "email":          "Export email artifacts (.eml / .msg) from the affected mail client.",
+    "browser":        "Export browser History files from the user profile directory.",
+}
+
 
 def run_tools(execution_plan: dict, evidence_files: dict):
 

@@ -4,7 +4,6 @@ Standalone: python -m src.aggregator.evidence_aggregator"""
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
@@ -15,7 +14,11 @@ import jsonschema
 from referencing import Registry, Resource
 
 from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
-from src.data.threat_intel import SEVERITY_ORDER, is_allowlisted_dns, is_lan_ipv4
+from src.data.threat_intel import (
+    HOST_TOKEN_RE as HOST_RE, SEVERITY_ORDER, is_allowlisted_dns, is_lan_ipv4,
+    normalize_host as _normalize_host,
+)
+from src.utils.io import load_json, write_json
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
@@ -24,29 +27,12 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 _IOC_CATALOG = load_ioc_catalog()
 
 
-def load_json(path: str) -> dict[str, Any]:
-    """Load a JSON file."""
-    p = Path(path)
-    with p.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
 _SCHEMAS_DIR = ROOT_DIR / "src" / "schemas"
 _EVIDENCE_ITEM_SCHEMA = load_json(str(_SCHEMAS_DIR / "evidence_item.json")) if (_SCHEMAS_DIR / "evidence_item.json").exists() else None
 _UNIFIED_EVIDENCE_SCHEMA = load_json(str(_SCHEMAS_DIR / "unified_evidence.json")) if (_SCHEMAS_DIR / "unified_evidence.json").exists() else None
 # Compiled once: jsonschema.validate() recompiles the schema per call, which is ~13k compilations
 # on a large run.
 _EVIDENCE_ITEM_VALIDATOR = jsonschema.Draft7Validator(_EVIDENCE_ITEM_SCHEMA) if _EVIDENCE_ITEM_SCHEMA else None
-
-
-def write_json(path: str, data: dict[str, Any]) -> None:
-    """Write a JSON file, creating parent directory if needed."""
-    p = Path(path)
-    if p.parent:
-        p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
 
 
 def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
@@ -208,11 +194,6 @@ BYTES_RE = re.compile(r"(\d[\d,]*)\s+bytes", re.IGNORECASE)
 DESTINATION_RE = re.compile(
     r"(?P<dst>(?:\d{1,3}\.){3}\d{1,3})(?::(?P<port>\d+))?\s*(?:\(|$)"
 )
-# Hostname token, alpha TLD ≥2 so an IPv4 literal never matches (B1). Mirrors
-# ioc_rescorer._HOST_TOKEN_RE; kept local to avoid coupling.
-HOST_RE = re.compile(
-    r"\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\b", re.IGNORECASE
-)
 # Only these types carry a correlatable hostname — keeps dotted filenames in file/process/registry
 # values out of the domain signal.
 _DOMAIN_BEARING_TYPES = {"dns_query", "http_request", "suspicious_domain"}
@@ -332,16 +313,6 @@ def _extract_paths(text: str) -> list[str]:
             seen.add(key)
             deduplicated.append(candidate)
     return deduplicated
-
-
-def _normalize_host(host: str) -> str:
-    """Lowercase, strip a trailing dot and a leading `www.` so a bare host and its
-    `www.`-prefixed form collapse to one key (issue B1: the pcap saw the killswitch as
-    `iuqerf…com`, memory as `www.iuqerf…com`)."""
-    host = host.strip().strip(".").lower()
-    if host.startswith("www."):
-        host = host[len("www."):]
-    return host
 
 
 def _extract_domains(text: str) -> list[str]:
@@ -921,7 +892,8 @@ def build_correlations(items: list[dict], signals: dict[str, dict[str, Any]]) ->
     findings.extend(_group_items_by_signal(items, signals, "ips"))
     findings.extend(_group_items_by_signal(items, signals, "file_keys"))
     findings.extend(_group_items_by_signal(items, signals, "domains", require_cross_source=True))
-    findings.extend(_group_items_by_signal(items, signals, "timestamp_bucket"))
+    # Same-minute groups confined to one tool+type are noise (measured 100% on dev01/ubnist — F4b).
+    findings.extend(_group_items_by_signal(items, signals, "timestamp_bucket", require_cross_source=True))
     findings.extend(_build_exfiltration_findings(items, signals))
     # Merge wrapper-declared explicit links (issue 4.6), after the signal-based findings so
     # already-covered link sets can be skipped.

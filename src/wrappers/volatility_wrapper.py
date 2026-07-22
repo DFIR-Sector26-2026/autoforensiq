@@ -4,9 +4,11 @@ import sys
 import json
 import hashlib
 import tempfile
+import subprocess
 from pathlib import Path
 
 from .base_wrapper import BaseWrapper, stable_artifact_id
+from src.utils.audit_log import log_action
 from src.data.threat_intel import (
     c2_port_severity, RANSOM_EXTENSIONS, EXECUTABLE_EXTENSIONS, SEVERITY_ORDER, is_benign_domain)
 
@@ -648,32 +650,29 @@ class VolatilityWrapper(BaseWrapper):
     def _build_strings_file(self, image_path: str):
         """Run system `strings` over the image into a tempfile for windows.strings
         --strings-file. Returns the path, or None on failure; caller unlinks."""
-
-        try:
-            stdout, stderr, code = self.run_command(
-                ["strings", "-a", "-n", "8", image_path],
-                input_files=[image_path],
-                timeout=120,
-            )
-        except Exception:
-            return None
-
-        if code != 0 or not stdout.strip():
-            return None
-
+        # Streamed straight to the file — run_command would hold the whole-image dump in RAM and
+        # then copy it (review-1 4.2); audit logging is done inline instead.
         tmp = tempfile.NamedTemporaryFile(delete=False, prefix="af_strings_", suffix=".txt", mode="w", encoding="utf-8")
+        command = ["strings", "-a", "-n", "8", image_path]
+        print(f"  [RUNNING] {' '.join(command)}")
         try:
-            tmp.write(stdout)
-            tmp.flush()
+            result = subprocess.run(command, stdout=tmp, stderr=subprocess.PIPE, text=True, timeout=120)
             tmp.close()
+            status = "success" if result.returncode == 0 else "failed"
+            log_action(self.tool_name, command, [image_path], [], status,
+                       result.stderr[:500] if result.stderr else "")
+            if result.returncode == 0 and os.path.getsize(tmp.name) > 0:
+                return tmp.name
+        except subprocess.TimeoutExpired:
+            log_action(self.tool_name, command, [image_path], [], "timeout")
+        except Exception as e:
+            log_action(self.tool_name, command, [image_path], [], "error", str(e))
+        try:
+            tmp.close()
+            os.unlink(tmp.name)
         except Exception:
-            try:
-                os.unlink(tmp.name)
-            except Exception:
-                pass
-            return None
-
-        return tmp.name
+            pass
+        return None
 
     def _parse_pslist(self, lines: list) -> list:
         items = []

@@ -81,6 +81,7 @@ EXE_IN_TEMP = re.compile(
 
 
 def _canonical_evidence_type(evidence_type: str) -> str:
+    # KEEP the substring rules in sync with pipeline._model_scope (finer 8-way view, F8a).
     evidence_type = evidence_type.lower()
 
     if (

@@ -14,6 +14,7 @@ output/
 !src/schemas/*.json
 !dashboard/package.json
 !dashboard/package-lock.json
+!dashboard/src/data/attackMatrix.json
 data/test_cases/
 dashboard/node_modules/
 dashboard/public/data/

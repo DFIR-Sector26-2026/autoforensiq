@@ -8,7 +8,7 @@ import yaml
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.data.threat_intel import EXECUTABLE_EXTENSIONS
+from src.data.threat_intel import EXECUTABLE_EXTENSIONS, SEVERITY_ORDER, is_lan_ipv4
 
 
 # ─────────────────────────────────────────────────────────────
@@ -327,7 +327,7 @@ def _call_anthropic(user_prompt, cfg):
 
     api_key = os.environ.get(cfg["llm"].get("anthropic_api_key_env", "ANTHROPIC_API_KEY"))
     client = anthropic.Anthropic(api_key=api_key)
-    model = cfg["llm"].get("anthropic_model", "claude-sonnet-4-6")
+    model = cfg["llm"].get("anthropic_model", "claude-sonnet-5")
     resp = client.messages.create(
         model=model,
         max_tokens=cfg["llm"].get("max_tokens", 2048),
@@ -495,23 +495,12 @@ RECOMMENDATIONS_BY_CASE = {
 
 # Single source of truth derived from each wrapper's `consumes` attribute (issue D2). Was re-typed
 # here and drifted (plaso said log_files while the orchestrator runs it on the disk image).
-from src.orchestrator import TOOL_EVIDENCE_MAP as _TOOL_TO_EVIDENCE
+from src.orchestrator import TOOL_EVIDENCE_MAP as _TOOL_TO_EVIDENCE, ACQUIRE_HINTS as _ACQUIRE_NOTES
 
 _ALL_EVIDENCE_TYPES = [
     "memory_dump", "pcap", "disk_image",
     "registry_hive", "log_files", "email", "browser",
 ]
-
-_ACQUIRE_NOTES = {
-    "memory_dump":   "Acquire a memory dump (.dmp/.mem) using WinPmem, DumpIt, or LiME.",
-    "pcap":          "Capture network traffic (.pcap) via Wireshark or tcpdump.",
-    "disk_image":    "Acquire a disk image (.img/.dd/.e01) using FTK Imager or dd.",
-    "registry_hive": "Export registry hives (NTUSER.DAT/SYSTEM/SOFTWARE) from the host.",
-    "log_files":     "Export Windows event logs (.evtx) via Event Viewer or wevtutil.",
-    "email":         "Export email artifacts (.eml/.msg) from the affected mail client.",
-    "browser":       "Export browser History files from the user profile directory.",
-}
-
 
 def _is_internal_ip(ip):
     """True for non-routable / local IPs that don't belong in an external IOC table (loopback,
@@ -1598,7 +1587,7 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     # Audit trail
     audit_section = (
         "## Audit Trail\n\n"
-        "A SHA-256 audit log was generated at `output/audit_log.json` "
+        "A SHA-256 audit log was generated at `output/audit_log.jsonl` "
         "and can be used to verify evidence integrity for chain-of-custody compliance."
     )
 
@@ -1615,6 +1604,74 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
         coverage_section, audit_section,
     ]
     return "\n\n---\n\n".join(sections)
+
+
+# Network-graph extraction (D2) — evidence types that carry a "src → dst" pair, and URL-bearing
+# types whose hosts hang off a synthetic "imaged host" subject node (no pair to parse).
+_GRAPH_NET_TYPES = {"network_connection", "dns_query", "http_request", "suspicious_port", "beacon_pattern"}
+_GRAPH_URL_TYPES = {"timeline_event", "suspicious_url"}
+_GRAPH_DISK_SUBJECT = "imaged host"
+_URL_HOST_RE = re.compile(r"https?://([^/\s:?#]+)", re.IGNORECASE)
+
+
+def _build_network_graph(all_items):
+    """Endpoint graph {nodes, links} for the dashboard's Network page (D2) — Network.jsx previously
+    re-parsed the free-text values in JS with its own RFC1918 copy that could silently drift."""
+    nodes, links = {}, {}
+
+    def touch(node_id):
+        return nodes.setdefault(node_id, {"id": node_id, "is_source": False, "rank": 0})
+
+    for e in all_items:
+        etype = e.get("evidence_type")
+        value = str(e.get("value") or "")
+        rank = SEVERITY_ORDER.get(str(e.get("severity", "")).lower(), 0)
+
+        if etype in _GRAPH_URL_TYPES:
+            m = _URL_HOST_RE.search(value)
+            if not m:
+                continue
+            host = m.group(1)
+            touch(_GRAPH_DISK_SUBJECT)["is_source"] = True
+            n = touch(host)
+            n["rank"] = max(n["rank"], rank)
+            links[f"{_GRAPH_DISK_SUBJECT}->{host}"] = {"source": _GRAPH_DISK_SUBJECT, "target": host}
+            continue
+
+        if etype not in _GRAPH_NET_TYPES:
+            continue
+        # Both arrow styles: tshark values use "→", volatility/memprocfs netstat uses "->".
+        parts = re.split(r"→|->", value)
+        if len(parts) < 2:
+            continue
+        left, right = parts[0].split(), parts[1].split()
+        if not left or not right:
+            continue
+        # Strip :port and /path so one host = one node.
+        src = re.split(r"[:/]", left[-1])[0]
+        dst = re.split(r"[:/]", right[0])[0]
+        if not src or not dst:
+            continue
+
+        # The internal subject is the LAN endpoint (reply-direction rows put the C2 on the left);
+        # an external host takes its WORST connecting severity so it shows once across filters.
+        for endpoint in (src, dst):
+            n = touch(endpoint)
+            if is_lan_ipv4(endpoint):
+                n["is_source"] = True
+            else:
+                n["rank"] = max(n["rank"], rank)
+        links[f"{src}->{dst}"] = {"source": src, "target": dst}
+
+    rank_to_sev = {4: "critical", 3: "high", 2: "medium"}
+    return {
+        "nodes": [
+            {"id": n["id"], "is_source": n["is_source"],
+             "severity": rank_to_sev.get(n["rank"], "low")}
+            for n in nodes.values()
+        ],
+        "links": list(links.values()),
+    }
 
 
 def _build_dashboard_summary(unified_evidence, case_context, shap_explanations):
@@ -1654,6 +1711,7 @@ def _build_dashboard_summary(unified_evidence, case_context, shap_explanations):
         # from (issue U4).
         "evidence_sources": case_context.get("evidence_sources", {}),
         "mitre": mitre,
+        "graph": _build_network_graph(all_items),
     }
 
 

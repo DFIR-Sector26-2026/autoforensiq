@@ -9,8 +9,9 @@ from __future__ import annotations
 import argparse
 import copy
 import json
-import os
 from typing import Any
+
+from src.utils.io import load_json, write_json
 
 
 DEFAULT_ONTOLOGY_PATH = "src/data/tool_ontology.json"
@@ -56,28 +57,7 @@ SAMPLE_CASE_CONTEXT_PATHS = {
 }
 
 
-def load_json(path: str) -> dict[str, Any]:
-    """Load a JSON object from disk."""
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: str, data: dict[str, Any]) -> None:
-    """Write a JSON object to disk, creating the parent directory if needed."""
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-
-
-def validate_case_context(context: dict[str, Any]) -> None:
+def validate_selector_contract(context: dict[str, Any]) -> None:
     """Validate the minimum selector input contract."""
     missing = []
 
@@ -180,7 +160,7 @@ def select_tools(
     ontology: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Filter and rank tools using artifact availability and case relevance."""
-    validate_case_context(context)
+    validate_selector_contract(context)
     validate_ontology(ontology)
 
     artifact_types = set(context["artifact_types"])

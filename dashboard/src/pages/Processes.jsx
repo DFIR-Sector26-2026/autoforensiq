@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+
 import useEvidence from "../hooks/useEvidence";
 
 // process_tree_json's own `suspicious` flag covers few lineages — cross-check node names against
@@ -22,8 +24,13 @@ function suspiciousNamesFrom(evidence, trees) {
 
   const flagged = new Set();
   names.forEach((name) => {
-    const needle = name.toLowerCase();
-    if (hot.some((h) => h.includes(needle))) flagged.add(name);
+    const needle = String(name || "").toLowerCase();
+    if (!needle) return;
+    // Word-boundary match (D3): bare includes() let a short name like "sh" match inside
+    // "powershell.exe", falsely flagging the node.
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`);
+    if (hot.some((h) => re.test(h))) flagged.add(name);
   });
   return flagged;
 }
@@ -43,8 +50,8 @@ function ProcNode({ node, suspiciousNames }) {
         <span className="text-slate-500 text-xs">(PID {node.pid})</span>
       </span>
 
-      {(node.children || []).map((child, index) => (
-        <ProcNode key={index} node={child} suspiciousNames={suspiciousNames} />
+      {(node.children || []).map((child) => (
+        <ProcNode key={`${child.pid}-${child.name}`} node={child} suspiciousNames={suspiciousNames} />
       ))}
 
     </div>
@@ -75,6 +82,21 @@ export default function Processes() {
 
   const { evidence, loading } = useEvidence();
 
+  // D3: memoized — this scans every critical/high item per tree node name, and previously
+  // re-ran on every render.
+  const processTrees = useMemo(
+    () =>
+      (Array.isArray(evidence) ? evidence : []).filter(
+        (item) => item && item.evidence_type === "process_tree"
+      ),
+    [evidence]
+  );
+
+  const suspiciousNames = useMemo(
+    () => suspiciousNamesFrom(Array.isArray(evidence) ? evidence : [], processTrees),
+    [evidence, processTrees]
+  );
+
   if (loading) {
 
     return (
@@ -83,12 +105,6 @@ export default function Processes() {
       </div>
     );
   }
-
-  const processTrees = (Array.isArray(evidence) ? evidence : []).filter(
-    (item) => item && item.evidence_type === "process_tree"
-  );
-
-  const suspiciousNames = suspiciousNamesFrom(evidence, processTrees);
 
   return (
 
@@ -114,10 +130,10 @@ export default function Processes() {
 
       <div className="space-y-4">
 
-        {processTrees.map((tree, index) => (
+        {processTrees.map((tree) => (
 
           <div
-            key={index}
+            key={tree.artifact_id}
             className="
               bg-slate-900
               border border-slate-700

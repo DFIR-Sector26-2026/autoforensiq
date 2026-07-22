@@ -444,7 +444,7 @@ def _provided_artifact_types(evidence_files: dict) -> list:
 
 # Tool → required evidence key; single source of truth from each wrapper's `consumes` (D2 — re-typed
 # copies previously let plaso drift).
-from src.orchestrator import TOOL_EVIDENCE_MAP as _TOOL_EVIDENCE_MAP
+from src.orchestrator import TOOL_EVIDENCE_MAP as _TOOL_EVIDENCE_MAP, ACQUIRE_HINTS as _ACQUIRE_HINT
 
 _TOOL_DISPLAY = {
     "volatility3": "Volatility3       (memory analysis)",
@@ -456,17 +456,6 @@ _TOOL_DISPLAY = {
     "email":       "Email analyzer    (email artifact analysis)",
     "browser":     "Browser analyzer  (browser history analysis)",
 }
-
-_ACQUIRE_HINT = {
-    "memory_dump":    "Acquire a memory dump (.dmp / .mem) using WinPmem, DumpIt, or LiME.",
-    "pcap":           "Capture network traffic (.pcap) via Wireshark or tcpdump.",
-    "disk_image":     "Acquire a disk image (.img / .dd / .e01) using FTK Imager or dd.",
-    "registry_hive":  "Export registry hives (NTUSER.DAT / SYSTEM / SOFTWARE) from the affected host.",
-    "log_files":      "Export Windows event logs (.evtx) via Event Viewer or wevtutil.",
-    "email":          "Export email artifacts (.eml / .msg) from the affected mail client.",
-    "browser":        "Export browser History files from the user profile directory.",
-}
-
 
 def preflight_check(evidence_files: dict, execution_plan: dict):
     """Print which planned tools WILL run vs be SKIPPED for the supplied evidence, with an

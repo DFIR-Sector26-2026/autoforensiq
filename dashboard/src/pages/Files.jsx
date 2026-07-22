@@ -162,9 +162,9 @@ export default function Files() {
 
             <tbody>
 
-              {fileArtifacts.map((e, index) => (
+              {fileArtifacts.map((e) => (
 
-                <tr key={index} className="border-b border-slate-800 align-top">
+                <tr key={e.artifact_id} className="border-b border-slate-800 align-top">
 
                   <td className={`py-2 pr-4 font-bold uppercase text-xs ${SEVERITY_TEXT[e.severity] || ""}`}>
                     {e.severity}

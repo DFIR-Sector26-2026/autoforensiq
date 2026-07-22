@@ -33,7 +33,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 _MANIFEST: list[tuple[str, str, str]] = [
     ("case_context.json",       "P1", "Intent Classifier"),
     ("execution_plan.json",     "P2", "Tool Selector"),
-    ("audit_log.json",          "P3", "Orchestrator audit"),
+    ("audit_log.jsonl",         "P3", "Orchestrator audit"),
     ("raw/*_output.json",       "P3", "Raw tool output"),
     ("unified_evidence.json",   "P4", "Aggregated evidence"),
     ("shap_explanations.json",  "P5", "ML / XAI"),

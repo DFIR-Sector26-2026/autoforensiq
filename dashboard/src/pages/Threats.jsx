@@ -48,10 +48,10 @@ function Section({ severity, items, sources }) {
 
           <tbody>
 
-            {items.map((e, index) => (
+            {items.map((e) => (
 
               <tr
-                key={index}
+                key={e.artifact_id}
                 className="border-b border-slate-800 align-top"
               >
 

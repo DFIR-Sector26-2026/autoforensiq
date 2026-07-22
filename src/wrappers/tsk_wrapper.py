@@ -148,6 +148,11 @@ class TSKWrapper(BaseWrapper):
                     continue
                 is_deleted = line.startswith("r/r *") or "* " in parts[0]
 
+                # Body fields 7-10 are atime|mtime|ctime|crtime epochs; "0" means unknown (F4b).
+                mtime  = parts[8].strip()  if len(parts) > 8  else ""
+                crtime = parts[10].strip() if len(parts) > 10 else ""
+                ts = next((t for t in (mtime, crtime) if t not in ("", "0")), "")
+
                 if is_deleted:
                     severity, label = "high", "DELETED file"
                 else:
@@ -161,7 +166,8 @@ class TSKWrapper(BaseWrapper):
                     evidence_type="file_artifact",
                     value=f"{label}: {filepath}",
                     severity=severity,
-                    confidence=0.75
+                    confidence=0.75,
+                    timestamp=ts
                 ))
             except Exception:
                 continue

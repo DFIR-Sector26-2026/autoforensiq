@@ -12,6 +12,7 @@ from typing import Any
 
 from src.data.threat_intel import (
     C2_PORTS_HIGH, C2_PORTS_WATCH, LATERAL_MOVEMENT_PORTS, SEVERITY_ORDER, matching_base,
+    HOST_TOKEN_RE as _HOST_TOKEN_RE, normalize_host as _norm_host,
 )
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -56,14 +57,6 @@ _PERSISTENCE_TARGET_RE = re.compile(
 # "11.2.3.40"). Octet-range validation is loose on purpose — the reputation match is an equality
 # test against the catalog list, not a parser.
 _IP_TOKEN_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
-
-# A hostname / domain token: one or more dot-separated labels ending in an alphabetic TLD (≥2). The
-# alphabetic-TLD requirement means an IPv4 literal is never mis-extracted as a host. Used for
-# reputation matching (issue 4.2).
-_HOST_TOKEN_RE = re.compile(
-    r"\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\b", re.IGNORECASE
-)
-
 
 def _is_ip(token: str) -> bool:
     return bool(_IP_TOKEN_RE.fullmatch(token.strip()))
@@ -208,14 +201,6 @@ def _build_indicator_list(catalog: dict, case_context: dict) -> list[dict]:
     # benign victim traffic (B2). Victim correlation is the aggregator's same_ip signal, so they're
     # deliberately NOT added here.
     return indicators
-
-
-def _norm_host(host: str) -> str:
-    """Lowercase, strip a trailing dot and a leading `www.` so the `www.`-prefixed memory copy of
-    a host and the bare form seen in a pcap collapse to one key (mirrors
-    evidence_aggregator._normalize_host)."""
-    host = host.strip().rstrip(".").lower()
-    return host[len("www."):] if host.startswith("www.") else host
 
 
 def _corroborated_hosts(items: list[dict]) -> set[str]:

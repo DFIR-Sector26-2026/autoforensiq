@@ -115,10 +115,10 @@ export default function Overview() {
                   outerRadius={110}
                 >
 
-                  {severityData.map((entry, index) => (
+                  {severityData.map((entry) => (
 
                     <Cell
-                      key={index}
+                      key={entry.name}
                       fill={SEVERITY_HEX[entry.name.toLowerCase()]}
                     />
 

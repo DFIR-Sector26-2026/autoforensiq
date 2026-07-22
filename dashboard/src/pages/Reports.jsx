@@ -42,8 +42,8 @@ function List({ title, items, tone }) {
 
       {items && items.length > 0 ? (
         <ul className="space-y-1">
-          {items.map((it, i) => (
-            <li key={i} className={`text-sm ${tone}`}>• {humanize(it)}</li>
+          {items.map((it) => (
+            <li key={it} className={`text-sm ${tone}`}>• {humanize(it)}</li>
           ))}
         </ul>
       ) : (

@@ -1,6 +1,4 @@
-// ATT&CK Enterprise matrix (tactics × techniques) for Mitre.jsx, extracted from the
-// attack-stix-data bundle 2026-06-26; regenerate if ATT&CK updates.
-export default [
+[
   {
     "tactic": "Reconnaissance",
     "techniques": [
@@ -1092,4 +1090,4 @@ export default [
       }
     ]
   }
-];
+]

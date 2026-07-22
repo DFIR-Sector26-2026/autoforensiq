@@ -2,7 +2,8 @@ import { useMemo } from "react";
 
 import useEvidence from "../hooks/useEvidence";
 
-import ATTACK_MATRIX from "../data/attackMatrix";
+// ATT&CK Enterprise matrix (attack-stix-data bundle 2026-06-26); regenerate if ATT&CK updates.
+import ATTACK_MATRIX from "../data/attackMatrix.json";
 
 export default function Mitre() {
 

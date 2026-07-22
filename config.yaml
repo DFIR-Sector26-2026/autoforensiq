@@ -7,10 +7,10 @@ llm:
   provider: "anthropic"
 
   # Model to use per provider (same lists the GUI offers).
-  # Anthropic options: "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-7"
+  # Anthropic options: "claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-opus-4-8"
   # OpenAI options:    "gpt-4o", "gpt-4o-mini", "gpt-4-turbo"
   # DeepSeek options:  "deepseek-chat", "deepseek-reasoner"
-  anthropic_model: "claude-sonnet-4-6"
+  anthropic_model: "claude-sonnet-5"
   openai_model: "gpt-4o"
   deepseek_model: "deepseek-chat"
 

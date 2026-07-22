@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime, timezone
 
-AUDIT_LOG_PATH = "output/audit_log.json"
+AUDIT_LOG_PATH = "output/audit_log.jsonl"
 
 # Hash cache keyed by (path, size, mtime) — the evidence image was re-hashed for every plugin
 # subprocess (review 4.1). Chain-of-custody holds: each distinct file state is hashed once.
@@ -36,17 +36,9 @@ def log_action(tool_name: str, command: list, input_files: list,
         "output_hashes": {f: sha256_file(f) for f in output_files}
     }
 
-    existing = []
-    if os.path.exists(AUDIT_LOG_PATH):
-        with open(AUDIT_LOG_PATH, "r") as f:
-            try:
-                existing = json.load(f)
-            except json.JSONDecodeError:
-                existing = []
-
-    existing.append(entry)
-
-    with open(AUDIT_LOG_PATH, "w") as f:
-        json.dump(existing, f, indent=2)
+    # JSONL append: the old read-whole-array-and-rewrite made every log O(file) and could lose the
+    # chain-of-custody file on a mid-write crash (review-2 F6).
+    with open(AUDIT_LOG_PATH, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
     print(f"  [AUDIT] {tool_name} → {status}")

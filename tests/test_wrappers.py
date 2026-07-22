@@ -94,6 +94,21 @@ def test_parse_fls_skips_directory_nodes():
     assert not any(v.rstrip().endswith("/Windows/Temp") for v in values)
 
 
+def test_parse_fls_carries_body_timestamps():
+    # F4b: fls -m body lines carry atime|mtime|ctime|crtime epochs (fields 7-10) that were
+    # silently dropped, leaving every file_artifact timestamp-less. mtime is preferred,
+    # crtime is the fallback, and epoch "0" (unknown) must NOT become 1970-01-01.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    body = "\n".join([
+        "0|/Windows/Temp/a.exe|1|r/rrwxrwxrwx|0|0|42|1674733000|1674734000|0|1674732000",
+        "0|/Windows/Temp/b.exe|2|r/rrwxrwxrwx|0|0|42|0|0|0|1674735000",
+        "0|/Windows/Temp/c.exe|3|r/rrwxrwxrwx|0|0|42|0|0|0|0",
+    ])
+    ts = {i["value"].rsplit("/", 1)[-1]: i["timestamp"]
+          for i in TSKWrapper()._parse_fls_lines(body)}
+    assert ts == {"a.exe": "1674734000", "b.exe": "1674735000", "c.exe": ""}
+
+
 def test_parse_fls_surfaces_powershell_transcripts_as_low():
     # B-6/B-7 (N5): transcript files are emitted as LOW file artifacts so they
     # become visible/correlatable — never higher, since transcription is often
@@ -949,15 +964,18 @@ def test_extract_strings_denoises_prefetch_and_email():
 # Audit log
 # ─────────────────────────────────────────────────────────────
 
-def test_audit_log_creates_entry(tmp_path):
+def test_audit_log_appends_jsonl_entries(tmp_path):
+    # F6: one JSON object per line, append-only — a second action must not rewrite the first.
     import src.utils.audit_log as al
-    al.AUDIT_LOG_PATH = str(tmp_path / "audit_log.json")
+    al.AUDIT_LOG_PATH = str(tmp_path / "audit_log.jsonl")
     log_action("test_tool", ["echo", "hi"], [], [], "success")
+    log_action("test_tool", ["echo", "bye"], [], [], "failed")
     with open(al.AUDIT_LOG_PATH) as f:
-        entries = json.load(f)
-    assert len(entries) == 1
+        entries = [json.loads(line) for line in f]
+    assert len(entries) == 2
     assert entries[0]["tool"] == "test_tool"
     assert entries[0]["status"] == "success"
+    assert entries[1]["status"] == "failed"
 
 
 def test_sha256_missing_file():
