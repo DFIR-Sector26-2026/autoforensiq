@@ -14,8 +14,7 @@ def stable_artifact_id(prefix: str, *parts: str) -> str:
 
 
 class BaseWrapper:
-    # The evidence_files key this tool consumes (D2); the orchestrator reads it to pick the tool's
-    # artifact. Subclasses override; None = no evidence type.
+    # The evidence_files key(s) this tool consumes (D2) — a str or tuple of alternatives
     consumes = None
 
     def __init__(self, tool_name: str):

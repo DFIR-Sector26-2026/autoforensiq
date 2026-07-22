@@ -1243,8 +1243,7 @@ def _build_evidence_coverage(tools_ran, evidence_items=None):
 
     covered = {}
     for t in tools_ran:
-        ev = _TOOL_TO_EVIDENCE.get(t)
-        if ev:
+        for ev in _TOOL_TO_EVIDENCE.get(t, ()):
             covered.setdefault(ev, []).append(t)
     rows = [
         "| Evidence Type | Status | Forensic Tool | Notes |",

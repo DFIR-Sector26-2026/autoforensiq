@@ -32,7 +32,7 @@ _EXT_MAP: dict[str, str] = {
     ".img": "disk_image", ".dd": "disk_image", ".e01": "disk_image", ".dmg": "disk_image",
     ".dat": "registry_hive", ".hiv": "registry_hive",
     ".eml": "email_archive", ".msg": "email_archive",
-    ".log": "log_files", ".evtx": "log_files",
+    ".log": "text_log", ".evtx": "log_files",
 }
 
 # Artifact type → evidence-dialog filter label, in display order.
@@ -41,7 +41,8 @@ _TYPE_LABELS = [
     ("pcap",          "PCAP"),
     ("disk_image",    "Disk images"),
     ("registry_hive", "Registry hives"),
-    ("log_files",     "Log files"),
+    ("log_files",     "Event logs"),
+    ("text_log",      "Text logs"),
     ("email_archive", "Email"),
 ]
 

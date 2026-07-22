@@ -415,9 +415,11 @@ def _map_evidence_files(paths: list):
         elif "history" in lower:
             _add("browser", path)
 
-        # LOGS
-        elif ext in [".log", ".evtx"]:
+        # LOGS: .log typed separately from .evtx
+        elif ext == ".evtx":
             _add("log_files", path)
+        elif ext == ".log":
+            _add("text_log", path)
 
     return mapping
 
@@ -446,6 +448,7 @@ from src.orchestrator import TOOL_EVIDENCE_MAP as _TOOL_EVIDENCE_MAP
 
 _TOOL_DISPLAY = {
     "volatility3": "Volatility3       (memory analysis)",
+    "memprocfs":   "MemProcFS         (memory analysis)",
     "tshark":      "tshark            (network capture analysis)",
     "tsk_fls":     "The Sleuth Kit    (disk image analysis)",
     "regripper":   "RegRipper         (registry hive analysis)",
@@ -478,11 +481,11 @@ def preflight_check(evidence_files: dict, execution_plan: dict):
     will_skip = []
 
     for tool in tools_in_plan:
-        required_ev = _TOOL_EVIDENCE_MAP.get(tool)
-        if required_ev is None or required_ev in evidence_files:
+        required = _TOOL_EVIDENCE_MAP.get(tool, ())
+        if not required or any(ev in evidence_files for ev in required):
             will_run.append(tool)
         else:
-            will_skip.append((tool, required_ev))
+            will_skip.append((tool, required))
 
     if will_run:
         print("  Tools that WILL run:")
@@ -492,11 +495,21 @@ def preflight_check(evidence_files: dict, execution_plan: dict):
 
     if will_skip:
         print("  Tools that will be SKIPPED (evidence not provided):")
-        for t, ev in will_skip:
+        for t, required in will_skip:
             label = _TOOL_DISPLAY.get(t, t)
-            hint  = _ACQUIRE_HINT.get(ev, f"Provide a '{ev}' artifact to enable this tool.")
             print(f"    [--]  {label}")
-            print(f"          Hint: {hint}")
+            for ev in required:
+                hint = _ACQUIRE_HINT.get(ev, f"Provide a '{ev}' artifact to enable this tool.")
+                print(f"          Hint: {hint}")
+
+    # Evidence nobody in the plan consumes would otherwise vanish without a trace
+    consumed = {ev for t in will_run for ev in _TOOL_EVIDENCE_MAP.get(t, ())}
+    for key, paths in evidence_files.items():
+        if key in consumed:
+            continue
+        for p in paths:
+            print(f"  [WARN] {Path(p).name}: no planned tool consumes this evidence ({key}) — "
+                  "it will not be analysed.")
 
     # VMware snapshot memory without its .vmss/.vmsn sidecar: MemProcFS carries the analysis instead of volatility
     for mem in evidence_files.get("memory_dump", []):

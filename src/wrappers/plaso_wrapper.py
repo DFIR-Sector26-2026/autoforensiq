@@ -39,9 +39,8 @@ SUSPICIOUS_SOURCES = [
 ROUTINE_SAMPLE_CAP = 150
 
 class PlasoWrapper(BaseWrapper):
-    # The orchestrator feeds plaso the disk image; display layers formerly mislabelled it log_files
-    # (D2).
-    consumes = "disk_image"
+    # Timelines a disk image, or event logs directly 
+    consumes = ("disk_image", "log_files")
 
     def __init__(self):
         super().__init__("plaso")

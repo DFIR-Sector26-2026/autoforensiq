@@ -25,10 +25,9 @@ WRAPPER_MAP = {
 }
 
 
-# Single source of truth for "which evidence type each tool consumes" (D2), derived from each
-# wrapper's `consumes` — pre-flight and the report import it.
+# Single source of truth for "which evidence type each tool consumes" 
 TOOL_EVIDENCE_MAP = {
-    name: cls.consumes
+    name: cls.consumes if isinstance(cls.consumes, tuple) else (cls.consumes,)
     for name, cls in WRAPPER_MAP.items()
     if cls.consumes is not None
 }
@@ -54,17 +53,17 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
         wrapper = WRAPPER_MAP[name]()
 
-        # Each wrapper declares the evidence key it consumes (D2) — one lookup instead of a per-tool
-        # if/elif ladder. One evidence type may carry several artifacts, so normalise to a list and
-        # run the tool on each.
-        evidence_path = evidence_files.get(wrapper.consumes)
+        # Each wrapper declares the evidence key(s) it consumes 
+        evidence_paths = []
+        for key in TOOL_EVIDENCE_MAP.get(name, ()):
+            paths = evidence_files.get(key)
+            if paths:
+                evidence_paths.extend(paths if isinstance(paths, list) else [paths])
 
-        if not evidence_path:
+        if not evidence_paths:
             print(f"  [SKIP] No evidence file provided for {name}")
             all_raw_outputs[name] = []
             continue
-
-        evidence_paths = evidence_path if isinstance(evidence_path, list) else [evidence_path]
 
         items = []
         for path in evidence_paths:

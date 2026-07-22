@@ -137,7 +137,7 @@
     {
       "name": "plaso",
       "domains": ["timeline"],
-      "input_types": ["disk_image", "evidence_directory"],
+      "input_types": ["disk_image", "log_files", "evidence_directory"],
       "output_types": ["timeline_event"],
       "case_relevance": {
         "ransomware": 0.8,

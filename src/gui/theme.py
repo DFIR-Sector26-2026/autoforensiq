@@ -20,6 +20,7 @@ ARTIFACT_BADGES: dict[str, dict] = {
     "disk_image":      {"bg": "#3a2a1c", "fg": "#d29922", "label": "Disk Image"},
     "registry_hive":   {"bg": "#3a1c2a", "fg": "#f778ba", "label": "Registry Hive"},
     "log_files":       {"bg": "#2a1c3a", "fg": "#bc8cff", "label": "Log Files"},
+    "text_log":        {"bg": "#2f3a1c", "fg": "#b3cc57", "label": "Text Log"},
     "email_archive":   {"bg": "#3a3a1c", "fg": "#e3b341", "label": "Email Archive"},
     "browser_history": {"bg": "#1c3a3a", "fg": "#39d0d8", "label": "Browser History"},
     "unknown":         {"bg": "#2d2d2d", "fg": "#8b949e", "label": "Unknown"},
