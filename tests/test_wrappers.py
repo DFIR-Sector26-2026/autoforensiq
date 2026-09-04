@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import pytest
 from src.utils.audit_log import sha256_file, log_action
@@ -1018,8 +1019,11 @@ def test_make_evidence_item_linked_artifacts_are_independent():
 
 
 def test_base_wrapper_run_command_success():
+    # `echo` is a shell builtin on Windows (no standalone echo.exe), so run_command
+    # (which invokes subprocess.run without shell=True) can't find it there. Use the
+    # running interpreter itself — a real executable on every platform — instead.
     w = BaseWrapper("echo_test")
-    stdout, stderr, code = w.run_command(["echo", "hello"])
+    stdout, stderr, code = w.run_command([sys.executable, "-c", "print('hello')"])
     assert code == 0
     assert "hello" in stdout
 

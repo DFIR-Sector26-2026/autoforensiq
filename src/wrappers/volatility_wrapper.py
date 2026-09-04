@@ -363,15 +363,22 @@ class VolatilityWrapper(BaseWrapper):
         isn't on PATH under `venv/bin/python autoforensiq.py`, D1), then the CWD-relative path
         pre-flight probes, then PATH."""
         candidates = []
+        venv_dir = os.path.dirname(sys.executable)
 
-        venv_vol = os.path.join(os.path.dirname(sys.executable), "vol")
-        if os.path.exists(venv_vol):
-            candidates.append([venv_vol])
+        # pip installs a `vol.exe` launcher on Windows (venv's Scripts/), and a bare `vol`
+        # script on Linux/macOS (venv's bin/) — check both names against the interpreter's
+        # own directory.
+        for name in ("vol", "vol.exe"):
+            venv_vol = os.path.join(venv_dir, name)
+            if os.path.exists(venv_vol):
+                candidates.append([venv_vol])
+                break
 
         # CWD-relative shim — the exact path the pre-flight check probes.
-        cwd_vol = os.path.join("venv", "bin", "vol")
-        if os.path.exists(cwd_vol):
-            candidates.append([os.path.join(".", "venv", "bin", "vol")])
+        for subdir, name in (("bin", "vol"), ("Scripts", "vol.exe")):
+            cwd_vol = os.path.join("venv", subdir, name)
+            if os.path.exists(cwd_vol):
+                candidates.append([os.path.join(".", "venv", subdir, name)])
 
         # Fallbacks for installs where Volatility is globally available.
         candidates.append(["vol"])

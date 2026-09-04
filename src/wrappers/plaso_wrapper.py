@@ -12,13 +12,16 @@ def _resolve_cmd(preferred: str, fallback: str) -> str:
     """Resolve a plaso console script (log2timeline.py / psort.py).
 
     venv/bin isn't on PATH under `venv/bin/python autoforensiq.py` (D1), so check
-    the interpreter's own bin dir first, then PATH, then the bare name."""
+    the interpreter's own bin dir first, then PATH, then the bare name. pip installs
+    a `<name>.exe` launcher on Windows rather than the bare/`.py` names, so probe
+    that too."""
     venv_bin = os.path.dirname(sys.executable)
-    for name in (preferred, fallback):
+    for name in (preferred, fallback, f"{fallback}.exe"):
         candidate = os.path.join(venv_bin, name)
         if os.path.exists(candidate):
             return candidate
-    return shutil.which(preferred) or shutil.which(fallback) or fallback
+    return (shutil.which(preferred) or shutil.which(fallback)
+            or shutil.which(f"{fallback}.exe") or fallback)
 
 
 LOG2TIMELINE = _resolve_cmd("log2timeline.py", "log2timeline")
@@ -148,8 +151,9 @@ class PlasoWrapper(BaseWrapper):
         routine_seen = set()
 
         # evtx "Strings" blobs exceed csv's 128 KB field limit; the csv.Error silently truncated the
-        # dev01 CSV at ~row 360k of 633k.
-        csv.field_size_limit(sys.maxsize)
+        # dev01 CSV at ~row 360k of 633k. sys.maxsize overflows the C long backing this on Windows
+        # (32-bit long even on 64-bit builds), so cap at C long's max instead.
+        csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 
         try:
             p = Path(csv_path)

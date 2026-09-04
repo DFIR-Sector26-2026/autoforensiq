@@ -626,7 +626,10 @@ class AutoForensiqGUI(ctk.CTk):
         spawn vite as a child that survives terminate(), orphaning the server."""
         url = "http://localhost:5173"
         dash_dir = ROOT_DIR / "dashboard"
-        vite_bin = dash_dir / "node_modules" / ".bin" / "vite"
+        # Windows has no executable-bit shebang script, only vite.cmd/vite.ps1 in .bin/ —
+        # a bare "vite" there is a POSIX shell script that CreateProcess can't launch.
+        vite_name = "vite.cmd" if sys.platform == "win32" else "vite"
+        vite_bin = dash_dir / "node_modules" / ".bin" / vite_name
 
         if not vite_bin.exists():
             self._console_write(
