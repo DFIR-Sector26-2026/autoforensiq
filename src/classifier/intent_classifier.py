@@ -377,6 +377,9 @@ def classify_file(report_path: str, output_path: str = None,
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    from src.utils.encoding import ensure_utf8_stdio
+    ensure_utf8_stdio()
+
     if len(sys.argv) < 2:
         print("Usage: python -m src.classifier.intent_classifier <path/to/incident_report.txt>")
         print("       python -m src.classifier.intent_classifier <path/to/incident_report.txt> <output/case_context.json>")

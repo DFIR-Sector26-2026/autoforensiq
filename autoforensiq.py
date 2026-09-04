@@ -14,6 +14,9 @@ ROOT_DIR = Path(__file__).resolve().parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from src.utils.encoding import ensure_utf8_stdio
+ensure_utf8_stdio()
+
 
 # Helpers
 
