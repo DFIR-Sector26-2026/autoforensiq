@@ -14,7 +14,12 @@ def _resolve_regripper_path() -> str | None:
     for candidate in candidate_paths:
         if not candidate:
             continue
-        resolved = os.path.expanduser(candidate)
+        # expanduser() substitutes ~ with the (backslash-separated) home dir but leaves the
+        # literal "/"s in these candidates untouched, producing a mixed-separator path like
+        # "C:\Users\name/RegRipper3.0/rip.pl". Perl can open that fine, but RegRipper derives its
+        # own plugins/ directory from this path with naive backslash-only parsing, so it silently
+        # resolves to the wrong directory and every plugin lookup fails. normpath() fixes it.
+        resolved = os.path.normpath(os.path.expanduser(candidate))
         if os.path.exists(resolved):
             return resolved
     return None
