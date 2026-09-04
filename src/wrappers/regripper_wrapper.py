@@ -45,15 +45,22 @@ class RegRipperWrapper(BaseWrapper):
             return []
 
         all_items = []
-        all_items.extend(self._run_plugin(hive_path, "ntuser", regripper_path))
+        # "ntuser" is a RegRipper *profile* (a curated list of ~100+ plugins for NTUSER.DAT-type
+        # hives), not a plugin itself — `-p ntuser` always fails with "plugins\ntuser.pl not
+        # found" and silently returns 0 items. Run it as a profile via `-f` instead.
+        all_items.extend(self._run_plugin(hive_path, "ntuser", regripper_path, use_profile=True))
         all_items.extend(self._run_plugin(hive_path, "run", regripper_path))
-        all_items.extend(self._run_plugin(hive_path, "autoruns", regripper_path))
+        # "autoruns" was never a real plugin in RegRipper3.0 either — "services" is a genuine
+        # plugin covering another persistence vector already named in SUSPICIOUS_KEYS.
+        all_items.extend(self._run_plugin(hive_path, "services", regripper_path))
         return all_items
 
-    def _run_plugin(self, hive_path: str, plugin: str, regripper_path: str) -> list:
-        print(f"  [REGRIP] Running plugin: {plugin}...")
+    def _run_plugin(self, hive_path: str, plugin: str, regripper_path: str,
+                    use_profile: bool = False) -> list:
+        print(f"  [REGRIP] Running {'profile' if use_profile else 'plugin'}: {plugin}...")
+        flag = "-f" if use_profile else "-p"
         stdout, _, code = self.run_command(
-            ["perl", regripper_path, "-r", hive_path, "-p", plugin],
+            ["perl", regripper_path, "-r", hive_path, flag, plugin],
             input_files=[hive_path],
             timeout=60
         )
