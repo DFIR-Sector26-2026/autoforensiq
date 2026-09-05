@@ -1544,3 +1544,89 @@ def test_epoch_to_iso_conversion_and_passthrough():
     assert _epoch_to_iso("1781000001.005") == "2026-06-09T10:13:21Z"
     assert _epoch_to_iso("") == ""            # missing stays empty
     assert _epoch_to_iso("not-a-number") == "not-a-number"  # unparseable passes through
+
+
+# ─────────────────────────────────────────────────────────────
+# Transferred-file recovery via --export-objects
+# ─────────────────────────────────────────────────────────────
+
+def test_transferred_files_recovers_and_classifies_by_extension(monkeypatch, tmp_path):
+    # http.file_data string-sweeping explicitly skips binary bodies, so a real exfiltrated/
+    # delivered file was never reconstructed anywhere. --export-objects carves it out to disk;
+    # the wrapper must classify it by extension and hash it.
+    w = TsharkWrapper()
+
+    def fake_run_command(cmd, **k):
+        # cmd looks like [..., "--export-objects", "<protocol>,<out_dir>"]
+        spec = cmd[cmd.index("--export-objects") + 1]
+        protocol, out_dir = spec.split(",", 1)
+        if protocol == "http":
+            with open(os.path.join(out_dir, "invoice.exe"), "wb") as f:
+                f.write(b"MZ fake pe header payload")
+            with open(os.path.join(out_dir, "readme.txt"), "wb") as f:
+                f.write(b"just a text file")
+        return "", "", 0
+
+    monkeypatch.setattr(w, "run_command", fake_run_command)
+
+    items = w._get_transferred_files("x.pcap")
+    by_name = {}
+    for i in items:
+        for fname in ("invoice.exe", "readme.txt"):
+            if fname in i["value"]:
+                by_name[fname] = i
+
+    assert set(by_name) == {"invoice.exe", "readme.txt"}
+    assert by_name["invoice.exe"]["severity"] == "high"      # executable extension
+    assert by_name["readme.txt"]["severity"] == "medium"     # ordinary file
+    assert by_name["invoice.exe"]["evidence_type"] == "transferred_file"
+    assert "SHA256" in by_name["invoice.exe"]["value"]
+    assert "HTTP" in by_name["invoice.exe"]["value"]
+
+
+def test_transferred_files_flags_ransomware_extension_critical(monkeypatch):
+    w = TsharkWrapper()
+
+    def fake_run_command(cmd, **k):
+        spec = cmd[cmd.index("--export-objects") + 1]
+        protocol, out_dir = spec.split(",", 1)
+        if protocol == "smb":
+            with open(os.path.join(out_dir, "budget.xlsx.locked"), "wb") as f:
+                f.write(b"encrypted-looking bytes")
+        return "", "", 0
+
+    monkeypatch.setattr(w, "run_command", fake_run_command)
+
+    items = w._get_transferred_files("x.pcap")
+    assert len(items) == 1
+    assert items[0]["severity"] == "critical"
+    assert "SMB" in items[0]["value"]
+
+
+def test_transferred_files_none_when_export_fails(monkeypatch):
+    w = TsharkWrapper()
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: ("", "no such protocol", 1))
+    assert w._get_transferred_files("x.pcap") == []
+
+
+def test_transferred_files_groups_byte_identical_repeats(monkeypatch):
+    # A scanner probing the same endpoint (or a repeated heartbeat body) can export the same
+    # object dozens of times — those must collapse into one item with an observation count,
+    # not one near-duplicate finding per instance.
+    w = TsharkWrapper()
+
+    def fake_run_command(cmd, **k):
+        spec = cmd[cmd.index("--export-objects") + 1]
+        protocol, out_dir = spec.split(",", 1)
+        if protocol == "http":
+            for i in range(5):
+                name = "%5c" if i == 0 else f"%5c({i})"
+                with open(os.path.join(out_dir, name), "wb") as f:
+                    f.write(b"same 404 page every time")
+        return "", "", 0
+
+    monkeypatch.setattr(w, "run_command", fake_run_command)
+
+    items = w._get_transferred_files("x.pcap")
+    assert len(items) == 1
+    assert "seen 5x" in items[0]["value"]

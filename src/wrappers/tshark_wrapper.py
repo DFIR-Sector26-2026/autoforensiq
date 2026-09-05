@@ -2,12 +2,15 @@ import os
 import re
 import json
 import math
+import shutil
 import statistics
+import tempfile
 from collections import Counter
 from datetime import datetime, timezone
 from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
 from src.data.threat_intel import (
     C2_PORTS_ALL, c2_port_severity, is_allowlisted_dns, is_lan_ipv4,
+    EXECUTABLE_EXTENSIONS, RANSOM_EXTENSIONS,
 )
 import hashlib
 
@@ -80,7 +83,75 @@ class TsharkWrapper(BaseWrapper):
         all_items.extend(self._get_host_identities(pcap_path))
         all_items.extend(self._get_suspicious_ports(pcap_path))
         all_items.extend(self._get_beacon_patterns(pcap_path))
+        all_items.extend(self._get_transferred_files(pcap_path))
         return all_items
+
+    def _get_transferred_files(self, pcap_path: str) -> list:
+        """Recover the actual files carried over HTTP/SMB — data exfiltration and malware delivery
+        both move real files, and http.file_data string-sweeping (_get_http_bodies) never
+        reconstructs them since it explicitly skips binary content. tshark's own --export-objects
+        carves each transferred object out to disk exactly as the client/server exchanged it.
+
+        A repeated request/response (a scanner probing the same endpoint, a heartbeat body) can
+        export the byte-identical object dozens of times; those are grouped by content hash into
+        one item with an observation count instead of one near-duplicate finding per instance."""
+        print("  [TSHARK] Extracting transferred files...")
+        # (protocol, sha256) -> {fname, size, protocol, count}
+        by_hash: dict[tuple, dict] = {}
+        for protocol in ("http", "smb"):
+            out_dir = tempfile.mkdtemp(prefix=f"tshark_objects_{protocol}_")
+            try:
+                _, _, code = self.run_command([
+                    "tshark", "-r", pcap_path,
+                    "--export-objects", f"{protocol},{out_dir}",
+                ], input_files=[pcap_path], timeout=120)
+                if code != 0:
+                    continue
+                for fname in sorted(os.listdir(out_dir)):
+                    fpath = os.path.join(out_dir, fname)
+                    if not os.path.isfile(fpath):
+                        continue
+                    size = os.path.getsize(fpath)
+                    with open(fpath, "rb") as f:
+                        sha256 = hashlib.sha256(f.read()).hexdigest()
+                    key = (protocol, sha256)
+                    rec = by_hash.get(key)
+                    if rec is None:
+                        by_hash[key] = {"fname": fname, "size": size,
+                                        "protocol": protocol, "sha256": sha256, "count": 1}
+                    else:
+                        rec["count"] += 1
+            finally:
+                shutil.rmtree(out_dir, ignore_errors=True)
+
+        items = [self._transferred_file_item(rec) for rec in by_hash.values()]
+        print(f"  [TSHARK] Transferred files → {len(items)} distinct file(s) recovered")
+        return items
+
+    def _transferred_file_item(self, rec: dict) -> dict:
+        fname, size, protocol, sha256, count = (
+            rec["fname"], rec["size"], rec["protocol"], rec["sha256"], rec["count"]
+        )
+        ext = os.path.splitext(fname)[1].lower()
+
+        if ext in RANSOM_EXTENSIONS:
+            severity, confidence = "critical", 0.90
+        elif ext in EXECUTABLE_EXTENSIONS:
+            severity, confidence = "high", 0.85
+        else:
+            severity, confidence = "medium", 0.60
+
+        seen = f", seen {count}x" if count > 1 else ""
+        return self.make_evidence_item(
+            artifact_id=stable_artifact_id("transferred_file", protocol, sha256),
+            evidence_type="transferred_file",
+            value=(
+                f"File transferred via {protocol.upper()}: {fname} "
+                f"({size:,} bytes, SHA256 {sha256[:16]}…{seen})"
+            ),
+            severity=severity,
+            confidence=confidence,
+        )
 
     def _get_beacon_patterns(self, pcap_path: str) -> list:
         """Catalog-free C2 heuristic (BUGS 2.3): flag flows whose TCP session initiations (bare
