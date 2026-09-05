@@ -1000,8 +1000,9 @@ def _build_process_tree(evidence_items, anomaly_ids, tool_sources=None):
     JSON), so the hierarchy is rebuilt from the flat ``process`` /
     ``memprocfs_process`` items — each carries PID/PPID and the IOC-rescored
     severity — linked child->parent by PPID. ``process_relation`` items mark
-    suspicious lineage. Only flagged processes and the parent chain that anchors
-    them are shown, with a severity word and the source evidence file per row.
+    suspicious lineage. The full tree is shown (capped at _TREE_ROW_CAP rows),
+    with a severity word per row so flagged lineages stand out without hiding
+    the benign processes an investigator would want the full context of.
     """
     tool_sources = tool_sources or {}
     items = [e for e in evidence_items if isinstance(e, dict)]
@@ -1097,29 +1098,10 @@ def _build_process_tree(evidence_items, anomaly_ids, tool_sources=None):
         if not nodes[pid]["ppid"] or nodes[pid]["ppid"] not in nodes
     )
 
-    # 3) Keep only flagged processes and the ancestor chain that anchors them, so
-    #    benign noise drops out while the lineage to a malicious process stays.
-    def _is_flagged(node):
-        return (node["severity"] in ("critical", "high")
-                or node["suspicious"]
-                or node["aid"] in anomaly_ids
-                or bool(node["ioc_match"]))
-
-    keep: set = set()
-    for pid, node in nodes.items():
-        if not _is_flagged(node):
-            continue
-        keep.add(pid)
-        cur = node["ppid"]            # walk ancestors (bounded to guard cycles)
-        seen = 0
-        while cur in nodes and cur not in keep and seen < len(nodes):
-            keep.add(cur)
-            cur = nodes[cur]["ppid"]
-            seen += 1
-
-    if not keep:
-        return (f"_No flagged processes — {len(nodes)} process(es) captured "
-                "(see output/unified_evidence.json)._")
+    # Show the full tree — every captured process, not just flagged lineages — so an
+    # investigator gets the same complete picture the dashboard already shows. Each row's
+    # severity word still makes flagged processes stand out at a glance.
+    keep: set = set(nodes.keys())
 
     lines: list = []
     emitted: set = set()
@@ -1155,7 +1137,7 @@ def _build_process_tree(evidence_items, anomaly_ids, tool_sources=None):
         _emit(pid)
 
     if len(keep) > len(emitted):
-        lines.append(f"  …  ({len(keep)} flagged/anchor processes; output truncated)")
+        lines.append(f"  …  ({len(keep)} processes captured; output truncated at {_TREE_ROW_CAP} rows)")
     return "\n".join(lines)
 
 

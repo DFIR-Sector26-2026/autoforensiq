@@ -1,8 +1,8 @@
 """Tests for report table rendering robustness under multi-tool input.
 
-Covers the Process Tree builder (flat-item PID/PPID hierarchy, prune-to-flagged,
-severity + source-file rendering, no cross-type leakage) and the markdown cell
-sanitizer used by the IOC / MITRE / Critical Findings tables.
+Covers the Process Tree builder (flat-item PID/PPID hierarchy, full-tree
+rendering, severity + source-file rendering, no cross-type leakage) and the
+markdown cell sanitizer used by the IOC / MITRE / Critical Findings tables.
 """
 
 import json
@@ -96,7 +96,9 @@ def test_process_tree_hierarchy_severity_and_source_file():
     assert "memdump.raw" in child
 
 
-def test_process_tree_prunes_benign_keeps_ancestors():
+def test_process_tree_shows_full_tree_including_benign():
+    # The report shows the same complete tree the dashboard does — benign siblings
+    # of a flagged process stay in, distinguished only by their severity word.
     items = [
         _proc(1636, 1608, "explorer.exe", severity="low"),
         _proc(1940, 1636, "tasksche.exe", severity="critical"),
@@ -104,11 +106,11 @@ def test_process_tree_prunes_benign_keeps_ancestors():
     ]
     tree = _build_process_tree(items, anomaly_ids=set())
     assert "tasksche.exe" in tree     # flagged
-    assert "explorer.exe" in tree     # ancestor of a flagged node -> kept
-    assert "notepad.exe" not in tree  # benign, no flagged descendant -> pruned
+    assert "explorer.exe" in tree     # ancestor
+    assert "notepad.exe" in tree      # benign sibling — full tree, not pruned
 
 
-def test_process_relation_flags_low_severity_child():
+def test_process_relation_shown_alongside_full_tree():
     items = [
         _proc(1636, 1608, "explorer.exe", severity="low"),
         _proc(1900, 1636, "winword.exe", severity="low"),
@@ -120,18 +122,21 @@ def test_process_relation_flags_low_severity_child():
          "linked_artifacts": ["proc_1900", "proc_2000"]},
     ]
     tree = _build_process_tree(items, anomaly_ids=set())
-    assert "powershell.exe" in tree  # flagged via process_relation despite low sev
-    assert "winword.exe" in tree     # ancestor kept
-    assert "calc.exe" not in tree    # unrelated benign pruned
+    assert "powershell.exe" in tree  # flagged via process_relation
+    assert "winword.exe" in tree     # ancestor
+    assert "calc.exe" in tree        # unrelated benign — full tree, not pruned
 
 
-def test_process_tree_no_flagged_processes_sentinel():
+def test_process_tree_shows_all_processes_even_when_none_flagged():
+    # No dedicated "nothing flagged" sentinel any more — the full tree renders
+    # regardless, since an investigator wants the complete picture either way.
     items = [
         _proc(1636, 1608, "explorer.exe", severity="low"),
         _proc(5000, 1636, "notepad.exe", severity="low"),
     ]
     out = _build_process_tree(items, anomaly_ids=set())
-    assert out.startswith("_No flagged processes")
+    assert "explorer.exe" in out
+    assert "notepad.exe" in out
 
 
 def test_extract_iocs_skips_aggregate_process_items():
@@ -403,15 +408,14 @@ def test_process_tree_empty_when_no_processes():
 
 def test_process_tree_raises_severity_on_repeat_observation():
     # Same PID seen first as low (e.g. pslist) then high (IOC-rescored copy).
-    # The merge must keep the highest severity so the process stays flagged and
-    # is not pruned out of the tree.
+    # The merge must keep the highest severity, not the first-seen value.
     items = [
         _proc(1940, 1636, "tasksche.exe", severity="low"),
         _proc(1940, 1636, "tasksche.exe", severity="high",
               ioc_match=["wannacry_dropper"]),
     ]
     tree = _build_process_tree(items, anomaly_ids=set())
-    assert "tasksche.exe" in tree     # survives the prune-to-flagged step
+    assert "tasksche.exe" in tree
     assert "HIGH" in tree             # highest severity wins, not first-seen low
 
 
