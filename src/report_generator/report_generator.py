@@ -1723,6 +1723,82 @@ def _build_dashboard_summary(unified_evidence, case_context, shap_explanations):
 # MAIN PUBLIC FUNCTION
 # ─────────────────────────────────────────────────────────────
 
+def _build_per_file_reports(unified_evidence, case_context) -> dict[str, str]:
+    """One short, standalone report per evidence file, alongside the case-wide final_report.md.
+
+    Evidence items only carry which tool produced them, not a literal source-file field (adding
+    one would mean touching every wrapper's make_evidence_item() call site) — but in this
+    pipeline's actual usage, each tool is run against exactly one file per case, and
+    case_context["evidence_sources"] (built in autoforensiq.py) already maps tool -> that file's
+    name. Grouping by tool and labelling with that filename gives a genuine per-file report for
+    the common case, without an invasive schema change across every wrapper. Returns
+    {safe_filename_stem: markdown_text}.
+    """
+    tool_sources = case_context.get("evidence_sources", {})
+    all_items = [e for e in unified_evidence.get("evidence_items", []) if isinstance(e, dict)]
+
+    by_tool: dict[str, list] = {}
+    for item in all_items:
+        tool = item.get("source_tool") or "unknown"
+        by_tool.setdefault(tool, []).append(item)
+
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    reports = {}
+
+    for tool, items in sorted(by_tool.items()):
+        source_file = tool_sources.get(tool) or "(source file not recorded)"
+        substantive = [i for i in items if i.get("evidence_type") not in _STATUS_EVIDENCE_TYPES]
+        overall_sev = _highest_severity(substantive) if substantive else "low"
+
+        by_sev = {}
+        for i in substantive:
+            sev = str(i.get("severity", "low")).lower()
+            by_sev[sev] = by_sev.get(sev, 0) + 1
+        sev_breakdown = ", ".join(
+            f"{by_sev[s]} {s}" for s in ("critical", "high", "medium", "low") if by_sev.get(s)
+        ) or "none"
+
+        lines = [
+            f"# {source_file} — {tool} Findings\n",
+            f"_Generated {generated}_\n",
+            f"| Field | Value |\n|-------|-------|\n"
+            f"| **Source File** | {_md_cell(source_file)} |\n"
+            f"| **Analysed By** | {_md_cell(tool)} |\n"
+            f"| **Total Items** | {len(items)} |\n"
+            f"| **Overall Severity** | **{overall_sev.upper()}** |\n",
+            f"By severity: {sev_breakdown}.\n",
+        ]
+
+        diagnostics = [i for i in items if i.get("evidence_type") == "evidence_diagnostic"]
+        if diagnostics:
+            lines.append("## File-Level Diagnosis\n")
+            for d in diagnostics:
+                lines.append(f"- ⚠ {_md_cell(d.get('value', ''))}")
+            lines.append("")
+
+        if substantive:
+            lines.append("## Findings\n")
+            rows = [
+                "| Evidence Type | Value | Severity | Confidence |",
+                "|---------------|-------|----------|------------|",
+            ]
+            for item in sorted(substantive, key=_finding_sort_key):
+                rows.append(
+                    f"| {_md_cell(item.get('evidence_type'))} "
+                    f"| {_md_cell(_truncate(item.get('value', ''), 140))} "
+                    f"| {_md_cell(str(item.get('severity', '')).upper())} "
+                    f"| {_format_percent(item.get('confidence'))} |"
+                )
+            lines.append("\n".join(rows) + "\n")
+        else:
+            lines.append("_No substantive findings from this file — see File-Level Diagnosis above if present._\n")
+
+        stem = re.sub(r"[^a-z0-9]+", "_", tool.lower()).strip("_") or "unknown"
+        reports[stem] = "\n".join(lines)
+
+    return reports
+
+
 def generate_report(
     unified_evidence,
     shap_explanations,
@@ -1806,5 +1882,18 @@ def generate_report(
         print(f"  [DONE] Dashboard data written -> {dash_path}")
     except Exception as exc:
         print(f"  [WARN] Dashboard data generation failed ({exc})")
+
+    # One standalone report per evidence file, alongside the case-wide final_report.md.
+    try:
+        per_file_reports = _build_per_file_reports(unified_evidence, case_context)
+        reports_dir = Path(output_path).parent / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        for stem, text in per_file_reports.items():
+            with open(reports_dir / f"{stem}_report.md", "w", encoding="utf-8") as f:
+                f.write(text)
+        if per_file_reports:
+            print(f"  [DONE] {len(per_file_reports)} per-file report(s) written -> {reports_dir}")
+    except Exception as exc:
+        print(f"  [WARN] Per-file report generation failed ({exc})")
 
     return report_text

@@ -22,6 +22,7 @@ from src.report_generator.report_generator import (
     _finding_sort_key,
     _indicators_cell,
     _item_indicators,
+    _build_per_file_reports,
     _md_cell,
     _mock_report,
     _parse_flat_pids,
@@ -855,3 +856,52 @@ def test_network_graph_external_node_keeps_worst_severity():
     g = _graph(items)
     by_id = {n["id"]: n for n in g["nodes"]}
     assert by_id["bad.tld"]["severity"] == "critical"
+
+
+# ─────────────────────────────────────────────────────────────
+# Per-evidence-file standalone reports
+# ─────────────────────────────────────────────────────────────
+
+def test_per_file_reports_split_by_tool_and_label_source_file():
+    unified_evidence = {"evidence_items": [
+        {"evidence_type": "http_request", "source_tool": "tshark",
+         "value": "HTTP 10.0.0.5 → evil.com/gate.php", "severity": "high",
+         "confidence": 0.8, "artifact_id": "http_1"},
+        {"evidence_type": "registry_entry", "source_tool": "regripper",
+         "value": "[run] Updater - C:\\Users\\Public\\svchost32.exe", "severity": "high",
+         "confidence": 0.8, "artifact_id": "reg_1"},
+    ]}
+    case_context = {"evidence_sources": {
+        "tshark": "capture.pcap", "regripper": "demo_ntuser_run.dat",
+    }}
+
+    reports = _build_per_file_reports(unified_evidence, case_context)
+
+    assert set(reports) == {"tshark", "regripper"}
+    assert "capture.pcap" in reports["tshark"]
+    assert "evil.com/gate.php" in reports["tshark"]
+    assert "demo_ntuser_run.dat" in reports["regripper"]
+    assert "Updater" in reports["regripper"]
+    # Each tool's report is self-contained — no cross-contamination between files.
+    assert "evil.com" not in reports["regripper"]
+    assert "Updater" not in reports["tshark"]
+
+
+def test_per_file_reports_surface_diagnosis_and_empty_findings():
+    unified_evidence = {"evidence_items": [
+        {"evidence_type": "evidence_diagnostic", "source_tool": "volatility3",
+         "value": "memory.dmp: This file is empty (0 bytes) — it contains no data to analyse.",
+         "severity": "low", "confidence": 0.9, "artifact_id": "diag_1"},
+    ]}
+    case_context = {"evidence_sources": {"volatility3": "memory.dmp"}}
+
+    reports = _build_per_file_reports(unified_evidence, case_context)
+
+    assert "memory.dmp" in reports["volatility3"]
+    assert "File-Level Diagnosis" in reports["volatility3"]
+    assert "empty (0 bytes)" in reports["volatility3"]
+    assert "No substantive findings" in reports["volatility3"]
+
+
+def test_per_file_reports_empty_evidence_returns_no_reports():
+    assert _build_per_file_reports({"evidence_items": []}, {}) == {}
