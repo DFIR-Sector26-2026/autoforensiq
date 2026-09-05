@@ -9,6 +9,7 @@ from src.aggregator.evidence_aggregator import (
     sort_evidence_items,
     build_indices,
     aggregate_evidence,
+    aggregate_bulk_evidence,
     enrich_evidence_items,
     build_correlations,
     reconcile_memprocfs_processes,
@@ -763,6 +764,77 @@ def test_run_bulk_aggregation_writes_summary():
         assert result["bulk_summary"]["total_items"] == 2
         assert len(result["bulk_summary"]["machines"]) == 2
         assert result["bulk_summary"]["machines"][0]["findings"] >= 0
+
+
+def test_bulk_aggregation_isolates_one_machine_failure(monkeypatch):
+    # At fleet scale, some fraction of machines will always have a raw-output collection that
+    # blows up aggregate_evidence() for reasons unrelated to any other machine (truncated JSON,
+    # a wrapper's schema drift, a permissions error). That must not lose every other machine's
+    # results in the same batch.
+    import src.aggregator.evidence_aggregator as agg_mod
+
+    real_aggregate_evidence = agg_mod.aggregate_evidence
+
+    def flaky_aggregate_evidence(case_context, raw_outputs_dir, output_path):
+        if "machine_bad" in raw_outputs_dir:
+            raise RuntimeError("simulated corrupt raw output")
+        return real_aggregate_evidence(case_context, raw_outputs_dir, output_path)
+
+    monkeypatch.setattr(agg_mod, "aggregate_evidence", flaky_aggregate_evidence)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        good_raw = Path(tmpdir) / "machine_good" / "raw"
+        bad_raw = Path(tmpdir) / "machine_bad" / "raw"
+        good_raw.mkdir(parents=True)
+        bad_raw.mkdir(parents=True)
+        with (good_raw / "volatility_output.json").open("w") as f:
+            json.dump({"tool": "volatility3", "items": [{
+                "artifact_id": "proc_1", "source_tool": "volatility3",
+                "evidence_type": "process", "value": "cmd.exe (PID:1 PPID:0)",
+                "severity": "low", "confidence": 0.5, "linked_artifacts": [],
+            }]}, f)
+
+        machine_runs = {
+            "machine_good": {"raw_outputs_dir": str(good_raw),
+                              "case_context": {"case_id": "c1"}},
+            "machine_bad": {"raw_outputs_dir": str(bad_raw),
+                             "case_context": {"case_id": "c2"}},
+        }
+        summary = agg_mod.aggregate_bulk_evidence(machine_runs, output_root=str(Path(tmpdir) / "out"))
+
+    assert len(summary["machines"]) == 1
+    assert summary["machines"][0]["machine_name"] == "machine_good"
+    assert len(summary["failed_machines"]) == 1
+    assert summary["failed_machines"][0]["machine_name"] == "machine_bad"
+    assert "simulated corrupt raw output" in summary["failed_machines"][0]["error"]
+
+
+def test_bulk_aggregation_survives_many_machines():
+    # No literal 1200-machine dataset is feasible in a unit test, but the loop must not fall over
+    # as machine count grows — this proves it holds well past the 2-machine case the rest of the
+    # suite otherwise only exercises.
+    n_machines = 60
+    with tempfile.TemporaryDirectory() as tmpdir:
+        machine_runs = {}
+        for i in range(n_machines):
+            raw_dir = Path(tmpdir) / f"machine_{i}" / "raw"
+            raw_dir.mkdir(parents=True)
+            with (raw_dir / "volatility_output.json").open("w") as f:
+                json.dump({"tool": "volatility3", "items": [{
+                    "artifact_id": f"proc_{i}", "source_tool": "volatility3",
+                    "evidence_type": "process", "value": f"proc{i}.exe (PID:{i} PPID:0)",
+                    "severity": "low", "confidence": 0.5, "linked_artifacts": [],
+                }]}, f)
+            machine_runs[f"machine_{i}"] = {
+                "raw_outputs_dir": str(raw_dir),
+                "case_context": {"case_id": f"case-{i}"},
+            }
+
+        summary = aggregate_bulk_evidence(machine_runs, output_root=str(Path(tmpdir) / "out"))
+
+    assert len(summary["machines"]) == n_machines
+    assert summary["failed_machines"] == []
+    assert summary["total_items"] == n_machines
 
 
 def test_process_tree_does_not_contaminate_correlations():

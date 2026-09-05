@@ -936,6 +936,10 @@ def build_bulk_summary(unified: dict) -> dict[str, Any]:
     }
 
 
+_BULK_PROGRESS_EVERY = 25  # print a progress line every N machines — silence for 1200 machines
+                            # otherwise gives an operator no sense the batch is alive at all
+
+
 def aggregate_bulk_evidence(
     machine_runs: dict[str, dict[str, Any]],
     output_root: str = "output/bulk"
@@ -947,9 +951,15 @@ def aggregate_bulk_evidence(
       - case_context: dict
       - raw_outputs_dir: str
       - output_path: optional str
+
+    One machine's raw outputs being malformed, unreadable, or otherwise fatal to
+    aggregate_evidence() must not lose every other machine's results in the same batch — at
+    fleet scale (hundreds to low-thousands of machines) some fraction of collections are always
+    going to be bad. Each machine's aggregation is isolated; failures are recorded, not raised.
     """
     summary = {
         "machines": [],
+        "failed_machines": [],
         "total_items": 0,
         "total_findings": 0,
         "output_root": output_root,
@@ -957,20 +967,36 @@ def aggregate_bulk_evidence(
 
     Path(output_root).mkdir(parents=True, exist_ok=True)
 
-    for machine_name, machine_spec in machine_runs.items():
+    total = len(machine_runs)
+    for i, (machine_name, machine_spec) in enumerate(machine_runs.items(), start=1):
+        if total >= _BULK_PROGRESS_EVERY and i % _BULK_PROGRESS_EVERY == 0:
+            print(f"  [BULK] {i}/{total} machines processed "
+                  f"({len(summary['failed_machines'])} failed so far)")
+
         machine_case_context = machine_spec.get("case_context") or {"case_id": machine_name}
         machine_raw_dir = machine_spec.get("raw_outputs_dir")
         machine_output_path = machine_spec.get("output_path") or str(
             Path(output_root) / f"{machine_name}_unified_evidence.json"
         )
         if not machine_raw_dir:
+            summary["failed_machines"].append({
+                "machine_name": machine_name, "error": "no raw_outputs_dir specified",
+            })
             continue
 
-        unified = aggregate_evidence(
-            case_context=machine_case_context,
-            raw_outputs_dir=machine_raw_dir,
-            output_path=machine_output_path,
-        )
+        try:
+            unified = aggregate_evidence(
+                case_context=machine_case_context,
+                raw_outputs_dir=machine_raw_dir,
+                output_path=machine_output_path,
+            )
+        except Exception as e:
+            print(f"  [BULK ERROR] {machine_name} failed to aggregate: {e}")
+            summary["failed_machines"].append({
+                "machine_name": machine_name, "error": str(e),
+            })
+            continue
+
         summary["machines"].append({
             "machine_name": machine_name,
             "case_id": unified.get("case_id", "unknown"),
@@ -980,6 +1006,10 @@ def aggregate_bulk_evidence(
         })
         summary["total_items"] += unified.get("total_items", 0)
         summary["total_findings"] += len(unified.get("findings", []))
+
+    if summary["failed_machines"]:
+        print(f"  [BULK] Done — {len(summary['machines'])} succeeded, "
+              f"{len(summary['failed_machines'])} failed, out of {total}")
 
     return summary
 
