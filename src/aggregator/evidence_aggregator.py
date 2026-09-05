@@ -109,10 +109,16 @@ def _own_process_pid(item: dict) -> str | None:
     return aid.group(1) if aid else None
 
 
+_SEVERITY_AT_LEAST_HIGH = {"low", "medium"}
+
+
 def reconcile_memprocfs_processes(items: list[dict]) -> tuple[list[dict], int]:
     """Drop MemProcFS process items whose PID Volatility already covered (D6) — its flat
-    medium-severity inventory is noise next to Volatility's scored list. PIDs unique to MemProcFS
-    are kept; with no Volatility process list at all, MemProcFS stays intact as the fallback."""
+    medium-severity inventory is noise next to Volatility's scored list. PIDs unique to
+    MemProcFS are kept and elevated to at least "high": a process a live-memory tool (MemProcFS)
+    can see that a memory-forensics tool built to enumerate every process (Volatility) can't is a
+    known process-hiding/rootkit signal, not just a second opinion to skim past. With no
+    Volatility process list at all, MemProcFS stays intact as the fallback, unelevated."""
     vol_pids = {
         _own_process_pid(i)
         for i in items
@@ -130,6 +136,13 @@ def reconcile_memprocfs_processes(items: list[dict]) -> tuple[list[dict], int]:
             if pid is not None and pid in vol_pids:
                 removed += 1
                 continue
+            if pid is not None and item.get("severity") in _SEVERITY_AT_LEAST_HIGH:
+                item = dict(item)
+                item["severity"] = "high"
+                item["value"] = (
+                    f"{item.get('value', '')} — NOT enumerated by Volatility3's process "
+                    "list despite one being present (possible process-hiding/rootkit technique)"
+                )
         kept.append(item)
     return kept, removed
 

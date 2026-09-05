@@ -1040,3 +1040,19 @@ def test_reconcile_does_not_confuse_ppid_with_pid():
     kept, removed = reconcile_memprocfs_processes(items)
     assert removed == 0
     assert any(i["artifact_id"] == "memprocfs_proc_7777" for i in kept)
+
+
+def test_reconcile_elevates_memprocfs_only_pid_as_hiding_signal():
+    # A PID MemProcFS sees but Volatility's own process list doesn't, despite
+    # Volatility having successfully enumerated processes at all, is a
+    # process-hiding/rootkit signal — not just a quiet fallback entry.
+    hidden = _mpfs(4242, 880, "secret.exe")
+    hidden["severity"] = "medium"
+    items = [_vol(880, 1944), hidden]
+    kept, removed = reconcile_memprocfs_processes(items)
+    assert removed == 0
+    survivor = next(i for i in kept if i["artifact_id"] == "memprocfs_proc_4242")
+    assert survivor["severity"] == "high"
+    assert "not enumerated by volatility3" in survivor["value"].lower()
+    # The original list is untouched (a copy is elevated, not mutated in place).
+    assert hidden["severity"] == "medium"
