@@ -362,6 +362,9 @@ def test_build_ioc_report_lists_indicators_with_provenance():
     assert "ransomware dropper" in md
     # Critical indicator sorts above the high one.
     assert md.index("tasksche.exe") < md.index("185.62.1.2")
+    # Matched Line(s) column shows the literal source text, not just an artifact-id pointer.
+    assert "tasksche.exe (PID:1940 PPID:1636)" in md
+    assert "TCP 10.0.0.5:1100 -> 185.62.1.2:4444 [EST]" in md
 
 
 def test_build_ioc_report_empty_sentinel():

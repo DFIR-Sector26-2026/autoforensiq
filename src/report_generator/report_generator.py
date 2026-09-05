@@ -748,6 +748,7 @@ def _extract_iocs(evidence_items, severity_lookup=None):
                 "tools": set(),
                 "artifact_ids": set(),
                 "ids_by_tool": {},
+                "sample_lines": [],
             }
             records[key] = rec
         # An indicator inherits the highest severity of any item it appeared in.
@@ -767,6 +768,13 @@ def _extract_iocs(evidence_items, severity_lookup=None):
             rec["artifact_ids"].add(item["artifact_id"])
             if item.get("source_tool"):
                 rec["ids_by_tool"].setdefault(item["source_tool"], set()).add(item["artifact_id"])
+        # The literal source line/value the indicator was found in — so a reader can see exactly
+        # what was matched instead of having to cross-reference the artifact id by hand in
+        # unified_evidence.json. Capped: one indicator can repeat across hundreds of items.
+        raw_value = item.get("value")
+        if raw_value and len(rec["sample_lines"]) < _IOC_SAMPLE_LINES_SHOWN \
+                and raw_value not in rec["sample_lines"]:
+            rec["sample_lines"].append(raw_value)
 
     for item in evidence_items:
         if not isinstance(item, dict):
@@ -824,6 +832,8 @@ def _ioc_xai_note(rec, anomaly_lookup, limit=100):
 _IOC_SURFACE_RANK = _SEVERITY_RANK["medium"]  # medium-or-higher earns a main-table row
 # Artifact-id pointers shown per tool in the Sources cell; the rest are counted (+N more).
 _IOC_IDS_SHOWN = 3
+# Example raw source lines kept per indicator, shown verbatim in the Matched Line column.
+_IOC_SAMPLE_LINES_SHOWN = 2
 # A domain whose wrapper confidence reached the URL-context (anchored) tier.
 _ANCHORED_CONF = 0.45
 _FOLDED_SAMPLE_CAP = 50
@@ -883,8 +893,8 @@ def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None,
 
     if surfaced:
         rows = [
-            "| Indicator | Type | Severity | IOC Match | Context(s) | Sources (tool · file: artifact ids) | Why flagged |",
-            "|-----------|------|----------|-----------|------------|-------------------------------------|-----------|",
+            "| Indicator | Type | Severity | IOC Match | Context(s) | Sources (tool · file: artifact ids) | Matched Line(s) | Why flagged |",
+            "|-----------|------|----------|-----------|------------|-------------------------------------|------------------|-----------|",
         ]
         for r in surfaced:
             matches = ", ".join(sorted(r["matches"])) if r["matches"] else "-"
@@ -902,6 +912,12 @@ def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None,
                     src += f": {shown}" + (f" +{extra} more" if extra > 0 else "")
                 srcs.append(src)
             src_cell = "; ".join(srcs) if srcs else "-"
+            # The literal evidence line(s) the indicator was matched in — no need to cross-reference
+            # the artifact id in unified_evidence.json by hand to see what was actually found.
+            lines_cell = (
+                "<br>".join(_truncate(ln, 80) for ln in r.get("sample_lines") or [])
+                or "-"
+            )
             xai = _ioc_xai_note(r, anomaly_lookup)
             rows.append(
                 f"| `{_md_cell(r['indicator'])}` "
@@ -910,6 +926,7 @@ def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None,
                 f"| {_md_cell(matches)} "
                 f"| {_md_cell(contexts)} "
                 f"| {_md_cell(src_cell)} "
+                f"| {_md_cell(lines_cell)} "
                 f"| {_md_cell(xai)} |"
             )
         parts.append("\n".join(rows) + "\n")
