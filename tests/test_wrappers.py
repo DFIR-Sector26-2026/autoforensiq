@@ -1359,6 +1359,59 @@ def test_plaso_and_regripper_artifact_ids_stable_and_distinct(tmp_path):
     assert len(set(reg_ids)) == len(reg_ids) == 2
 
 
+def test_regripper_ignores_negative_result_boilerplate():
+    # RegRipper's own report boilerplate for a checked-but-empty path routinely contains a
+    # SUSPICIOUS_KEYS word as a substring of the KEY NAME itself (e.g. "...\RunOnce has no
+    # subkeys." contains "run") — that used to slip past the keyword filter and get reported as
+    # a HIGH-severity finding despite explicitly saying nothing was found.
+    from src.wrappers.regripper_wrapper import RegRipperWrapper
+
+    output = "\n".join([
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "LastWrite Time 2026-09-04 11:48:22Z",
+        "  Updater - C:\\Users\\Public\\svchost32.exe",
+        "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce has no subkeys.",
+        "Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Run not found.",
+        "Software\\Microsoft\\Windows\\CurrentVersion\\StartupApproved\\Run has no values.",
+    ])
+    items = RegRipperWrapper()._parse_output(output, "run")
+
+    values = [i["value"] for i in items]
+    assert any("Updater" in v for v in values)          # the real finding survives
+    assert not any("has no subkeys" in v for v in values)
+    assert not any("not found" in v for v in values)
+    assert not any("has no values" in v for v in values)
+    assert not any("LastWrite Time" in v for v in values)
+    # The bare "announcing" path line itself ("Software\...\Run" with nothing else on it) is
+    # not a finding either — only the actual name/value pair beneath it is.
+    assert not any(v.strip() == "[run] Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+                   for v in values)
+
+
+def test_regripper_ignores_plugin_version_and_description_banners():
+    # Every plugin prints its own "<name> v.<date>" and "(<hive>) [<category>] <description>"
+    # banner before doing anything — under a profile (-f), that's one pair per plugin (~100+ for
+    # ntuser), and many legitimately mention "run"/"shell"/"startup" in their own name/category
+    # (run, runmru, runvirtual, shellfolders, ...) despite having found nothing yet.
+    from src.wrappers.regripper_wrapper import RegRipperWrapper
+
+    output = "\n".join([
+        "run v.20200511",
+        "(Software, NTUSER.DAT) [Autostart] Get autostart key contents from Software hive",
+        "runmru v.20200525",
+        "(NTUSER.DAT) Gets contents of user's RunMRU key",
+        "shellfolders v.20200515",
+        "  Updater - C:\\Users\\Public\\svchost32.exe",
+    ])
+    items = RegRipperWrapper()._parse_output(output, "ntuser")
+
+    values = [i["value"] for i in items]
+    assert any("Updater" in v for v in values)
+    assert not any("v.2020" in v for v in values)
+    assert not any("Autostart key contents" in v for v in values)
+    assert not any("RunMRU key" in v for v in values)
+
+
 # ─────────────────────────────────────────────────────────────
 # Process-tree structured output (issue 4.5)
 # ─────────────────────────────────────────────────────────────
