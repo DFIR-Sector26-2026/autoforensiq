@@ -1195,14 +1195,15 @@ def _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence):
 
 # Status/diagnostic markers, not analysis output — a tool with only these ran but produced nothing
 # usable and must not be credited as "Analysed".
-_STATUS_EVIDENCE_TYPES = {"memory_analysis_status"}
+_STATUS_EVIDENCE_TYPES = {"memory_analysis_status", "evidence_diagnostic"}
 
 
 def _build_evidence_coverage(tools_ran, evidence_items=None):
     # Attribute each evidence type to every tool that analysed it; a tool is credited "Analysed"
     # only if it produced a substantive (non-status) item, else it's "ran but produced no artifacts"
     # — the report mustn't claim a tool analysed a dump its own evidence says was unavailable.
-    produced = {}  # tool -> produced at least one non-status item
+    produced = {}       # tool -> produced at least one non-status item
+    diagnosis = {}       # tool -> specific reason its input file looked unusable, if diagnosed
     for e in (evidence_items or []):
         if not isinstance(e, dict):
             continue
@@ -1211,6 +1212,8 @@ def _build_evidence_coverage(tools_ran, evidence_items=None):
             continue
         substantive = e.get("evidence_type") not in _STATUS_EVIDENCE_TYPES
         produced[tool] = produced.get(tool, False) or substantive
+        if e.get("evidence_type") == "evidence_diagnostic" and tool not in diagnosis:
+            diagnosis[tool] = e.get("value", "")
 
     covered = {}
     for t in tools_ran:
@@ -1236,10 +1239,12 @@ def _build_evidence_coverage(tools_ran, evidence_items=None):
             rows.append(f"| {ev_label} | Analysed | {tool_str} | {note} |")
         elif attempted:
             tool_str = ", ".join(attempted)
-            rows.append(
-                f"| {ev_label} | Not analysed | {tool_str} | "
-                "Tool ran but could not parse the evidence; no artifacts extracted. |"
+            reasons = list(dict.fromkeys(diagnosis[t] for t in attempted if t in diagnosis))
+            note = (
+                " ".join(reasons) if reasons
+                else "Tool ran but could not parse the evidence; no artifacts extracted."
             )
+            rows.append(f"| {ev_label} | Not analysed | {tool_str} | {note} |")
         else:
             note = _ACQUIRE_NOTES.get(ev, "Collect evidence to enable analysis.")
             rows.append(

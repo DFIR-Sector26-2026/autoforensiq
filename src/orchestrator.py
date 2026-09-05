@@ -11,6 +11,7 @@ from src.wrappers.browser_wrapper import BrowserWrapper
 from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
 
 from src.ioc.ioc_engine import extract_iocs
+from src.utils.file_diagnostics import diagnose_evidence_file
 
 
 WRAPPER_MAP = {
@@ -65,12 +66,16 @@ def run_tools(execution_plan: dict, evidence_files: dict):
 
         wrapper = WRAPPER_MAP[name]()
 
-        # Each wrapper declares the evidence key(s) it consumes 
+        # Each wrapper declares the evidence key(s) it consumes
         evidence_paths = []
+        path_evidence_key = {}
         for key in TOOL_EVIDENCE_MAP.get(name, ()):
             paths = evidence_files.get(key)
             if paths:
-                evidence_paths.extend(paths if isinstance(paths, list) else [paths])
+                paths = paths if isinstance(paths, list) else [paths]
+                evidence_paths.extend(paths)
+                for p in paths:
+                    path_evidence_key[p] = key
 
         if not evidence_paths:
             print(f"  [SKIP] No evidence file provided for {name}")
@@ -82,6 +87,18 @@ def run_tools(execution_plan: dict, evidence_files: dict):
             if not os.path.exists(path):
                 print(f"  [SKIP] Evidence path does not exist: {path}")
                 continue
+
+            diagnosis = diagnose_evidence_file(path, path_evidence_key.get(path, ""))
+            if diagnosis:
+                print(f"  [DIAGNOSIS] {path}: {diagnosis}")
+                items.append(wrapper.make_evidence_item(
+                    artifact_id=f"{name}_diagnostic_{os.path.basename(path)}",
+                    evidence_type="evidence_diagnostic",
+                    value=f"{os.path.basename(path)}: {diagnosis}",
+                    severity="low",
+                    confidence=0.90,
+                ))
+
             try:
                 out = wrapper.run(path)
                 if out:
