@@ -449,6 +449,25 @@ def _provided_artifact_types(evidence_files: dict) -> list:
 # copies previously let plaso drift).
 from src.orchestrator import TOOL_EVIDENCE_MAP as _TOOL_EVIDENCE_MAP, ACQUIRE_HINTS as _ACQUIRE_HINT
 
+
+def _build_evidence_sources(evidence_files: dict) -> dict:
+    """Tool -> source filename(s), so the report can attribute findings without threading a
+    source_file field through every wrapper and the item schema.
+
+    _TOOL_EVIDENCE_MAP's values are always tuples of evidence keys (even single-key tools), so
+    membership must be checked per key, not the tuple as a whole against evidence_files' plain-
+    string keys — that comparison never matched, leaving evidence_sources empty for every tool
+    and silently breaking every "Sources" column and per-file report downstream."""
+    return {
+        tool: ", ".join(
+            Path(p).name
+            for ev_key in ev_keys if ev_key in evidence_files
+            for p in evidence_files[ev_key]
+        )
+        for tool, ev_keys in _TOOL_EVIDENCE_MAP.items()
+        if any(ev_key in evidence_files for ev_key in ev_keys)
+    }
+
 _TOOL_DISPLAY = {
     "volatility3": "Volatility3       (memory analysis)",
     "memprocfs":   "MemProcFS         (memory analysis)",
@@ -598,13 +617,7 @@ def main(args=None):
         priority_list = [f"#{i + 1} {k}" for i, k in enumerate(evidence_files)]
         print(f"  [PRIORITY] {' -> '.join(priority_list)}")
 
-    # Tool → source filename(s), so the report can attribute findings without threading a
-    # source_file field through every wrapper and the item schema.
-    case_context["evidence_sources"] = {
-        tool: ", ".join(Path(p).name for p in evidence_files[ev_key])
-        for tool, ev_key in _TOOL_EVIDENCE_MAP.items()
-        if ev_key in evidence_files
-    }
+    case_context["evidence_sources"] = _build_evidence_sources(evidence_files)
 
     preflight_check(evidence_files, execution_plan)
 
