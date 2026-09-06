@@ -11,6 +11,7 @@ from pathlib import Path
 from src.report_generator.report_generator import (
     MITRE_BY_CASE,
     RECOMMENDATIONS_BY_CASE,
+    _build_analyst_verdict,
     _build_correlated_findings,
     _build_dashboard_summary,
     _build_evidence_coverage,
@@ -905,3 +906,30 @@ def test_per_file_reports_surface_diagnosis_and_empty_findings():
 
 def test_per_file_reports_empty_evidence_returns_no_reports():
     assert _build_per_file_reports({"evidence_items": []}, {}) == {}
+
+
+# ─────────────────────────────────────────────────────────────
+# Analyst verdict acknowledges narrative/evidence divergence
+# ─────────────────────────────────────────────────────────────
+
+def test_analyst_verdict_flags_divergence_instead_of_asserting_case_type():
+    # Case Classification can say "evidence weakly supports ransomware (14%) ... aligns more with
+    # data_exfiltration" while the verdict, two sections later, used to say "Evidence is consistent
+    # with Ransomware activity" with no acknowledgment at all - a reader hits a flat contradiction.
+    reconciliation = {
+        "narrative_evidence_divergence": True,
+        "reconciled_confidence": 0.61,
+        "evidence_suggests": "data_exfiltration",
+    }
+    verdict = _build_analyst_verdict("ransomware", "high", 346, 0.95, reconciliation)
+    assert "weakly supports" in verdict
+    assert "61%" in verdict
+    assert "data_exfiltration" in verdict
+
+
+def test_analyst_verdict_unchanged_when_no_divergence():
+    # No reconciliation flag -> no caveat text, and omitting the argument entirely must still work
+    # (existing callers/tests didn't pass one).
+    verdict = _build_analyst_verdict("ransomware", "high", 346, 0.95)
+    assert "weakly supports" not in verdict
+    assert "Evidence is consistent with Ransomware activity" in verdict

@@ -1177,7 +1177,7 @@ def _evaluate_hypothesis(hypothesis, overall_sev, n_anomalies):
     return "**Not Evidenced** — no elevated-severity or anomalous artifacts in the current evidence set"
 
 
-def _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence):
+def _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence, reconciliation=None):
     ct = case_type.replace("_", " ").title()
     sev_lower = overall_sev.lower()
     # The verdict is led by the evidence severity; P5 corroboration is mentioned only when anomaly
@@ -1186,21 +1186,40 @@ def _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence):
         f" {n_anomalies} artifact(s) were independently flagged by anomaly detection."
         if n_anomalies else ""
     )
+    # The verdict named the narrative case_type as settled fact even when Case Classification, two
+    # sections above it, already flagged that the evidence only weakly supports that same
+    # classification - a reader hits "evidence weakly supports ransomware (14%)... aligns more with
+    # data_exfiltration" immediately followed by "evidence is consistent with Ransomware activity"
+    # with no acknowledgment of the contradiction. Surface the reconciled confidence and the
+    # suggested alternative here too, when reconciliation actually flagged a divergence.
+    reconciliation = reconciliation or {}
+    caveat = ""
+    if reconciliation.get("narrative_evidence_divergence"):
+        rc = reconciliation.get("reconciled_confidence")
+        rc_str = f" (reconciled confidence {rc:.0%})" if isinstance(rc, (int, float)) else ""
+        alt = reconciliation.get("evidence_suggests")
+        alt_str = f" The recovered evidence aligns more strongly with '{alt}'." if alt else ""
+        caveat = (
+            f" However, the evidence only weakly supports the {ct} classification itself{rc_str} "
+            f"— this verdict should be read as evidence-severity-driven, not as a confirmed {ct} "
+            f"determination.{alt_str}"
+        )
     if sev_lower == "critical":
         return (
             f"This investigation reveals strong indicators of a confirmed {ct} incident, "
             f"with critical-severity artifacts corroborated across the evidence set.{corrob} "
-            "Immediate escalation to incident response is warranted."
+            f"Immediate escalation to incident response is warranted.{caveat}"
         )
     elif sev_lower == "high":
         return (
             f"Evidence is consistent with {ct} activity, with high-severity findings in the "
-            f"evidence set.{corrob} Analyst review and targeted containment steps are recommended."
+            f"evidence set.{corrob} Analyst review and targeted containment steps are "
+            f"recommended.{caveat}"
         )
     elif sev_lower == "medium":
         return (
             f"Evidence shows suspicious activity consistent with early-stage {ct} indicators.{corrob} "
-            "Further monitoring and expanded evidence collection are advised."
+            f"Further monitoring and expanded evidence collection are advised.{caveat}"
         )
     else:
         return (
@@ -1577,7 +1596,7 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     )
 
     # Analyst verdict
-    verdict_text = _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence)
+    verdict_text = _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence, reconciliation)
     verdict_section = f"## Analyst Verdict\n\n{verdict_text}"
 
     # Recommendations
