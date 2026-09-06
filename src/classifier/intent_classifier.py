@@ -74,7 +74,8 @@ _MOCK_KEYWORDS = {
     "ransomware":        ["ransom", "encrypt", "decrypt", "bitcoin", "locked", ".crypt", "payment"],
     "apt_intrusion":     ["apt", "advanced persistent", "nation-state", "lateral movement", "spear phish", "c2", "command and control"],
     "data_exfiltration": ["exfil", "data theft", "stolen", "upload", "ftp", "transfer", "leak", "exfiltrat"],
-    "insider_threat":    ["insider", "employee", "disgruntled", "privileged user", "unauthorised access", "unauthorized access"],
+    "insider_threat":    ["insider", "employee", "disgruntled", "privileged user", "unauthorised access",
+                          "unauthorized access", "resignation", "resigned", "usb device"],
     "malware_infection": ["malware", "trojan", "worm", "virus", "injected", "backdoor", "rootkit", "payload"],
     "phishing":          ["phishing", "spear phish", "email", "credential harvest", "fake login", "link clicked"],
 }
