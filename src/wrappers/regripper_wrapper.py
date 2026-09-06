@@ -78,14 +78,29 @@ class RegRipperWrapper(BaseWrapper):
         return all_items
 
     def _run_plugin(self, hive_path: str, plugin: str, regripper_path: str,
-                    use_profile: bool = False) -> list:
+                    use_profile: bool = False, max_attempts: int = 8) -> list:
         print(f"  [REGRIP] Running {'profile' if use_profile else 'plugin'}: {plugin}...")
         flag = "-f" if use_profile else "-p"
-        stdout, _, code = self.run_command(
-            ["perl", regripper_path, "-r", hive_path, flag, plugin],
-            input_files=[hive_path],
-            timeout=60
-        )
+        command = ["perl", regripper_path, "-r", hive_path, flag, plugin]
+
+        stdout = ""
+        for attempt in range(1, max_attempts + 1):
+            stdout, _, code = self.run_command(command, input_files=[hive_path], timeout=60)
+            n_lines = len(stdout.strip().splitlines())
+            # rip.pl's own output on Windows is intermittently truncated to just its two-line
+            # banner (version + description) with none of the actual key content that follows —
+            # confirmed reproducible: the identical command against the identical hive returns
+            # full output roughly half the time and only the banner the other half, with no error
+            # of any kind either way. Even a run that finds NOTHING still prints a "not found."/
+            # "has no subkeys." status line per checked path (a dozen or more), so a genuine
+            # zero-findings result is never this short — retry rather than silently under-report.
+            if n_lines > 3 or not stdout.strip():
+                break
+            if attempt < max_attempts:
+                print(f"  [REGRIP] {plugin}: output looked truncated ({n_lines} lines), "
+                      f"retrying ({attempt}/{max_attempts})...")
+            else:
+                print(f"  [REGRIP] {plugin}: still truncated after {max_attempts} attempts")
 
         if not stdout.strip():
             return []

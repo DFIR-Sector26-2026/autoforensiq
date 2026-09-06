@@ -1324,6 +1324,53 @@ def test_plaso_routine_sample_low_severity_capped_and_deduped(tmp_path, monkeypa
     assert "Classes\\A" in items[0]["value"] and "Classes\\B" in items[1]["value"]
 
 
+def test_regripper_retries_on_truncated_output(monkeypatch):
+    # rip.pl's own stdout is intermittently truncated to just its two-line banner under Windows
+    # redirection - confirmed reproducible: the identical command against the identical hive
+    # returns full output roughly half the time and only the banner the other half, with no error
+    # either way (upstream Perl/Windows I/O behavior, not this project's code). The wrapper must
+    # retry rather than silently report 0 items for a hive that actually has findings.
+    from src.wrappers.regripper_wrapper import RegRipperWrapper
+
+    w = RegRipperWrapper()
+    call_count = {"n": 0}
+    truncated = "\n".join([
+        "run v.20200511",
+        "(Software, NTUSER.DAT) [Autostart] Get autostart key contents from Software hive",
+    ])
+    full = truncated + "\n".join([
+        "",
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "LastWrite Time 2026-09-04 11:48:22Z",
+        "  Updater - C:\\Users\\Public\\svchost32.exe",
+    ])
+
+    def fake_run_command(cmd, **kwargs):
+        call_count["n"] += 1
+        return (truncated, "", 0) if call_count["n"] < 3 else (full, "", 0)
+
+    monkeypatch.setattr(w, "run_command", fake_run_command)
+    items = w._run_plugin("hive.dat", "run", "rip.pl", max_attempts=5)
+
+    assert call_count["n"] == 3
+    assert any("Updater" in i["value"] for i in items)
+
+
+def test_regripper_gives_up_after_max_attempts(monkeypatch):
+    from src.wrappers.regripper_wrapper import RegRipperWrapper
+
+    w = RegRipperWrapper()
+    truncated = "\n".join([
+        "run v.20200511",
+        "(Software, NTUSER.DAT) [Autostart] Get autostart key contents from Software hive",
+    ])
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: (truncated, "", 0))
+
+    # Always truncated, every attempt — must not loop forever or crash, just give up cleanly.
+    items = w._run_plugin("hive.dat", "run", "rip.pl", max_attempts=3)
+    assert items == []
+
+
 def test_plaso_and_regripper_artifact_ids_stable_and_distinct(tmp_path):
     # plaso/regripper minted ids with abs(hash())%99999 — per-process-salted, so
     # ids changed every run, and only ~100k buckets, so distinct artifacts could
