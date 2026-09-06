@@ -7,6 +7,7 @@ output/
 *.pcap
 *.img
 *.raw
+*.zip
 *.json
 !src/data/ioc_patterns.json
 !src/data/tool_ontology.json
@@ -16,6 +17,7 @@ output/
 !dashboard/package-lock.json
 !dashboard/src/data/attackMatrix.json
 data/test_cases/
+evidence_used_review2/
 dashboard/node_modules/
 dashboard/public/data/
 dashboard/dist/
