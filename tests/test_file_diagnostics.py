@@ -51,3 +51,21 @@ def test_evidence_type_with_no_checks_is_never_flagged(tmp_path):
     p = tmp_path / "history.txt"
     p.write_bytes(b"http://example.com\n")
     assert diagnose_evidence_file(str(p), "browser") is None
+
+
+def test_valid_raw_disk_image_with_no_e01_signature_is_not_flagged(tmp_path):
+    # Raw .img/.dd disk images have no fixed header at all - an NTFS/FAT partition table can start
+    # with almost any bytes. A real, mmls/fls-verified-valid raw image was previously flagged as
+    # "invalid header" here because the check only recognised the E01/EWF signature. Size is the
+    # only universal check for this type; a plausibly-sized raw image must pass cleanly.
+    p = tmp_path / "disk.img"
+    p.write_bytes(b"\xeb\x52\x90NTFS    " + b"\x00" * 2_000_000)  # plausible size, no E01 magic
+    assert diagnose_evidence_file(str(p), "disk_image") is None
+
+
+def test_tiny_disk_image_below_plausible_size_is_still_flagged(tmp_path):
+    p = tmp_path / "disk.img"
+    p.write_bytes(b"\x00" * 100)
+    diagnosis = diagnose_evidence_file(str(p), "disk_image")
+    assert diagnosis is not None
+    assert "too small" in diagnosis.lower()

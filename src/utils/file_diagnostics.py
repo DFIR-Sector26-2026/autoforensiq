@@ -19,9 +19,12 @@ _MAGIC_SIGNATURES = {
     "registry_hive": [
         (b"regf", 0),
     ],
-    "disk_image": [
-        (b"EVF\x09\x0d\x0a\xff\x00", 0),  # EWF/E01 - only signature-checked format among disk images
-    ],
+    # disk_image deliberately has NO entry here: it covers both raw .img/.dd (no fixed header at
+    # all - a valid partition table can start with almost anything) and E01/EWF (which does have a
+    # signature). Gating on the E01 signature alone flagged every genuine raw image as "invalid" -
+    # confirmed live against a real, mmls/fls-verified-valid raw NTFS image that has no EVF magic
+    # and never would. Size is the only universal check available for this type; see
+    # _MIN_PLAUSIBLE_SIZE below.
 }
 
 # Minimum plausible size per evidence type for formats with no reliable magic bytes to check
