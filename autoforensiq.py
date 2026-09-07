@@ -397,6 +397,16 @@ def _map_evidence_files(paths: list):
         elif ext in [".img", ".dd", ".e01", ".dmg"]:
             _add("disk_image", path)
 
+        # LOGS: checked before REGISTRY below — an unambiguous extension must win over a filename
+        # substring guess. "System.evtx"/"system_events.evtx" is the natural, even default, name
+        # for an exported Windows System event log, and it was being caught by REGISTRY's "system"
+        # in lower check before ever reaching this branch, misrouting every such file to RegRipper
+        # instead of Plaso. .log typed separately from .evtx.
+        elif ext == ".evtx":
+            _add("log_files", path)
+        elif ext == ".log":
+            _add("text_log", path)
+
         # REGISTRY
         elif (
             "system" in lower
@@ -417,12 +427,6 @@ def _map_evidence_files(paths: list):
         # BROWSER
         elif "history" in lower:
             _add("browser", path)
-
-        # LOGS: .log typed separately from .evtx
-        elif ext == ".evtx":
-            _add("log_files", path)
-        elif ext == ".log":
-            _add("text_log", path)
 
     return mapping
 

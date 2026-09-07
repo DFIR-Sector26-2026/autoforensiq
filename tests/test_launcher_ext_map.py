@@ -23,6 +23,16 @@ def test_gui_ext_map_agrees_with_cli_evidence_mapping():
         )
 
 
+def test_evtx_extension_wins_over_registry_filename_heuristic():
+    # "System.evtx" is the natural, even default, name for an exported Windows System event log —
+    # but REGISTRY's "system" in lower filename check used to run before the .evtx extension
+    # check, misrouting it to registry_hive (RegRipper) instead of log_files (Plaso). An
+    # unambiguous extension must always win over a filename substring guess.
+    for name in ("System.evtx", "system_events.evtx", "NTUSER_history.evtx"):
+        mapped = _map_evidence_files([name])
+        assert set(mapped) == {"log_files"}, f"{name} routed to {set(mapped)}, expected log_files"
+
+
 def test_gui_name_based_routing_agrees_with_cli():
     # F8e: the CLI also routes on filename (SYSTEM/NTUSER/SOFTWARE hives, browser History,
     # memory dumps) with no extension — the GUI badge must agree for those too.
