@@ -1,9 +1,13 @@
 import os
+import sys
 import json
 import pytest
 from src.utils.audit_log import sha256_file, log_action
 from src.wrappers.base_wrapper import BaseWrapper
-from src.wrappers.volatility_wrapper import VolatilityWrapper
+from src.wrappers.volatility_wrapper import (
+    VolatilityWrapper, ProcessNode, tree_to_dict, tree_lineage,
+)
+from src.wrappers.tshark_wrapper import TsharkWrapper
 
 
 # ─────────────────────────────────────────────────────────────
@@ -91,6 +95,62 @@ def test_parse_fls_skips_directory_nodes():
     assert not any(v.rstrip().endswith("/Windows/Temp") for v in values)
 
 
+def test_parse_fls_carries_body_timestamps():
+    # F4b: fls -m body lines carry atime|mtime|ctime|crtime epochs (fields 7-10) that were
+    # silently dropped, leaving every file_artifact timestamp-less. mtime is preferred,
+    # crtime is the fallback, and epoch "0" (unknown) must NOT become 1970-01-01.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    body = "\n".join([
+        "0|/Windows/Temp/a.exe|1|r/rrwxrwxrwx|0|0|42|1674733000|1674734000|0|1674732000",
+        "0|/Windows/Temp/b.exe|2|r/rrwxrwxrwx|0|0|42|0|0|0|1674735000",
+        "0|/Windows/Temp/c.exe|3|r/rrwxrwxrwx|0|0|42|0|0|0|0",
+    ])
+    ts = {i["value"].rsplit("/", 1)[-1]: i["timestamp"]
+          for i in TSKWrapper()._parse_fls_lines(body)}
+    assert ts == {"a.exe": "1674734000", "b.exe": "1674735000", "c.exe": ""}
+
+
+def test_parse_fls_surfaces_powershell_transcripts_as_low():
+    # B-6/B-7 (N5): transcript files are emitted as LOW file artifacts so they
+    # become visible/correlatable — never higher, since transcription is often
+    # enabled fleet-wide and existence alone is weak evidence. Other .txt files
+    # are still not flagged.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    body = "\n".join([
+        "0|/Users/cbarton-a/Documents/20230126/PowerShell_transcript.DEV01"
+        ".AbCdEf12.20230126120000.txt|453|r/rrwxrwxrwx|0|0|42|0|0|0|0",
+        "0|/Users/cbarton-a/Documents/notes.txt|454|r/rrwxrwxrwx|0|0|10|0|0|0|0",
+    ])
+    items = TSKWrapper()._parse_fls_lines(body)
+    assert len(items) == 1
+    assert items[0]["severity"] == "low"
+    assert items[0]["value"].startswith("PowerShell transcript: ")
+    assert "PowerShell_transcript.DEV01" in items[0]["value"]
+
+
+def test_mactime_keeps_transcript_timeline_events_low(monkeypatch):
+    # _run_mactime historically hardcodes medium for every _file_signal match;
+    # a low signal (transcript) must not be elevated by appearing in the timeline.
+    from src.wrappers.tsk_wrapper import TSKWrapper
+    wrapper = TSKWrapper()
+    # _run_mactime reads activity from column 2 and filepath from column 3.
+    csv = (
+        "Date,Size,Type,File Name,UID,GID\n"
+        "2023-01-26T12:00:00,42,macb,/Users/cbarton-a/Documents/20230126"
+        "/PowerShell_transcript.DEV01.AbCdEf12.20230126120000.txt,0,0\n"
+        "2023-01-26T12:01:00,42,macb,/Windows/Temp/evil.exe,0,0\n"
+    )
+    monkeypatch.setattr(wrapper, "run_command", lambda *a, **k: (csv, "", 0))
+    by_path = {}
+    for item in wrapper._run_mactime("nonempty"):
+        if "transcript" in item["value"].lower():
+            by_path["transcript"] = item
+        elif "evil.exe" in item["value"]:
+            by_path["exe"] = item
+    assert by_path["transcript"]["severity"] == "low"
+    assert by_path["exe"]["severity"] == "medium"
+
+
 def test_parse_cmdline_zero_args_stores_process_name():
     # Issue 3.4-r: a process with exactly PID + name and zero arguments must store
     # just the process name as `value`, not the raw "PID<tab>Process" row. The
@@ -175,6 +235,30 @@ def test_tsk_run_fls_bare_filesystem_no_offset(monkeypatch):
     assert len(fls_calls) == 1
     assert "-o" not in fls_calls[0]                     # offset-less fallback
     assert len(items) == 1
+
+
+def test_tsk_known_malware_filename_flagged_outside_staging_dir():
+    # The staging-dir gate hid the synthetic fixture's root-level tasksche.exe /
+    # @WanaDecryptor@.exe — no item emitted, so the IOC rescorer had nothing to
+    # boost to critical. Catalog-named files now signal anywhere on the disk,
+    # with letter boundaries so substrings like "conti" can't hit "continue.exe".
+    from src.wrappers.tsk_wrapper import _file_signal
+
+    assert _file_signal("/tasksche.exe") == ("medium", "Known-malware filename")
+    assert _file_signal("/@WanaDecryptor@.exe") == ("medium", "Known-malware filename")
+    assert _file_signal("/Tools/mimikatz.exe") == ("medium", "Known-malware filename")
+    # boundary: catalog token inside a longer word must not match
+    assert _file_signal("/Windows/System32/continue.exe") is None
+    assert _file_signal("/Windows/taskscheduler.dll") is None
+    # plain executables outside staging dirs stay un-flagged
+    assert _file_signal("/Program Files/app/setup.exe") is None
+    # dev01 FP class (BUGS 1.2): bundled-library collisions and bare tokens as mere substrings
+    assert _file_signal("/Kibana/node_modules/brace/mode/maze.js") is None
+    assert _file_signal("/Kibana/node_modules/evil/tasksche.exe") is None
+    assert _file_signal("/icons/material/svg/bitcoin.svg") is None
+    assert _file_signal("/rules/credential_access_mimikatz_memory.json") is None
+    # a bare family name as the exact stem of an executable still flags outside libraries
+    assert _file_signal("/Users/bob/maze.js") == ("medium", "Known-malware filename")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -277,6 +361,25 @@ PID	Process	Start VPN	End VPN	Tag	Protection	CommitCharge	PrivateMemory	File out
     assert "Corroborated by another IOC" in items[0]["value"]
 
 
+def test_parse_malfind_rx_region_not_labelled_rwx():
+    # 3.1-B: PAGE_EXECUTE_READ is an execute-only (RX) region — "page_execute"
+    # is a substring of it as well as of PAGE_EXECUTE_READWRITE, so the old
+    # has_rwx flag mislabelled an RX region as "RWX region detected". The reason
+    # text must now say RX; a real PAGE_EXECUTE_READWRITE still reads as RWX
+    # (test_parse_malfind covers the RWX+PE critical case).
+    wrapper = VolatilityWrapper()
+    rx = """
+PID	Process	Start VPN	End VPN	Tag	Protection	CommitCharge	PrivateMemory	File output	Notes
+1500	evil.exe	0x1000	0x2000	VadS	PAGE_EXECUTE_READ	4	1	Disabled	N/A
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ................
+"""
+    items = wrapper._parse_malfind([l for l in rx.splitlines() if l.strip()])
+    assert len(items) == 1
+    assert items[0]["severity"] == "high"          # executable private region, not down-ranked
+    assert "Executable (RX) region detected" in items[0]["value"]
+    assert "RWX" not in items[0]["value"]
+
+
 def test_collect_corroborated_pids():
     # Only behavioral IOCs (suspicious cmdline / C2 connection) at high/critical
     # corroborate. A benign low-severity item and a name-based process listing
@@ -298,6 +401,18 @@ def test_collect_corroborated_pids():
     ]
     pids = wrapper._collect_corroborated_pids(items)
     assert pids == {"1234", "620"}
+
+
+def test_collect_corroborated_pids_includes_suspicious_lineage():
+    # 2.5: a suspicious parent-child relation implicates both endpoints, so a
+    # JIT-named process (e.g. svchost spawned by cmd) escapes the down-rank.
+    wrapper = VolatilityWrapper()
+    items = [
+        {"artifact_id": "relation_808_1416", "evidence_type": "process_relation",
+         "value": "Suspicious parent-child relationship: cmd.exe -> svchost.exe",
+         "severity": "critical"},
+    ]
+    assert wrapper._collect_corroborated_pids(items) == {"808", "1416"}
 
 
 def test_dedupe_items_collapses_repeats_keeping_strongest():
@@ -367,6 +482,187 @@ def test_memprocfs_find_pagefile(tmp_path, monkeypatch):
     override.write_bytes(b"x")
     monkeypatch.setenv("MEMPROCFS_PAGEFILE", str(override))
     assert w._find_pagefile(str(img)) == str(override)  # env var wins
+
+
+def test_memprocfs_enumerates_processes_from_pid_mount(tmp_path):
+    # 3.5-B: MemProcFS exposes processes under <mount>/pid/<pid>/, each carrying
+    # name/ppid virtual files — NOT <mount>/forensic/processes (which isn't part
+    # of the layout, so a successful mount used to enumerate nothing). Build a
+    # fake mount tree and confirm the enumerator reads pid/name/ppid.
+    from src.wrappers.memprocfs_wrapper import _enumerate_mounted_processes
+
+    mount = tmp_path / "mnt"
+    pid_root = mount / "pid"
+    for pid, name, ppid in [("4", "System", "0"),
+                            ("1940", "tasksche.exe", "1636"),
+                            ("740", "@WanaDecryptor@", "1940")]:
+        d = pid_root / pid
+        d.mkdir(parents=True)
+        (d / "pid").write_text(pid + "\n")
+        (d / "name").write_text(name + "\n")
+        (d / "ppid").write_text(ppid + "\n")
+    # a stray non-directory entry under /pid must be ignored, not crash.
+    (pid_root / "readme.txt").write_text("ignore me")
+
+    procs = _enumerate_mounted_processes(str(mount))
+    by_pid = {p["pid"]: p for p in procs}
+    assert set(by_pid) == {"4", "1940", "740"}
+    assert by_pid["1940"]["name"] == "tasksche.exe"
+    assert by_pid["1940"]["ppid"] == "1636"
+
+    # The legacy (wrong) path must no longer be what works: a mount that only
+    # has forensic/processes now yields nothing.
+    legacy = tmp_path / "legacy"
+    (legacy / "forensic" / "processes").mkdir(parents=True)
+    (legacy / "forensic" / "processes" / "1.txt").write_text("x")
+    assert _enumerate_mounted_processes(str(legacy)) == []
+
+    # No /pid at all -> empty, no crash.
+    assert _enumerate_mounted_processes(str(tmp_path / "nope")) == []
+
+
+def test_memprocfs_enumerates_missing_name_falls_back(tmp_path):
+    # A process dir with no `name` file still yields an entry (name "unknown"),
+    # so a partially-populated mount degrades gracefully.
+    from src.wrappers.memprocfs_wrapper import _enumerate_mounted_processes
+    d = tmp_path / "mnt" / "pid" / "1024"
+    d.mkdir(parents=True)
+    procs = _enumerate_mounted_processes(str(tmp_path / "mnt"))
+    assert procs == [{"pid": "1024", "name": "unknown", "ppid": ""}]
+
+
+def test_memprocfs_classify_process_tiers():
+    # 3.5-C: the process list must not land every process at medium/0.80.
+    # Benign system processes and ordinary apps stay low; only notable names
+    # escalate, so the medium/high tiers are not flooded on a supported image.
+    from src.wrappers.memprocfs_wrapper import _classify_process
+
+    # known-malicious name → high, no corroboration needed
+    sev, conf, note = _classify_process("tasksche.exe")
+    assert sev == "high" and conf == 0.85 and "tasksche" in note
+
+    # common Windows system process → low (name-only, masquerade-blind by design)
+    sev, conf, _ = _classify_process("svchost.exe")
+    assert sev == "low" and conf == 0.50
+    assert _classify_process("System")[0] == "low"
+
+    # ordinary third-party app we can't vouch for → low (not medium)
+    sev, conf, _ = _classify_process("chrome.exe")
+    assert sev == "low" and conf == 0.55
+
+    # unidentified process → low
+    assert _classify_process("unknown")[0] == "low"
+    assert _classify_process("")[0] == "low"
+
+
+def test_memprocfs_classify_flags_random_name_as_medium():
+    # 3.5-C: a hash-like / keyboard-mash executable name is a malware trait and
+    # earns medium — but ordinary product names must not be misflagged.
+    from src.wrappers.memprocfs_wrapper import _classify_process
+
+    assert _classify_process("a9f3c1b2.exe")[0] == "medium"   # hex/hash-like
+    assert _classify_process("xkzqwvbnm.exe")[0] == "medium"  # vowel-starved
+
+    # real product names stay low
+    for benign in ("notepad.exe", "firefox.exe", "OneDrive.exe", "Telegram.exe"):
+        assert _classify_process(benign)[0] == "low", benign
+
+
+class _FakeModule:
+    def __init__(self, name, fullname):
+        self.name, self.fullname = name, fullname
+
+
+class _FakeProc:
+    def __init__(self, pid, name, modules):
+        self.pid, self.name, self._modules = pid, name, modules
+
+    def module_list(self):
+        return self._modules
+
+
+def test_memprocfs_module_items_signal_gated():
+    # BUGS 1.1: modules emit only on a catalog-name or staging-dir signal — the R2D2
+    # injected mfc42ul.dll (catalog IOC) must surface, benign system dlls must not.
+    from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
+    w = MemProcFSWrapper()
+    procs = [_FakeProc(1956, "explorer.exe", [
+        _FakeModule("kernel32.dll", "C:\\WINDOWS\\system32\\kernel32.dll"),
+        _FakeModule("mfc42ul.dll", "C:\\WINDOWS\\system32\\mfc42ul.dll"),
+        _FakeModule("evil.dll", "C:\\Users\\bob\\AppData\\Roaming\\evil.dll"),
+    ])]
+    items = w._module_items(procs)
+    assert [i["severity"] for i in items] == ["medium", "medium"]
+    assert "Known-malware filename" in items[0]["value"]
+    assert "mfc42ul.dll" in items[0]["value"] and "PID 1956" in items[0]["value"]
+    assert "Executable in staging directory" in items[1]["value"]
+    # deterministic ids: rebuilding the same input yields the same artifact_ids
+    assert [i["artifact_id"] for i in w._module_items(procs)] == \
+           [i["artifact_id"] for i in items]
+
+
+def test_memprocfs_service_items_hostile_name_gated():
+    # The R2D2 driver registers a service literally named "malware" — flagged high.
+    # Boundary-aware: Antimalware/Malwarebytes never hit; staging-dir image paths flag medium.
+    from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
+
+    class _FakeMaps:
+        def service(self):
+            return {
+                1: {"name": "Abiosdsk", "name-display": "Abiosdsk", "path": "",
+                    "path-image": "", "dwServiceType": 1},
+                2: {"name": "malware", "name-display": "malware2",
+                    "path": "\\Driver\\malware", "path-image": "", "dwServiceType": 1},
+                3: {"name": "MBAMService", "name-display": "Malwarebytes Service",
+                    "path": "", "path-image": "C:\\Program Files\\Malwarebytes\\mbam.exe",
+                    "dwServiceType": 16},
+                4: {"name": "WinDefend", "name-display": "Microsoft Antimalware Service",
+                    "path": "", "path-image": "C:\\Program Files\\Windows Defender\\MsMpEng.exe",
+                    "dwServiceType": 16},
+                5: {"name": "updsvc", "name-display": "Update Service", "path": "",
+                    "path-image": "C:\\Users\\bob\\AppData\\Local\\Temp\\upd.exe",
+                    "dwServiceType": 16},
+            }
+
+    class _FakeVmm:
+        maps = _FakeMaps()
+
+    w = MemProcFSWrapper()
+    items = w._service_items(_FakeVmm())
+    assert len(items) == 2
+    assert items[0]["severity"] == "high"
+    assert "Hostile-named service" in items[0]["value"]
+    assert "kernel-driver service 'malware'" in items[0]["value"]
+    assert items[1]["severity"] == "medium"
+    assert "upd.exe" in items[1]["value"]
+
+
+def test_memprocfs_network_items_mirror_netstat():
+    # Net-map entries become network_connection items in the volatility netstat value
+    # format, port-tiered via c2_port_severity; entries without any IP are skipped.
+    from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
+
+    class _FakeMaps:
+        def net(self):
+            return [
+                {"proto": "TCPv4", "src-ip": "10.0.0.5", "src-port": 49152,
+                 "dst-ip": "165.245.215.18", "dst-port": 4444, "pid": 1234},
+                {"proto": "TCPv4", "src-ip": "10.0.0.5", "src-port": 49153,
+                 "dst-ip": "10.0.0.9", "dst-port": 445, "pid": 4},
+                {"proto": "TCPv4", "src-ip": "", "src-port": "",
+                 "dst-ip": "", "dst-port": "", "pid": 0},
+            ]
+
+    class _FakeVmm:
+        maps = _FakeMaps()
+
+    w = MemProcFSWrapper()
+    items = w._network_items(_FakeVmm())
+    assert len(items) == 2
+    assert items[0]["severity"] == "high"            # 4444 ∈ C2_PORTS_HIGH
+    assert items[0]["value"] == "TCPv4 10.0.0.5:49152 -> 165.245.215.18:4444 (PID:1234)"
+    assert items[1]["severity"] == "low"
+    assert items[0]["evidence_type"] == "network_connection"
 
 
 def test_parse_filescan():
@@ -472,6 +768,46 @@ def test_parse_filescan_random_staging_dir_is_high():
     assert by_value[logs]["severity"] == "medium"  # named dir not promoted
 
 
+def test_parse_filescan_json_is_not_matched_as_js():
+    # 3.3-D: ".js" is a substring of ".json", so the relevance gate used to
+    # count a spurious marker hit for a plain .json file and emit it. A .json in
+    # a non-staging path must now be skipped, while a real .js dropper in a
+    # staging path still clears the gate.
+    wrapper = VolatilityWrapper()
+    mock_output = "\n".join([
+        "Volatility 3 Framework 2.28.0",
+        "Offset\tName",
+        "0x1000\t\\Device\\HarddiskVolume2\\Users\\bob\\Documents\\settings.json",
+        "0x2000\t\\Device\\HarddiskVolume2\\Windows\\Temp\\dropper.js",
+    ])
+    items = wrapper._parse("windows.filescan", mock_output)
+    values = [it["value"] for it in items]
+    assert not any("settings.json" in v for v in values)   # .json no longer mis-hit by ".js"
+    assert any("dropper.js" in v for v in values)           # real .js still flagged
+
+
+def test_parse_filescan_drops_garbage_suffixed_benign_names():
+    # Raw-strings scraping glues garbage onto basenames (a partial GUID + .tmp
+    # from an adjacent memory string), so "Desktop.ini4e6-…}.tmp" evaded the
+    # exact-match skip for ubiquitous benign files. startswith now covers those
+    # — but not an executable masquerade (desktop.ini.exe in Startup is a
+    # finding, not scrape noise).
+    wrapper = VolatilityWrapper()
+    programs = "\\Users\\x\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs"
+    mock_output = "\n".join([
+        "Volatility 3 Framework 2.28.0",
+        "Offset\tName",
+        f"0x1000\t{programs}\\Maintenance\\Desktop.ini4e6-4699-9046-34a7c1ef12fc}}.tmp",
+        f"0x2000\t{programs}\\Startup\\desktop.ini",
+        "0x3000\t\\Users\\x\\AppData\\Local\\Thumbs.db",
+        f"0x4000\t{programs}\\Startup\\desktop.ini.exe",
+    ])
+    items = wrapper._parse("windows.filescan", mock_output)
+    values = [it["value"] for it in items]
+    assert len(values) == 1                     # noise variants all dropped...
+    assert "desktop.ini.exe" in values[0]       # ...only the masquerade kept
+
+
 def test_extract_strings():
     wrapper = VolatilityWrapper()
 
@@ -499,86 +835,106 @@ def test_extract_strings():
     assert "ignore_this_file.dll" not in values
 
 
+def test_extract_strings_validates_bech32_wallets():
+    # 3.3-G: native SegWit `bc1…` wallets (BIP-173 bech32 / BIP-350 bech32m)
+    # were a recall gap — base58check only matched legacy 1.../3... addresses.
+    # Valid v0 (P2WPKH/P2WSH) and v1 (Taproot) addresses must now be recovered,
+    # with checksum validation rejecting corrupted / wrong-network look-alikes.
+    wrapper = VolatilityWrapper()
+    corpus = " ".join([
+        "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",                                  # legacy P2PKH still works
+        "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",                          # P2WPKH v0 (bech32)
+        "BC1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KV8F3T4",                          # same, all-uppercase
+        "bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0",      # P2TR v1 (bech32m)
+        "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t5",                          # bad checksum → reject
+        "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx",                          # testnet hrp → reject
+    ])
+    crypto = {
+        i["value"] for i in wrapper._extract_strings(corpus)
+        if i["evidence_type"] == "suspicious_crypto"
+    }
+    assert "1a1zp1ep5qgefi2dmptftl5slmv7divfna" not in crypto  # legacy is case-sensitive...
+    assert "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa" in crypto       # ...kept verbatim
+    assert "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4" in crypto   # v0 recovered
+    assert "bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0" in crypto  # v1
+    # the all-uppercase copy is normalised to lowercase (dedup-friendly)
+    assert "BC1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KV8F3T4" not in crypto
+    # corrupted checksum and wrong-network addresses are rejected
+    assert "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t5" not in crypto
+    assert not any(v.startswith("tb1") for v in crypto)
+
+
 def test_extract_strings_domain_tld_recall_and_denoise():
-    # Regression for 3.3-E: country-code / .gov / .edu C2 domains must be
-    # recovered (the old tiny allowlist dropped them), while filename noise and
-    # TLD/extension collisions stay filtered.
+    # Anchored-only (D3/dev01): a memory-string domain is emitted only inside URL/
+    # network grammar. Valid country-code / .gov / .edu endpoints are recovered
+    # when anchored; tokens whose final label isn't a real TLD (.exe/.pdb), 1-char
+    # SLDs, and ambiguous script-ext ccTLDs are dropped even when anchored.
     wrapper = VolatilityWrapper()
     corpus = "\n".join([
-        "c2-panel.example.de",        # ccTLD domain -> recovered
-        "exfil.agency.gov",           # .gov -> recovered
-        "login.university.edu",       # .edu -> recovered
-        "ntoskrnl.exe",               # not a TLD -> dropped
-        "symbols.pdb",                # not a TLD -> dropped
-        "l3codecx.ax",                # DirectShow filter (ext==ccTLD) -> dropped
-        "main.py",                    # script ext == ccTLD, 2 labels -> dropped
-        "panel.c2.pl",                # ambiguous TLD but sub-domained -> recovered
-        "t.com",                      # 1-char SLD junk -> dropped
+        "GET http://c2-panel.example.de/gate",   # ccTLD, anchored -> recovered
+        "Host: exfil.agency.gov",                # .gov, header anchor -> recovered
+        "login.university.edu:8443 open",        # .edu, :port anchor -> recovered
+        "http://panel.c2.pl/x",                  # ambiguous ccTLD w/ sub-domain -> recovered
+        "http://ntoskrnl.exe/x",                 # .exe not a TLD -> dropped
+        "http://symbols.pdb/x",                  # .pdb not a TLD -> dropped
+        "http://t.com/x",                        # 1-char SLD junk -> dropped
+        "http://main.py/x",                      # ambiguous ccTLD, 2 labels -> dropped
     ])
     domains = {
         it["value"] for it in wrapper._extract_strings(corpus)
         if it["evidence_type"] == "suspicious_domain"
     }
 
-    assert "c2-panel.example.de" in domains
-    assert "exfil.agency.gov" in domains
-    assert "login.university.edu" in domains
-    assert "panel.c2.pl" in domains
-    for noise in ("ntoskrnl.exe", "symbols.pdb", "l3codecx.ax", "main.py", "t.com"):
-        assert noise not in domains
+    for keep in ("c2-panel.example.de", "exfil.agency.gov",
+                 "login.university.edu", "panel.c2.pl"):
+        assert keep in domains, keep
+    for noise in ("ntoskrnl.exe", "symbols.pdb", "t.com", "main.py"):
+        assert noise not in domains, noise
 
 
 def test_extract_strings_drops_short_cctld_fragments():
-    # Regression for 3.3-J: bare 2-label tokens on a 2-letter ccTLD with a < 4
-    # char SLD are string-fragment / public-suffix noise, not endpoints. They
-    # must drop when bare but survive when anchored in URL/network grammar, and
-    # genuine short domains (3-letter TLD, or SLD >= 4) must be kept.
+    # Anchored-only: a bare 2-label token is dropped whether it's public-suffix
+    # noise (ho.gn, gob.ve) or a genuine-looking short domain (ft.com, google.de)
+    # — without network grammar none of them are endpoints. The same token
+    # anchored in a URL is kept.
     wrapper = VolatilityWrapper()
     corpus = "\n".join([
-        "ho.gn", "gc.ie", "ht.ht", "exe.pt", "lp.sx",   # fragments -> dropped
-        "gob.ve", "asn.au", "pro.ae",                    # public-suffix labels -> dropped
-        "ft.com",                                        # 3-letter TLD -> kept
-        "google.de",                                     # SLD >= 4 -> kept
-        "evil-c2.io",                                    # SLD >= 4 ccTLD -> kept
-        "http://ai.bj/login",                            # anchored fragment -> kept
+        "ho.gn", "gc.ie", "gob.ve", "asn.au",   # public-suffix / fragment noise, bare
+        "ft.com", "google.de", "evil-c2.io",     # genuine-looking, but still bare
+        "http://ai.bj/login",                    # anchored -> kept
     ])
     domains = {
         it["value"] for it in wrapper._extract_strings(corpus)
         if it["evidence_type"] == "suspicious_domain"
     }
-    for frag in ("ho.gn", "gc.ie", "ht.ht", "exe.pt", "lp.sx", "gob.ve", "asn.au", "pro.ae"):
+    for frag in ("ho.gn", "gc.ie", "gob.ve", "asn.au",
+                 "ft.com", "google.de", "evil-c2.io"):
         assert frag not in domains, frag
-    for keep in ("ft.com", "google.de", "evil-c2.io", "ai.bj"):
-        assert keep in domains, keep
+    assert "ai.bj" in domains
 
 
 def test_extract_strings_drops_dos_exe_and_digit_fragments():
-    # Regression for 3.3-J residuals: DOS/console `.com` executables swept from a
-    # memory image (COMMAND.COM, MORE.COM, TREE.COM…) and digit/repeat ccTLD junk
-    # ("f0hht.ht", "htaht.ht", "dn5t.aw") are string fragments, not endpoints.
-    # They drop when bare but survive when anchored in URL grammar, and real
-    # domains that merely look short stay.
+    # Anchored-only: DOS/console `.com` executables (COMMAND.COM, MORE.COM…),
+    # digit/repeat ccTLD junk, AND ordinary bare domains (evilcorp.com,
+    # lonely-bare-c2.ru) all drop without network grammar. Only the anchored one
+    # survives — and it is kept even though the same token also appears bare.
     wrapper = VolatilityWrapper()
     corpus = "\n".join([
-        "command.com", "format.com", "more.com", "tree.com", "edit.com",  # DOS exes
-        "f0hht.ht", "ltchht8ht.ht", "dn5t.aw", "qv0uz.sx",                 # digit junk
-        "htaht.ht", "hteht.ht",                                           # repeat-suffix junk
-        "evilcorp.com",                                                  # real .com (non-DOS) -> kept
-        "taxonomy.ht",                                                   # SLD no digit/repeat -> kept
-        "audit.it",                                                      # word ending in ccTLD (one occurrence) -> kept
-        "lonely-bare-c2.ru",                                             # hyphenated digit C2 -> kept
-        "http://more.com/payload",                                       # anchored -> kept
+        "command.com", "format.com", "tree.com", "edit.com",  # DOS exes, bare
+        "f0hht.ht", "dn5t.aw", "qv0uz.sx", "htaht.ht",        # digit/repeat junk
+        "evilcorp.com", "taxonomy.ht", "lonely-bare-c2.ru",   # ordinary bare domains
+        "more.com",                                           # bare occurrence...
+        "http://more.com/payload",                            # ...and anchored -> kept
     ])
     domains = {
         it["value"] for it in wrapper._extract_strings(corpus)
         if it["evidence_type"] == "suspicious_domain"
     }
     for frag in ("command.com", "format.com", "tree.com", "edit.com",
-                 "f0hht.ht", "ltchht8ht.ht", "dn5t.aw", "qv0uz.sx",
-                 "htaht.ht", "hteht.ht"):
+                 "f0hht.ht", "dn5t.aw", "qv0uz.sx", "htaht.ht",
+                 "evilcorp.com", "taxonomy.ht", "lonely-bare-c2.ru"):
         assert frag not in domains, frag
-    for keep in ("evilcorp.com", "taxonomy.ht", "audit.it", "lonely-bare-c2.ru", "more.com"):
-        assert keep in domains, keep  # more.com kept because anchored once
+    assert "more.com" in domains  # kept because anchored at least once
 
 
 def test_extract_strings_denoises_prefetch_and_email():
@@ -609,15 +965,18 @@ def test_extract_strings_denoises_prefetch_and_email():
 # Audit log
 # ─────────────────────────────────────────────────────────────
 
-def test_audit_log_creates_entry(tmp_path):
+def test_audit_log_appends_jsonl_entries(tmp_path):
+    # F6: one JSON object per line, append-only — a second action must not rewrite the first.
     import src.utils.audit_log as al
-    al.AUDIT_LOG_PATH = str(tmp_path / "audit_log.json")
+    al.AUDIT_LOG_PATH = str(tmp_path / "audit_log.jsonl")
     log_action("test_tool", ["echo", "hi"], [], [], "success")
+    log_action("test_tool", ["echo", "bye"], [], [], "failed")
     with open(al.AUDIT_LOG_PATH) as f:
-        entries = json.load(f)
-    assert len(entries) == 1
+        entries = [json.loads(line) for line in f]
+    assert len(entries) == 2
     assert entries[0]["tool"] == "test_tool"
     assert entries[0]["status"] == "success"
+    assert entries[1]["status"] == "failed"
 
 
 def test_sha256_missing_file():
@@ -647,9 +1006,24 @@ def test_base_wrapper_makes_evidence_item():
     assert item["severity"] == "high"
 
 
+def test_make_evidence_item_linked_artifacts_are_independent():
+    # Regression for the shared-mutable-default (4.1): two items created without
+    # linked_artifacts must NOT share one list object — mutating one must not
+    # leak into the other.
+    w = BaseWrapper("test_tool")
+    a = w.make_evidence_item("a", "process", "v")
+    b = w.make_evidence_item("b", "process", "v")
+    a["linked_artifacts"].append("proc_1")
+    assert a["linked_artifacts"] == ["proc_1"]
+    assert b["linked_artifacts"] == []
+
+
 def test_base_wrapper_run_command_success():
+    # `echo` is a shell builtin on Windows (no standalone echo.exe), so run_command
+    # (which invokes subprocess.run without shell=True) can't find it there. Use the
+    # running interpreter itself — a real executable on every platform — instead.
     w = BaseWrapper("echo_test")
-    stdout, stderr, code = w.run_command(["echo", "hello"])
+    stdout, stderr, code = w.run_command([sys.executable, "-c", "print('hello')"])
     assert code == 0
     assert "hello" in stdout
 
@@ -721,36 +1095,58 @@ def test_extract_strings_drops_benign_infrastructure_domains():
     assert domains == [], f"benign infra leaked: {[d['value'] for d in domains]}"
 
 
-def test_extract_strings_downgrades_generic_domains_to_low():
-    # D3: a bare domain from a string sweep is an indicator, not a finding — it
-    # is low severity until the reputation layer (4.2) elevates it. (Was medium.)
+def test_extract_strings_anchored_domain_is_low_severity():
+    # D3: an anchored memory-string domain is an indicator, not a finding — it is
+    # emitted at low severity until the reputation layer (4.2) elevates it, and
+    # only if network-corroborated (B-2).
     from src.wrappers.volatility_wrapper import VolatilityWrapper
-    items = VolatilityWrapper()._extract_strings("beacon to evil-c2-panel.xyz now")
+    items = VolatilityWrapper()._extract_strings("beacon GET http://evil-c2-panel.xyz/x now")
     doms = [i for i in items if i["evidence_type"] == "suspicious_domain"]
     assert len(doms) == 1
     assert doms[0]["value"] == "evil-c2-panel.xyz"
     assert doms[0]["severity"] == "low"
 
 
-def test_extract_strings_keeps_onion_high():
-    # D3 must not weaken genuine indicators: .onion hidden services stay high.
+def test_extract_strings_onion_kept_as_low_indicator():
+    # A .onion is kept even when bare (it bypasses the anchored-only drop, since a
+    # memory-resident .onion rarely sits in URL grammar), but emitted at LOW — an
+    # indicator, not a finding. A host holding an in-memory threat-intel / EDR
+    # feed carries dozens of unrelated families' .onions it never contacted; at
+    # high these manufactured a false verdict. A genuine infection is carried by
+    # its other artifacts (ransom note, payload, process, wallet), and the
+    # rescorer still tags this as tor_hidden_service.
     from src.wrappers.volatility_wrapper import VolatilityWrapper
     items = VolatilityWrapper()._extract_strings(
         "ransom abcdef1234567890abcd.onion site"
     )
     onion = [i for i in items if i["value"].endswith(".onion")]
     assert len(onion) == 1
-    assert onion[0]["severity"] == "high"
+    assert onion[0]["severity"] == "low"
     assert onion[0]["evidence_type"] == "suspicious_domain"
 
 
 def test_is_benign_domain_is_host_aware():
     # A lookalike subdomain ("microsoft.com.evil.ru") must NOT be whitelisted.
-    from src.wrappers.volatility_wrapper import _is_benign_domain
-    assert _is_benign_domain("www.microsoft.com") is True
-    assert _is_benign_domain("microsoft.com") is True
-    assert _is_benign_domain("microsoft.com.evil.ru") is False
-    assert _is_benign_domain("evil-c2-panel.xyz") is False
+    from src.data.threat_intel import is_benign_domain
+    assert is_benign_domain("www.microsoft.com") is True
+    assert is_benign_domain("microsoft.com") is True
+    assert is_benign_domain("microsoft.com.evil.ru") is False
+    assert is_benign_domain("evil-c2-panel.xyz") is False
+
+
+def test_dns_allowlist_is_host_aware_not_substring():
+    # D7 step 2: the old substring rule allowlisted lookalikes seen in real threat feeds
+    # ("counter-google.com" matched "google"). Exact-or-subdomain only, local suffixes kept.
+    from src.data.threat_intel import is_allowlisted_dns
+    assert is_allowlisted_dns("google.com") is True
+    assert is_allowlisted_dns("safebrowsing.clients.google.com") is True
+    assert is_allowlisted_dns("counterpath.s3.amazonaws.com") is True
+    assert is_allowlisted_dns("host.lan") is True
+    assert is_allowlisted_dns("4.0.0.0.0.0.0.0.ip6.arpa") is True
+    assert is_allowlisted_dns("counter-google.com") is False
+    assert is_allowlisted_dns("support.0ffice-microsoft.com") is False
+    assert is_allowlisted_dns("login-appleid.apple.com.alert-wode.com") is False
+    assert is_allowlisted_dns("khttpswindowsupdates.com") is False
 
 
 def test_extract_strings_registry_key_stops_at_pipe():
@@ -774,16 +1170,17 @@ def test_extract_strings_registry_key_stops_at_pipe():
 # Domain confidence-tier regression (issue D3 — URL context, non-destructive)
 # ─────────────────────────────────────────────────────────────
 
-def test_extract_strings_anchored_domains_get_higher_confidence():
-    # A domain inside URL/network grammar (scheme, Host:, www., :port, path) is a
-    # likely real endpoint and ranks above a bare token — but BOTH are kept.
+def test_extract_strings_anchored_domains_emitted_bare_dropped():
+    # Anchored-only: a domain inside URL/network grammar (scheme, Host:, www.,
+    # :port, path) is emitted at 0.45; a bare token with no anchor is dropped
+    # entirely (it reaches the pipeline through its real connection/DNS artifact).
     from src.wrappers.volatility_wrapper import VolatilityWrapper
     corpus = "\n".join([
         "GET http://callback-host.xyz/gate.php",   # scheme + path
         "Host: beacon.example.to",                 # header anchor
         "www.tracked.io here",                     # www. prefix
         "endpoint api.svc.net:8443 ready",         # :port
-        "loose prose mentions across.com somewhere",  # bare
+        "loose prose mentions across.com somewhere",  # bare -> dropped
     ])
     conf = {i["value"]: i["confidence"] for i in VolatilityWrapper()._extract_strings(corpus)
             if i["evidence_type"] == "suspicious_domain"}
@@ -791,18 +1188,17 @@ def test_extract_strings_anchored_domains_get_higher_confidence():
     assert conf.get("beacon.example.to") == 0.45
     assert conf.get("www.tracked.io") == 0.45
     assert conf.get("api.svc.net") == 0.45
-    assert conf.get("across.com") == 0.20          # bare token demoted, NOT dropped
+    assert "across.com" not in conf                # bare token dropped
 
 
-def test_extract_strings_bare_domain_is_kept_not_dropped():
-    # Non-destructive: a bare domain still appears in the evidence set (so the
-    # reputation layer can elevate it), just at the lower confidence tier.
+def test_extract_strings_bare_domain_is_dropped():
+    # Anchored-only: a lone bare domain with no URL/network grammar is dropped —
+    # a bare-but-real C2 still reaches the pipeline through its actual
+    # connection/DNS artifact, which is what the aggregator correlates on.
     from src.wrappers.volatility_wrapper import VolatilityWrapper
     items = VolatilityWrapper()._extract_strings("config c2 = lonely-bare-c2.ru ;")
     sd = [i for i in items if i["evidence_type"] == "suspicious_domain"]
-    assert [i["value"] for i in sd] == ["lonely-bare-c2.ru"]
-    assert sd[0]["confidence"] == 0.20
-    assert sd[0]["severity"] == "low"
+    assert sd == []
 
 
 def test_extract_strings_anchored_anywhere_wins():
@@ -870,3 +1266,467 @@ def test_plaso_resolve_cmd_falls_back_to_path_then_bare(monkeypatch, tmp_path):
     monkeypatch.setattr(plaso_wrapper.shutil, "which",
                         lambda n: "/usr/bin/log2timeline.py" if n == "log2timeline.py" else None)
     assert plaso_wrapper._resolve_cmd("log2timeline.py", "log2timeline") == "/usr/bin/log2timeline.py"
+
+
+def test_plaso_parse_csv_reads_l2tcsv_columns(tmp_path):
+    # B-12: psort's l2tcsv format has no "datetime"/"description" columns — the
+    # header is date,time,...,sourcetype,...,desc,...,filename. The parser was
+    # reading the wrong keys, so every row looked empty and even a successful
+    # plaso run produced 0 items.
+    from src.wrappers.plaso_wrapper import PlasoWrapper
+    header = ("date,time,timezone,MACB,source,sourcetype,type,user,host,"
+              "short,desc,version,filename,inode,notes,format,extra")
+    # plaso's windows Run-key plugin emits sourcetype "Run Key" (the generic
+    # winreg plugin's "Registry Key" carries no filter keyword).
+    run_key = ('01/27/2023,19:04:11,UTC,M...,REG,Run Key,Content Modification Time,'
+               '-,-,short,"[HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run] '
+               'evil: [REG_SZ] C:\\Temp\\evil.exe",2,'
+               'NTFS:\\Windows\\System32\\config\\SOFTWARE,1,-,winreg,-')
+    benign = ('05/08/2021,08:23:59,UTC,M...,REG,Registry Key,Content Modification Time,'
+              '-,-,short,"[HKLM\\Software\\Classes\\CLSID\\{X}] (default): [REG_SZ] ok",2,'
+              'NTFS:\\Windows\\System32\\config\\SOFTWARE,1,-,winreg,-')
+    csv_path = tmp_path / "timeline.csv"
+    csv_path.write_text("\n".join([header, run_key, benign]) + "\n")
+
+    items = PlasoWrapper()._parse_csv(csv_path)
+
+    # Run-key row matches SUSPICIOUS_SOURCES at medium; the benign row survives
+    # as a low-severity routine sample (baseline-harvest material).
+    assert [i["severity"] for i in items] == ["medium", "low"]
+    item = items[0]
+    assert "evil.exe" in item["value"]
+    assert item["timestamp"] == "01/27/2023 19:04:11"
+
+
+def test_plaso_routine_sample_low_severity_capped_and_deduped(tmp_path, monkeypatch):
+    # Benign-image runs formerly yielded 0 harvestable plaso items (all medium). Non-matching
+    # rows are sampled at low severity, deduped by (source, desc) and capped.
+    from src.wrappers import plaso_wrapper
+    monkeypatch.setattr(plaso_wrapper, "ROUTINE_SAMPLE_CAP", 2)
+    header = ("date,time,timezone,MACB,source,sourcetype,type,user,host,"
+              "short,desc,version,filename,inode,notes,format,extra")
+    def routine(ts, desc):
+        return (f'01/27/2023,{ts},UTC,M...,REG,Registry Key,Content Modification Time,'
+                f'-,-,short,"{desc}",2,NTFS:\\SOFTWARE,1,-,winreg,-')
+    rows = [
+        routine("10:00:00", "[HKLM\\Classes\\A] ok"),
+        routine("10:00:01", "[HKLM\\Classes\\A] ok"),   # duplicate (source, desc) — dropped
+        routine("10:00:02", "[HKLM\\Classes\\B] ok"),
+        routine("10:00:03", "[HKLM\\Classes\\C] ok"),   # beyond the cap — dropped
+    ]
+    csv_path = tmp_path / "timeline.csv"
+    csv_path.write_text("\n".join([header] + rows) + "\n")
+
+    items = plaso_wrapper.PlasoWrapper()._parse_csv(csv_path)
+
+    assert [i["severity"] for i in items] == ["low", "low"]
+    assert all(i["confidence"] == 0.5 for i in items)
+    assert "Classes\\A" in items[0]["value"] and "Classes\\B" in items[1]["value"]
+
+
+def test_regripper_retries_on_truncated_output(monkeypatch):
+    # rip.pl's own stdout is intermittently truncated to just its two-line banner under Windows
+    # redirection - confirmed reproducible: the identical command against the identical hive
+    # returns full output roughly half the time and only the banner the other half, with no error
+    # either way (upstream Perl/Windows I/O behavior, not this project's code). The wrapper must
+    # retry rather than silently report 0 items for a hive that actually has findings.
+    from src.wrappers.regripper_wrapper import RegRipperWrapper
+
+    w = RegRipperWrapper()
+    call_count = {"n": 0}
+    truncated = "\n".join([
+        "run v.20200511",
+        "(Software, NTUSER.DAT) [Autostart] Get autostart key contents from Software hive",
+    ])
+    full = truncated + "\n".join([
+        "",
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "LastWrite Time 2026-09-04 11:48:22Z",
+        "  Updater - C:\\Users\\Public\\svchost32.exe",
+    ])
+
+    def fake_run_command(cmd, **kwargs):
+        call_count["n"] += 1
+        return (truncated, "", 0) if call_count["n"] < 3 else (full, "", 0)
+
+    monkeypatch.setattr(w, "run_command", fake_run_command)
+    items = w._run_plugin("hive.dat", "run", "rip.pl", max_attempts=5)
+
+    assert call_count["n"] == 3
+    assert any("Updater" in i["value"] for i in items)
+
+
+def test_regripper_gives_up_after_max_attempts(monkeypatch):
+    from src.wrappers.regripper_wrapper import RegRipperWrapper
+
+    w = RegRipperWrapper()
+    truncated = "\n".join([
+        "run v.20200511",
+        "(Software, NTUSER.DAT) [Autostart] Get autostart key contents from Software hive",
+    ])
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: (truncated, "", 0))
+
+    # Always truncated, every attempt — must not loop forever or crash, just give up cleanly.
+    items = w._run_plugin("hive.dat", "run", "rip.pl", max_attempts=3)
+    assert items == []
+
+
+def test_plaso_and_regripper_artifact_ids_stable_and_distinct(tmp_path):
+    # plaso/regripper minted ids with abs(hash())%99999 — per-process-salted, so
+    # ids changed every run, and only ~100k buckets, so distinct artifacts could
+    # collide onto one id and be silently dropped by the aggregator's
+    # dedup-by-artifact_id (the same defect dropped ~19k tsk items on dev01).
+    from src.wrappers.plaso_wrapper import PlasoWrapper
+    from src.wrappers.regripper_wrapper import RegRipperWrapper
+
+    header = ("date,time,timezone,MACB,source,sourcetype,type,user,host,"
+              "short,desc,version,filename,inode,notes,format,extra")
+    rows = [
+        ('01/27/2023,19:04:11,UTC,M...,REG,Run Key,Content Modification Time,'
+         '-,-,short,"[HKLM\\...\\Run] evil: [REG_SZ] C:\\Temp\\evil.exe",2,'
+         'NTFS:\\SOFTWARE,1,-,winreg,-'),
+        ('01/27/2023,19:04:11,UTC,M...,REG,Run Key,Content Modification Time,'
+         '-,-,short,"[HKLM\\...\\Run] evil2: [REG_SZ] C:\\Temp\\evil2.exe",2,'
+         'NTFS:\\SOFTWARE,1,-,winreg,-'),
+    ]
+    csv_path = tmp_path / "timeline.csv"
+    csv_path.write_text("\n".join([header] + rows) + "\n")
+    plaso_ids = [i["artifact_id"] for i in PlasoWrapper()._parse_csv(csv_path)]
+    assert plaso_ids == [i["artifact_id"] for i in PlasoWrapper()._parse_csv(csv_path)]
+    assert len(set(plaso_ids)) == len(plaso_ids) == 2
+
+    rip_output = "\n".join([
+        "run: C:\\Temp\\evil.exe",
+        "run: C:\\Temp\\evil2.exe",
+    ])
+    reg_ids = [i["artifact_id"]
+               for i in RegRipperWrapper()._parse_output(rip_output, "soft_run")]
+    assert reg_ids == [i["artifact_id"] for i in
+                       RegRipperWrapper()._parse_output(rip_output, "soft_run")]
+    assert len(set(reg_ids)) == len(reg_ids) == 2
+
+
+def test_regripper_ignores_negative_result_boilerplate():
+    # RegRipper's own report boilerplate for a checked-but-empty path routinely contains a
+    # SUSPICIOUS_KEYS word as a substring of the KEY NAME itself (e.g. "...\RunOnce has no
+    # subkeys." contains "run") — that used to slip past the keyword filter and get reported as
+    # a HIGH-severity finding despite explicitly saying nothing was found.
+    from src.wrappers.regripper_wrapper import RegRipperWrapper
+
+    output = "\n".join([
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "LastWrite Time 2026-09-04 11:48:22Z",
+        "  Updater - C:\\Users\\Public\\svchost32.exe",
+        "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce has no subkeys.",
+        "Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Run not found.",
+        "Software\\Microsoft\\Windows\\CurrentVersion\\StartupApproved\\Run has no values.",
+    ])
+    items = RegRipperWrapper()._parse_output(output, "run")
+
+    values = [i["value"] for i in items]
+    assert any("Updater" in v for v in values)          # the real finding survives
+    assert not any("has no subkeys" in v for v in values)
+    assert not any("not found" in v for v in values)
+    assert not any("has no values" in v for v in values)
+    assert not any("LastWrite Time" in v for v in values)
+    # The bare "announcing" path line itself ("Software\...\Run" with nothing else on it) is
+    # not a finding either — only the actual name/value pair beneath it is.
+    assert not any(v.strip() == "[run] Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+                   for v in values)
+
+
+def test_regripper_ignores_plugin_version_and_description_banners():
+    # Every plugin prints its own "<name> v.<date>" and "(<hive>) [<category>] <description>"
+    # banner before doing anything — under a profile (-f), that's one pair per plugin (~100+ for
+    # ntuser), and many legitimately mention "run"/"shell"/"startup" in their own name/category
+    # (run, runmru, runvirtual, shellfolders, ...) despite having found nothing yet.
+    from src.wrappers.regripper_wrapper import RegRipperWrapper
+
+    output = "\n".join([
+        "run v.20200511",
+        "(Software, NTUSER.DAT) [Autostart] Get autostart key contents from Software hive",
+        "runmru v.20200525",
+        "(NTUSER.DAT) Gets contents of user's RunMRU key",
+        "shellfolders v.20200515",
+        "  Updater - C:\\Users\\Public\\svchost32.exe",
+    ])
+    items = RegRipperWrapper()._parse_output(output, "ntuser")
+
+    values = [i["value"] for i in items]
+    assert any("Updater" in v for v in values)
+    assert not any("v.2020" in v for v in values)
+    assert not any("Autostart key contents" in v for v in values)
+    assert not any("RunMRU key" in v for v in values)
+
+
+# ─────────────────────────────────────────────────────────────
+# Process-tree structured output (issue 4.5)
+# ─────────────────────────────────────────────────────────────
+
+def test_process_tree_structured_json_and_lineage():
+    # 4.5: the process_tree must be exposed as structured data + a concise
+    # one-line lineage, not only the indented text `value` blob.
+    root = ProcessNode(1636, 1608, "explorer.exe")
+    child = ProcessNode(1940, 1636, "tasksche.exe")
+    grand = ProcessNode(740, 1940, "@WanaDecryptor@")
+    child.suspicious = True
+    root.children = [child]
+    child.children = [grand]
+
+    d = tree_to_dict(root)
+    assert d["pid"] == 1636 and d["name"] == "explorer.exe" and d["ppid"] == 1608
+    assert d["children"][0]["name"] == "tasksche.exe"
+    assert d["children"][0]["suspicious"] is True
+    assert d["children"][0]["children"][0]["pid"] == 740
+
+    assert tree_lineage(root) == \
+        "explorer.exe(1636) → tasksche.exe(1940) → @WanaDecryptor@(740)"
+
+
+def test_process_tree_lineage_one_line_per_leaf():
+    # A branching tree yields one lineage line per leaf path.
+    root = ProcessNode(4, 0, "System")
+    a = ProcessNode(10, 4, "a.exe")
+    b = ProcessNode(11, 4, "b.exe")
+    root.children = [a, b]
+    lines = tree_lineage(root).splitlines()
+    assert lines == ["System(4) → a.exe(10)", "System(4) → b.exe(11)"]
+
+
+# ─────────────────────────────────────────────────────────────
+# DNS query-type disambiguation (issue 4.3-r)
+# ─────────────────────────────────────────────────────────────
+
+def test_dns_query_type_disambiguates_artifact_id(monkeypatch):
+    # 4.3-r: an A (1) and an HTTPS/SVCB (65) lookup for the same domain at the
+    # same frame-instant must produce DISTINCT artifact_ids (they used to
+    # collapse onto one id keyed only on src+domain+timestamp).
+    w = TsharkWrapper()
+    out = "\n".join([
+        "1781000005.000000000\t10.10.14.22\texample-c2.com\t1",
+        "1781000005.000000000\t10.10.14.22\texample-c2.com\t65",
+    ])
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: (out, "", 0))
+
+    items = w._get_dns_queries("x.pcap")
+    ids = [i["artifact_id"] for i in items]
+    assert len(items) == 2
+    assert len(set(ids)) == 2                       # no collapse
+    assert any("_A_" in i for i in ids)
+    assert any("_HTTPS_" in i for i in ids)
+    assert any("DNS A query" in i["value"] for i in items)
+    assert any("DNS HTTPS query" in i["value"] for i in items)
+
+
+def test_suspicious_ports_single_pass_groups_by_port(monkeypatch):
+    # One combined-filter pass replaced 12 per-port scans; grouped output must keep the old
+    # shape: one item per port, first-seen src/dst/timestamp, packet count, tiered severity.
+    w = TsharkWrapper()
+    out = "\n".join([
+        "1781000001.0\t10.0.0.5\t165.245.215.18\t4444",
+        "1781000002.0\t10.0.0.5\t165.245.215.18\t4444",
+        "1781000003.0\t10.0.0.7\t8.8.4.4\t6667",
+        "1781000004.0\t10.0.0.5\t165.245.215.18\t4444",
+        "garbage-line-without-port",
+    ])
+    calls = []
+    def fake(cmd, **k):
+        calls.append(cmd)
+        return out, "", 0
+    monkeypatch.setattr(w, "run_command", fake)
+
+    items = w._get_suspicious_ports("x.pcap")
+    assert len(calls) == 1                                  # one pcap read
+    by_id = {i["artifact_id"]: i for i in items}
+    assert set(by_id) == {"suspport_4444", "suspport_6667"}
+    assert "10.0.0.5 → 165.245.215.18 (3 packets)" in by_id["suspport_4444"]["value"]
+    # frame.time_epoch floats are converted to readable ISO-8601 UTC at the source
+    assert by_id["suspport_4444"]["timestamp"] == "2026-06-09T10:13:21Z"
+    assert by_id["suspport_4444"]["severity"] == "high"     # C2_PORTS_HIGH
+    assert by_id["suspport_6667"]["severity"] == "medium"   # watch tier
+
+
+def test_upload_volume_anomaly_flags_asymmetric_lan_to_wan_only(monkeypatch):
+    """BUGS 2.3: a large upload-dominant LAN→WAN transfer flags on volume alone; downloads,
+    LAN-internal transfers and sub-threshold uploads stay silent."""
+    w = TsharkWrapper()
+
+    def rows(src, dst, port, nbytes, n=10):
+        per = nbytes // n
+        return [f"{src}\t{dst}\t{port}\t{per}\t1000.{i}" for i in range(n)]
+
+    lines = (
+        rows("10.0.0.5", "203.0.113.7", "443", 6_000_000)     # exfil: 6MB out
+        + rows("203.0.113.7", "10.0.0.5", "49152", 200_000)   # ...only 200KB back
+        + rows("10.0.0.5", "142.250.1.1", "443", 500_000)     # sub-threshold upload
+        + rows("142.250.1.1", "10.0.0.5", "49153", 9_000_000) # download-dominant: fine
+        + rows("10.0.0.5", "10.0.0.9", "445", 50_000_000)     # LAN→LAN: fine
+    )
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: ("\n".join(lines), "", 0))
+
+    items = w._get_conversations("x.pcap")
+    anomalies = [i for i in items if i["evidence_type"] == "volume_anomaly"]
+    assert len(anomalies) == 1
+    a = anomalies[0]
+    assert a["severity"] == "medium"
+    assert "10.0.0.5 sent 6,000,000 bytes to 203.0.113.7" in a["value"]
+
+
+def test_host_identity_maps_victim_mac_from_comma_joined_src(monkeypatch):
+    """BUGS 3.2: the macOS victim rows carry comma-joined ip.src (tunneled dual IP layer) —
+    the LAN address must still map to its MAC; WAN-only rows produce nothing."""
+    w = TsharkWrapper()
+    rows = "\n".join([
+        "1781000001.0\t10.5.11.101,142.251.116.94\t1c:f6:4c:57:46:99",
+        "1781000002.0\t104.16.79.73\t20:e5:2a:b6:93:f1",       # WAN src: no identity
+        "1781000003.0\t10.5.11.1\t20:e5:2a:b6:93:f1",
+    ])
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: (rows, "", 0))
+
+    items = w._get_host_identities("x.pcap")
+    values = sorted(i["value"] for i in items)
+    assert values == [
+        "Host 10.5.11.1 has MAC 20:e5:2a:b6:93:f1",
+        "Host 10.5.11.101 has MAC 1c:f6:4c:57:46:99",
+    ]
+
+
+def test_beacon_cadence_flags_regular_remote_flows_only(monkeypatch):
+    """BUGS 2.3: steady session-initiation cadence to a remote peer is C2-shaped without any
+    catalog hit; bursty flows, loopback, and short runs stay silent; LAN heartbeats stay low."""
+    w = TsharkWrapper()
+
+    def syn_rows(src, dst, port, stamps):
+        return [f"{t}\t{src}\t{dst}\t{port}" for t in stamps]
+
+    regular = [1000.0 + i * 50 for i in range(10)]           # ~50s, cv=0
+    bursty = [1000.0, 1001.0, 1002.0, 1500.0, 1501.0, 1502.0, 2900.0, 2901.0]
+    rows = (
+        syn_rows("10.5.11.101", "94.232.249.129", "80", regular)
+        + syn_rows("10.5.11.101", "10.0.0.9", "1514", regular)      # LAN agent heartbeat
+        + syn_rows("127.0.0.1", "127.0.0.1", "1514", regular)       # loopback: skipped
+        + syn_rows("10.5.11.101", "165.245.215.18", "80", bursty)   # irregular: skipped
+        + syn_rows("10.5.11.101", "8.8.8.8", "443", regular[:5])    # below min count
+    )
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: ("\n".join(rows), "", 0))
+
+    items = w._get_beacon_patterns("x.pcap")
+    by_dst = {i["value"].split("→ ")[1].split(":")[0]: i for i in items}
+    assert set(by_dst) == {"94.232.249.129", "10.0.0.9"}
+    assert by_dst["94.232.249.129"]["severity"] == "medium"
+    assert by_dst["10.0.0.9"]["severity"] == "low"
+    assert "every ~50s" in by_dst["94.232.249.129"]["value"]
+    assert by_dst["94.232.249.129"]["evidence_type"] == "beacon_pattern"
+
+
+def test_http_scripted_ua_not_elevated_on_loopback(monkeypatch):
+    """BUGS 1.2b: a scripted UA on loopback traffic is local tooling, not C2 beaconing —
+    capture.pcap's okhttp → 127.0.0.1:9200 flooded 22 high items. LAN/WAN peers still elevate."""
+    w = TsharkWrapper()
+    rows = "\n".join([
+        "1781000001.005\t127.0.0.1\tlocalhost:9200\t/_search\tokhttp/4.9.0",
+        "1781000002.005\t10.0.0.5\tevil.example\t/gate.php\tokhttp/4.9.0",
+        "1781000003.005\t10.0.0.5\tintranet.local\t/page\tMozilla/5.0",
+    ])
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: (rows, "", 0))
+
+    items = w._get_http_requests("x.pcap")
+    assert [i["severity"] for i in items] == [
+        "medium",   # loopback okhttp: elevation gated
+        "high",     # real peer + scripted UA: still elevated
+        "medium",   # browser UA: baseline, unchanged
+    ]
+    assert "[UA: okhttp/4.9.0]" in items[0]["value"]     # UA still surfaced in the value
+
+
+def test_epoch_to_iso_conversion_and_passthrough():
+    from src.wrappers.tshark_wrapper import _epoch_to_iso
+    assert _epoch_to_iso("1781000001.005") == "2026-06-09T10:13:21Z"
+    assert _epoch_to_iso("") == ""            # missing stays empty
+    assert _epoch_to_iso("not-a-number") == "not-a-number"  # unparseable passes through
+
+
+# ─────────────────────────────────────────────────────────────
+# Transferred-file recovery via --export-objects
+# ─────────────────────────────────────────────────────────────
+
+def test_transferred_files_recovers_and_classifies_by_extension(monkeypatch, tmp_path):
+    # http.file_data string-sweeping explicitly skips binary bodies, so a real exfiltrated/
+    # delivered file was never reconstructed anywhere. --export-objects carves it out to disk;
+    # the wrapper must classify it by extension and hash it.
+    w = TsharkWrapper()
+
+    def fake_run_command(cmd, **k):
+        # cmd looks like [..., "--export-objects", "<protocol>,<out_dir>"]
+        spec = cmd[cmd.index("--export-objects") + 1]
+        protocol, out_dir = spec.split(",", 1)
+        if protocol == "http":
+            with open(os.path.join(out_dir, "invoice.exe"), "wb") as f:
+                f.write(b"MZ fake pe header payload")
+            with open(os.path.join(out_dir, "readme.txt"), "wb") as f:
+                f.write(b"just a text file")
+        return "", "", 0
+
+    monkeypatch.setattr(w, "run_command", fake_run_command)
+
+    items = w._get_transferred_files("x.pcap")
+    by_name = {}
+    for i in items:
+        for fname in ("invoice.exe", "readme.txt"):
+            if fname in i["value"]:
+                by_name[fname] = i
+
+    assert set(by_name) == {"invoice.exe", "readme.txt"}
+    assert by_name["invoice.exe"]["severity"] == "high"      # executable extension
+    assert by_name["readme.txt"]["severity"] == "medium"     # ordinary file
+    assert by_name["invoice.exe"]["evidence_type"] == "transferred_file"
+    assert "SHA256" in by_name["invoice.exe"]["value"]
+    assert "HTTP" in by_name["invoice.exe"]["value"]
+
+
+def test_transferred_files_flags_ransomware_extension_critical(monkeypatch):
+    w = TsharkWrapper()
+
+    def fake_run_command(cmd, **k):
+        spec = cmd[cmd.index("--export-objects") + 1]
+        protocol, out_dir = spec.split(",", 1)
+        if protocol == "smb":
+            with open(os.path.join(out_dir, "budget.xlsx.locked"), "wb") as f:
+                f.write(b"encrypted-looking bytes")
+        return "", "", 0
+
+    monkeypatch.setattr(w, "run_command", fake_run_command)
+
+    items = w._get_transferred_files("x.pcap")
+    assert len(items) == 1
+    assert items[0]["severity"] == "critical"
+    assert "SMB" in items[0]["value"]
+
+
+def test_transferred_files_none_when_export_fails(monkeypatch):
+    w = TsharkWrapper()
+    monkeypatch.setattr(w, "run_command", lambda *a, **k: ("", "no such protocol", 1))
+    assert w._get_transferred_files("x.pcap") == []
+
+
+def test_transferred_files_groups_byte_identical_repeats(monkeypatch):
+    # A scanner probing the same endpoint (or a repeated heartbeat body) can export the same
+    # object dozens of times — those must collapse into one item with an observation count,
+    # not one near-duplicate finding per instance.
+    w = TsharkWrapper()
+
+    def fake_run_command(cmd, **k):
+        spec = cmd[cmd.index("--export-objects") + 1]
+        protocol, out_dir = spec.split(",", 1)
+        if protocol == "http":
+            for i in range(5):
+                name = "%5c" if i == 0 else f"%5c({i})"
+                with open(os.path.join(out_dir, name), "wb") as f:
+                    f.write(b"same 404 page every time")
+        return "", "", 0
+
+    monkeypatch.setattr(w, "run_command", fake_run_command)
+
+    items = w._get_transferred_files("x.pcap")
+    assert len(items) == 1
+    assert "seen 5x" in items[0]["value"]

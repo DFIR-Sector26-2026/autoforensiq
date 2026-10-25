@@ -1,34 +1,29 @@
-"""
-AutoForensiq — Main CLI Entry Point
-"""
+"""AutoForensiq — Main CLI Entry Point"""
 
 import argparse
 import json
 import sys
 import os
+import shutil
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
 
+# Ensure the project root is importable for the `src` package, once, at import time — the per-stage
+# functions below used to repeat this insert individually.
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-# ─────────────────────────────────────────────────────────────
+from src.utils.encoding import ensure_utf8_stdio
+ensure_utf8_stdio()
+
+
 # Helpers
-# ─────────────────────────────────────────────────────────────
 
 def _stage(num: int, name: str):
     print(f"\n{'=' * 60}")
     print(f"  STAGE {num}: {name}")
     print(f"{'=' * 60}")
-
-
-def _stub(stage_name: str, expected_output: str):
-    print(f"  [STUB] {stage_name} not yet integrated.")
-    print(f"         Expected output: {expected_output}")
-
-
-def _load_json(path: str):
-    with open(path) as f:
-        return json.load(f)
 
 
 def _ensure_output_dir():
@@ -47,152 +42,106 @@ def _clear_stale_outputs():
             stale.unlink()
 
 
-# ─────────────────────────────────────────────────────────────
+def _publish_to_dashboard():
+    """Copy the artifacts the web dashboard reads into dashboard/public/data/ so `npm run dev`
+    serves the latest run at /data/*."""
+    data_dir = ROOT_DIR / "dashboard" / "public" / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("unified_evidence.json", "dashboard.json", "final_report.md",
+                 "evidence_reconciliation.json"):
+        src = ROOT_DIR / "output" / name
+        if src.exists():
+            shutil.copy2(src, data_dir / name)
+    print(f"  [DASHBOARD] Published run → {data_dir}")
+
+
 # STAGE 1 — CLASSIFIER
-# ─────────────────────────────────────────────────────────────
 
 def run_classifier(report_path: str, config_override: dict = None,
                    provided_artifact_types=None):
-
     _stage(1, "Intent Classifier")
-
     from src.classifier.intent_classifier import classify_file
-
     import yaml
 
     cfg_path = ROOT_DIR / "config.yaml"
-
     with open(cfg_path) as f:
         cfg = yaml.safe_load(f)
-
     output_path = ROOT_DIR / cfg["paths"]["case_context_output"]
-
-    return classify_file(report_path, str(output_path),
-                         config_override=config_override,
+    return classify_file(report_path, str(output_path), config_override=config_override,
                          provided_artifact_types=provided_artifact_types)
 
 
-# ─────────────────────────────────────────────────────────────
 # STAGE 2 — TOOL SELECTOR
-# ─────────────────────────────────────────────────────────────
 
 def run_tool_selector(case_context: dict):
-
     _stage(2, "Dynamic Tool Selector")
-
     out_path = ROOT_DIR / "output" / "execution_plan.json"
 
     try:
-
-        from src.agents.tool_selector import (
-            generate_execution_plan,
-            load_json as _load_ontology
-        )
+        from src.agents.tool_selector import generate_execution_plan, load_json as _load_ontology
 
         ontology_path = ROOT_DIR / "src" / "data" / "tool_ontology.json"
-
         ontology = _load_ontology(str(ontology_path))
-
         plan = generate_execution_plan(case_context, ontology)
-
         with open(out_path, "w") as f:
             json.dump(plan, f, indent=2)
-
         print(f"  [LIVE] Execution plan generated → {out_path}")
-
         return plan
 
     except Exception as exc:
+        # DFIR-safe degradation: over-collect (run every wrapper) rather than risk missing
+        # evidence; the plan records the fallback so the audit trail shows DTSA never ran.
+        from src.orchestrator import WRAPPER_MAP
 
-        print(f"  [WARN] Tool selector failed ({exc})")
-
+        print(f"  [WARN] Tool selector failed ({exc}) — "
+              f"falling back to running ALL {len(WRAPPER_MAP)} tools")
         stub_plan = {
             "tools": [
-                {"name": "volatility3", "order": 1},
-                {"name": "tshark", "order": 2},
-                {"name": "tsk_fls", "order": 3},
-                {"name": "regripper", "order": 4},
-                {"name": "plaso", "order": 5},
-                {"name": "email", "order": 6},
-                {"name": "browser", "order": 7}
-            ]
+                {"name": name, "order": i}
+                for i, name in enumerate(WRAPPER_MAP, start=1)
+            ],
+            "fallback": True,
+            "fallback_reason": str(exc),
         }
-
         with open(out_path, "w") as f:
             json.dump(stub_plan, f, indent=2)
-
         return stub_plan
 
 
-# ─────────────────────────────────────────────────────────────
 # STAGE 3 — ORCHESTRATOR
-# ─────────────────────────────────────────────────────────────
 
 def run_orchestrator(execution_plan: dict, evidence_files: dict):
-
     _stage(3, "Execution Orchestrator")
-
     if not evidence_files:
-        _stub(
-            "Orchestrator (P3)",
-            "output/raw/<tool>_output.json"
-        )
+        print("  [SKIP] No evidence files provided — skipping tool execution.")
         return {}
 
     _clear_stale_outputs()
-
     try:
-
-        sys.path.insert(0, str(ROOT_DIR))
-
         from src.orchestrator import run_tools
-
         print("  [LIVE] Running orchestrator...")
-
         return run_tools(execution_plan, evidence_files)
-
     except Exception as exc:
-
         print(f"  [ERROR] Orchestrator failed: {exc}")
-
         return {}
 
 
-# ─────────────────────────────────────────────────────────────
 # STAGE 4 — AGGREGATOR
-# ─────────────────────────────────────────────────────────────
 
 def run_aggregator(case_context: dict):
-
     _stage(4, "Evidence Aggregator")
-
     unified_path = ROOT_DIR / "output" / "unified_evidence.json"
-
     try:
-
-        sys.path.insert(0, str(ROOT_DIR))
-
-        from src.aggregator.evidence_aggregator import (
-            aggregate_evidence
-        )
-
+        from src.aggregator.evidence_aggregator import aggregate_evidence
         print("  [LIVE] Running aggregator...")
-
         return aggregate_evidence(
             case_context=case_context,
             raw_outputs_dir=str(ROOT_DIR / "output" / "raw"),
             output_path=str(unified_path)
         )
-
     except Exception as exc:
-
         print(f"  [ERROR] Aggregator failed: {exc}")
-
-        return {
-            "evidence_items": [],
-            "generated_at": "",
-            "total_items": 0
-        }
+        return {"evidence_items": [], "generated_at": "", "total_items": 0}
 
 
 def _load_bulk_manifest(manifest_path: str) -> tuple[dict[str, dict], str, str]:
@@ -237,46 +186,35 @@ def _load_bulk_manifest(manifest_path: str) -> tuple[dict[str, dict], str, str]:
             "output_path": spec.get("output_path"),
         }
 
-    output_root = manifest.get("output_root", str(ROOT_DIR / "output" / "bulk")) if isinstance(manifest, dict) else str(ROOT_DIR / "output" / "bulk")
-    summary_path = manifest.get("summary_path", str(ROOT_DIR / "output" / "bulk_summary.json")) if isinstance(manifest, dict) else str(ROOT_DIR / "output" / "bulk_summary.json")
+    top = manifest if isinstance(manifest, dict) else {}
+    output_root = top.get("output_root", str(ROOT_DIR / "output" / "bulk"))
+    summary_path = top.get("summary_path", str(ROOT_DIR / "output" / "bulk_summary.json"))
     return machine_runs, output_root, summary_path
 
 
 def run_bulk_aggregation(manifest_path: str):
-
     _stage(4, "Bulk Evidence Aggregator")
-
     try:
-        sys.path.insert(0, str(ROOT_DIR))
-
         from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
 
         machine_runs, output_root, summary_path = _load_bulk_manifest(manifest_path)
-
         print(f"  [LIVE] Running bulk aggregation for {len(machine_runs)} machines...")
-
         bulk_summary = aggregate_bulk_evidence(
             machine_runs=machine_runs,
             output_root=output_root,
         )
-
         summary = {
             "generated_at": bulk_summary.get("generated_at", ""),
             "manifest_path": manifest_path,
             "bulk_summary": bulk_summary,
         }
-
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2)
-
         print(f"  [SAVE] Wrote bulk summary → {summary_path}")
-
         return summary
 
     except Exception as exc:
-
         print(f"  [ERROR] Bulk aggregation failed: {exc}")
-
         return {
             "generated_at": "",
             "manifest_path": manifest_path,
@@ -288,88 +226,43 @@ def run_bulk_aggregation(manifest_path: str):
         }
 
 
-# ─────────────────────────────────────────────────────────────
 # STAGE 5/6 — ML + XAI
-# ─────────────────────────────────────────────────────────────
 
 def run_ml_pipeline():
-
     _stage(5, "Anomaly Detector + XAI Explainer")
-
     shap_path = ROOT_DIR / "output" / "shap_explanations.json"
-
     try:
-
-        sys.path.insert(0, str(ROOT_DIR))
-
-        from src.ml.pipeline import (
-            run_ml_pipeline as _run_p5
-        )
-
+        from src.ml.pipeline import run_ml_pipeline as _run_p5
         print("  [LIVE] Running P5 ML pipeline...")
-
         result = _run_p5(
             input_path=str(ROOT_DIR / "output" / "unified_evidence.json"),
             output_path=str(shap_path),
             baseline_path=str(ROOT_DIR / "data" / "baseline_normal.json")
         )
-
-        return result if result else {
-            "explanations": [],
-            "generated_at": ""
-        }
-
+        return result if result else {"explanations": [], "generated_at": ""}
     except Exception as exc:
-
         print(f"  [ERROR] ML pipeline failed: {exc}")
-
-        return {
-            "explanations": [],
-            "generated_at": ""
-        }
+        return {"explanations": [], "generated_at": ""}
 
 
-# ─────────────────────────────────────────────────────────────
 # STAGE 7 — REPORT GENERATOR
-# ─────────────────────────────────────────────────────────────
 
-def run_report_generator(
-    unified_evidence: dict,
-    shap_explanations: dict,
-    case_context: dict,
-    config_override: dict = None
-):
-
+def run_report_generator(unified_evidence: dict, shap_explanations: dict, case_context: dict,
+                         config_override: dict = None):
     _stage(7, "Report Generator")
-
     try:
-
-        from src.report_generator.report_generator import (
-            generate_report
-        )
-
+        from src.report_generator.report_generator import generate_report
         print("  [LIVE] Running report generator...")
-
-        return generate_report(
-            unified_evidence,
-            shap_explanations,
-            case_context,
-            config_override=config_override
-        )
-
+        return generate_report(unified_evidence, shap_explanations, case_context,
+                               config_override=config_override)
     except Exception as exc:
-
         print(f"  [ERROR] Report generator failed: {exc}")
-
         return ""
 
 
-# ─────────────────────────────────────────────────────────────
 # ARGUMENTS
-# ─────────────────────────────────────────────────────────────
 
 def parse_args():
-
     parser = argparse.ArgumentParser(
         description="AutoForensiq — run with no arguments to open the GUI"
     )
@@ -427,7 +320,8 @@ def parse_args():
 
     parser.add_argument(
         "--mock",
-        action="store_true"
+        action="store_true",
+        help="Build the final report from data without calling an LLM."
     )
 
     parser.add_argument(
@@ -439,7 +333,30 @@ def parse_args():
 
     parser.add_argument(
         "--skip-tools",
-        action="store_true"
+        action="store_true",
+        help="Stop after classification; do not select or run analysis tools."
+    )
+
+    parser.add_argument(
+        "--ti-enrich",
+        action="store_true",
+        help=(
+            "Opt-in: query the abuse.ch ThreatFox database to attribute flagged IOCs to known "
+            "malware families. Discloses case IOCs to a third party — off by default. Needs "
+            "ABUSECH_AUTH_KEY set; degrades silently offline."
+        )
+    )
+
+    parser.add_argument(
+        "--known-bad",
+        nargs="*",
+        default=[],
+        metavar="HOST",
+        help=(
+            "Per-case known-bad domains/IPs (e.g. from an advisory or TI feed). Folded into "
+            "case_context.known_bad_hosts: evidence touching these hosts is boosted and "
+            "IOC-tagged by the reputation match. Example: --known-bad evil.example 203.0.113.7"
+        )
     )
 
     parser.add_argument(
@@ -451,24 +368,18 @@ def parse_args():
     return parser.parse_args()
 
 
-# ─────────────────────────────────────────────────────────────
 # EVIDENCE MAPPING
-# ─────────────────────────────────────────────────────────────
 
 def _map_evidence_files(paths: list):
-
-    # Each evidence type maps to a *list* of paths so that supplying more than
-    # one artifact of the same kind (e.g. two memory images) analyses all of
-    # them rather than silently keeping only the last one.
+    # Each evidence type maps to a *list* of paths — two memory images should both be analysed, not
+    # silently keep only the last one.
     mapping = {}
 
     def _add(key, path):
         mapping.setdefault(key, []).append(path)
 
     for path in paths:
-
         lower = path.lower()
-
         ext = Path(path).suffix.lower()
 
         # MEMORY
@@ -486,6 +397,16 @@ def _map_evidence_files(paths: list):
         elif ext in [".img", ".dd", ".e01", ".dmg"]:
             _add("disk_image", path)
 
+        # LOGS: checked before REGISTRY below — an unambiguous extension must win over a filename
+        # substring guess. "System.evtx"/"system_events.evtx" is the natural, even default, name
+        # for an exported Windows System event log, and it was being caught by REGISTRY's "system"
+        # in lower check before ever reaching this branch, misrouting every such file to RegRipper
+        # instead of Plaso. .log typed separately from .evtx.
+        elif ext == ".evtx":
+            _add("log_files", path)
+        elif ext == ".log":
+            _add("text_log", path)
+
         # REGISTRY
         elif (
             "system" in lower
@@ -495,11 +416,8 @@ def _map_evidence_files(paths: list):
         ):
             _add("registry_hive", path)
 
-        # EMAIL  (issue D4: a .csv mailbox/spam export was previously dropped.
-        # .csv is ambiguous — route it to the email analyzer only when the
-        # filename signals mail, so a bare data.csv isn't keyword-scanned as a
-        # phishing archive. The email wrapper is text-based, so it parses any of
-        # these formats.)
+        # EMAIL (D4): .csv is ambiguous — route to the email analyzer only when the filename signals
+        # mail, so a bare data.csv isn't keyword-scanned.
         elif ext in [".eml", ".msg"] or (
             ext == ".csv"
             and any(h in lower for h in ("email", "mail", "inbox", "phish", "spam"))
@@ -510,21 +428,13 @@ def _map_evidence_files(paths: list):
         elif "history" in lower:
             _add("browser", path)
 
-        # LOGS
-        elif ext in [".log", ".evtx"]:
-            _add("log_files", path)
-
     return mapping
 
 
-# ─────────────────────────────────────────────────────────────
 # PRE-FLIGHT CHECK
-# ─────────────────────────────────────────────────────────────
 
-# Maps the evidence keys produced by _map_evidence_files() → the artifact_type
-# enum values used by the classifier / case_context schema. Most keys already
-# match; only the email/browser shorthands differ. Used to narrow the
-# narrative artifact_types to what was actually provided (issue 1.2).
+# Evidence keys → classifier artifact_type enum values (1.2). Only the email/browser shorthands
+# differ; other keys pass through unchanged.
 _EVIDENCE_KEY_TO_ARTIFACT_TYPE = {
     "email":   "email_archive",
     "browser": "browser_history",
@@ -539,20 +449,32 @@ def _provided_artifact_types(evidence_files: dict) -> list:
     })
 
 
-# Maps each forensic tool name → the evidence key it requires
-_TOOL_EVIDENCE_MAP = {
-    "volatility3": "memory_dump",
-    "memprocfs":   "memory_dump",
-    "tshark":      "pcap",
-    "tsk_fls":     "disk_image",
-    "regripper":   "registry_hive",
-    "plaso":       "log_files",
-    "email":       "email",
-    "browser":     "browser",
-}
+# Tool → required evidence key; single source of truth from each wrapper's `consumes` (D2 — re-typed
+# copies previously let plaso drift).
+from src.orchestrator import TOOL_EVIDENCE_MAP as _TOOL_EVIDENCE_MAP, ACQUIRE_HINTS as _ACQUIRE_HINT
+
+
+def _build_evidence_sources(evidence_files: dict) -> dict:
+    """Tool -> source filename(s), so the report can attribute findings without threading a
+    source_file field through every wrapper and the item schema.
+
+    _TOOL_EVIDENCE_MAP's values are always tuples of evidence keys (even single-key tools), so
+    membership must be checked per key, not the tuple as a whole against evidence_files' plain-
+    string keys — that comparison never matched, leaving evidence_sources empty for every tool
+    and silently breaking every "Sources" column and per-file report downstream."""
+    return {
+        tool: ", ".join(
+            Path(p).name
+            for ev_key in ev_keys if ev_key in evidence_files
+            for p in evidence_files[ev_key]
+        )
+        for tool, ev_keys in _TOOL_EVIDENCE_MAP.items()
+        if any(ev_key in evidence_files for ev_key in ev_keys)
+    }
 
 _TOOL_DISPLAY = {
     "volatility3": "Volatility3       (memory analysis)",
+    "memprocfs":   "MemProcFS         (memory analysis)",
     "tshark":      "tshark            (network capture analysis)",
     "tsk_fls":     "The Sleuth Kit    (disk image analysis)",
     "regripper":   "RegRipper         (registry hive analysis)",
@@ -561,25 +483,9 @@ _TOOL_DISPLAY = {
     "browser":     "Browser analyzer  (browser history analysis)",
 }
 
-_ACQUIRE_HINT = {
-    "memory_dump":    "Acquire a memory dump (.dmp / .mem) using WinPmem, DumpIt, or LiME.",
-    "pcap":           "Capture network traffic (.pcap) via Wireshark or tcpdump.",
-    "disk_image":     "Acquire a disk image (.img / .dd / .e01) using FTK Imager or dd.",
-    "registry_hive":  "Export registry hives (NTUSER.DAT / SYSTEM / SOFTWARE) from the affected host.",
-    "log_files":      "Export Windows event logs (.evtx) via Event Viewer or wevtutil.",
-    "email":          "Export email artifacts (.eml / .msg) from the affected mail client.",
-    "browser":        "Export browser History files from the user profile directory.",
-}
-
-
 def preflight_check(evidence_files: dict, execution_plan: dict):
-    """
-    Print a pre-flight summary of which tools will run and which will be
-    skipped based on the evidence files that were supplied.
-
-    For each skipped tool a one-line acquisition hint is printed so the
-    investigator knows exactly what to collect to enable full coverage.
-    """
+    """Print which planned tools WILL run vs be SKIPPED for the supplied evidence, with an
+    acquisition hint per skipped tool."""
     print("\n" + "─" * 60)
     print("  PRE-FLIGHT CHECK")
     print("─" * 60)
@@ -590,11 +496,11 @@ def preflight_check(evidence_files: dict, execution_plan: dict):
     will_skip = []
 
     for tool in tools_in_plan:
-        required_ev = _TOOL_EVIDENCE_MAP.get(tool)
-        if required_ev is None or required_ev in evidence_files:
+        required = _TOOL_EVIDENCE_MAP.get(tool, ())
+        if not required or any(ev in evidence_files for ev in required):
             will_run.append(tool)
         else:
-            will_skip.append((tool, required_ev))
+            will_skip.append((tool, required))
 
     if will_run:
         print("  Tools that WILL run:")
@@ -604,21 +510,36 @@ def preflight_check(evidence_files: dict, execution_plan: dict):
 
     if will_skip:
         print("  Tools that will be SKIPPED (evidence not provided):")
-        for t, ev in will_skip:
+        for t, required in will_skip:
             label = _TOOL_DISPLAY.get(t, t)
-            hint  = _ACQUIRE_HINT.get(ev, f"Provide a '{ev}' artifact to enable this tool.")
             print(f"    [--]  {label}")
-            print(f"          Hint: {hint}")
+            for ev in required:
+                hint = _ACQUIRE_HINT.get(ev, f"Provide a '{ev}' artifact to enable this tool.")
+                print(f"          Hint: {hint}")
+
+    # Evidence nobody in the plan consumes would otherwise vanish without a trace
+    consumed = {ev for t in will_run for ev in _TOOL_EVIDENCE_MAP.get(t, ())}
+    for key, paths in evidence_files.items():
+        if key in consumed:
+            continue
+        for p in paths:
+            print(f"  [WARN] {Path(p).name}: no planned tool consumes this evidence ({key}) — "
+                  "it will not be analysed.")
+
+    # VMware snapshot memory without its .vmss/.vmsn sidecar: MemProcFS carries the analysis instead of volatility
+    for mem in evidence_files.get("memory_dump", []):
+        p = Path(mem)
+        if p.suffix.lower() == ".vmem" and not any(
+                p.with_suffix(s).exists() for s in (".vmss", ".vmsn")):
+            print(f"  [WARN] {p.name}: VMware .vmem without a .vmss/.vmsn sidecar — "
+                  "volatility3 may fail on pre-Vista guests; MemProcFS results will carry.")
 
     print("─" * 60)
 
 
-# ─────────────────────────────────────────────────────────────
 # MAIN
-# ─────────────────────────────────────────────────────────────
 
 def main(args=None):
-
     if args is None:
         args = parse_args()
 
@@ -636,33 +557,10 @@ def main(args=None):
 
     _ensure_output_dir()
 
-    # If bulk manifest provided, run bulk aggregation and exit early
+    # Bulk manifest → run the validated bulk-aggregation path and exit early.
     if args.bulk_manifest:
-        print(f"\n[BULK] Loading manifest: {args.bulk_manifest}")
-        try:
-            with open(args.bulk_manifest) as f:
-                manifest = json.load(f)
-        except Exception as exc:
-            print(f"  [ERROR] Failed to load bulk manifest: {exc}")
-            return
-
-        machine_runs = manifest.get("machines") or manifest
-
-        try:
-            sys.path.insert(0, str(ROOT_DIR))
-            from src.aggregator.evidence_aggregator import aggregate_bulk_evidence
-
-            summary = aggregate_bulk_evidence(
-                machine_runs, output_root=str(ROOT_DIR / "output" / "bulk")
-            )
-            summary_path = ROOT_DIR / "output" / "bulk_summary.json"
-            with open(summary_path, "w") as f:
-                json.dump(summary, f, indent=2)
-            print(f"  [BULK] Summary written → {summary_path}")
-            return
-        except Exception as exc:
-            print(f"  [ERROR] Bulk aggregation failed: {exc}")
-            return
+        run_bulk_aggregation(args.bulk_manifest)
+        return
 
     os.chdir(ROOT_DIR)
 
@@ -680,9 +578,8 @@ def main(args=None):
                 llm_override[model_key] = args.model
         config_override = {"llm": llm_override}
 
-    # Map the supplied evidence files up-front so the classifier can narrow its
-    # narrative artifact_types to what was actually provided (issue 1.2) before
-    # P2 selects tools from them.
+    # Map evidence up-front so the classifier can narrow its narrative artifact_types to what was
+    # actually provided (1.2).
     evidence_files = _map_evidence_files(args.evidence)
     provided_artifact_types = _provided_artifact_types(evidence_files)
 
@@ -692,6 +589,15 @@ def main(args=None):
         config_override=config_override,
         provided_artifact_types=provided_artifact_types,
     )
+
+    # Analyst-supplied per-case threat intel (BUGS 2.1) — joins the P4 reputation match;
+    # re-persisted so the saved context records what intel the verdict was based on.
+    known_bad = [t.strip() for t in (args.known_bad or []) if t.strip()]
+    if known_bad:
+        case_context["known_bad_hosts"] = known_bad
+        with open(ROOT_DIR / "output" / "case_context.json", "w") as f:
+            json.dump(case_context, f, indent=2)
+        print(f"  [TI] {len(known_bad)} per-case known-bad host(s) will join the reputation match")
 
     if args.skip_tools:
         print("\n[SKIP] --skip-tools enabled")
@@ -715,26 +621,20 @@ def main(args=None):
         priority_list = [f"#{i + 1} {k}" for i, k in enumerate(evidence_files)]
         print(f"  [PRIORITY] {' -> '.join(priority_list)}")
 
-    # Record which evidence file each tool drew from so the report can attribute
-    # findings to their source artifact. Keyed by tool because each tool reads a
-    # single evidence type — avoids threading a source_file field through every
-    # wrapper and the evidence_item schema.
-    case_context["evidence_sources"] = {
-        tool: ", ".join(Path(p).name for p in evidence_files[ev_key])
-        for tool, ev_key in _TOOL_EVIDENCE_MAP.items()
-        if ev_key in evidence_files
-    }
+    case_context["evidence_sources"] = _build_evidence_sources(evidence_files)
 
     preflight_check(evidence_files, execution_plan)
 
-    raw_outputs = run_orchestrator(execution_plan, evidence_files)
+    # Side effects only: writes output/raw/<tool>_output.json, which Stage 4 re-reads from disk. The
+    # returned dict is intentionally not used here.
+    run_orchestrator(execution_plan, evidence_files)
 
     # STAGE 4
     unified_evidence = run_aggregator(case_context)
 
-    # Issue 1.1 — reconcile the narrative classification against the evidence
-    # actually recovered. Leaves classifier_confidence untouched; attaches a
-    # reconciled_confidence + divergence flag for the report and audit trail.
+    # Issue 1.1 — reconcile the narrative classification against the evidence actually recovered.
+    # Leaves classifier_confidence untouched; attaches a reconciled_confidence + divergence flag for
+    # the report and audit trail.
     try:
         from src.classifier.evidence_reconciler import reconcile_evidence
         reconciliation = reconcile_evidence(case_context, unified_evidence)
@@ -753,6 +653,17 @@ def main(args=None):
     except Exception as exc:
         print(f"  [RECONCILE] skipped ({exc})")
 
+    # PF-1b — opt-in ThreatFox attribution. Runs before P5/P7, which re-read the unified file.
+    if args.ti_enrich:
+        try:
+            from src.ioc.ti_enricher import enrich_unified
+            n = enrich_unified(
+                unified_evidence,
+                output_path=str(ROOT_DIR / "output" / "unified_evidence.json"))
+            print(f"  [TI] ThreatFox attribution annotated {n} item(s)")
+        except Exception as exc:
+            print(f"  [TI] enrichment skipped ({exc})")
+
     # STAGE 5/6
     shap_explanations = run_ml_pipeline()
 
@@ -766,6 +677,12 @@ def main(args=None):
         print(f"  [DEV] HTML report → {html_path}")
     except Exception as e:
         print(f"  [DEV] HTML report skipped: {e}")
+
+    # Publish the run to the web dashboard's static data dir.
+    try:
+        _publish_to_dashboard()
+    except Exception as e:
+        print(f"  [DASHBOARD] Publish skipped: {e}")
 
     print("\n" + "=" * 60)
     print("  PIPELINE COMPLETE")

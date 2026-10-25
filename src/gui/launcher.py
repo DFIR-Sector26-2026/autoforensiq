@@ -11,6 +11,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import threading
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -24,15 +25,26 @@ from src.gui.theme import (
 )
 from src.gui.widgets import ArtifactRow
 
-# Extension → artifact type (mirrors _map_evidence_files in autoforensiq.py)
+# Extension: artifact type (mirrors _map_evidence_files in autoforensiq.py). The single source for the evidence-dialog filter groups below
 _EXT_MAP: dict[str, str] = {
-    ".dmp": "memory_dump", ".mem": "memory_dump", ".raw": "memory_dump",
+    ".dmp": "memory_dump", ".mem": "memory_dump", ".raw": "memory_dump", ".vmem": "memory_dump",
     ".pcap": "pcap", ".pcapng": "pcap",
-    ".img": "disk_image", ".dd": "disk_image", ".e01": "disk_image",
+    ".img": "disk_image", ".dd": "disk_image", ".e01": "disk_image", ".dmg": "disk_image",
     ".dat": "registry_hive", ".hiv": "registry_hive",
     ".eml": "email_archive", ".msg": "email_archive",
-    ".log": "log_files", ".evtx": "log_files",
+    ".log": "text_log", ".evtx": "log_files",
 }
+
+# Artifact type → evidence-dialog filter label, in display order.
+_TYPE_LABELS = [
+    ("memory_dump",   "Memory dumps"),
+    ("pcap",          "PCAP"),
+    ("disk_image",    "Disk images"),
+    ("registry_hive", "Registry hives"),
+    ("log_files",     "Event logs"),
+    ("text_log",      "Text logs"),
+    ("email_archive", "Email"),
+]
 
 
 def _detect_type(path: str) -> str:
@@ -41,6 +53,10 @@ def _detect_type(path: str) -> str:
     t = _EXT_MAP.get(p.suffix.lower())
     if t:
         return t
+    # .csv is conditional, not in _EXT_MAP: the CLI routes it to the email analyzer only when the
+    # name signals mail (D4), so only those badge as email — a bare data.csv stays unknown.
+    if p.suffix.lower() == ".csv" and any(h in low for h in ("email", "mail", "inbox", "phish", "spam")):
+        return "email_archive"
     if "memory" in low:
         return "memory_dump"
     if any(k in low for k in ("ntuser", "system", "software")):
@@ -55,7 +71,7 @@ ctk.set_default_color_theme("dark-blue")
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 _PROVIDER_MODELS: dict[str, list[str]] = {
-    "anthropic": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-7"],
+    "anthropic": ["claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-opus-4-8"],
     "openai":    ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
     "deepseek":  ["deepseek-chat", "deepseek-reasoner"],
 }
@@ -86,15 +102,18 @@ class AutoForensiqGUI(ctk.CTk):
         self._report_path = ctk.StringVar()
         self._artifact_rows: list = []
         self._provider = ctk.StringVar(value="anthropic")
-        self._model = ctk.StringVar(value="claude-sonnet-4-6")
+        self._model = ctk.StringVar(value="claude-sonnet-5")
         self._mock_mode = ctk.BooleanVar(value=True)
         self._skip_tools = ctk.BooleanVar(value=False)
+        self._known_bad = ctk.StringVar()
         self._tool_vars: dict[str, ctk.BooleanVar] = {
             name: ctk.BooleanVar(value=True) for name, _ in _TOOLS
         }
         self._pipeline_running = False
+        self._dashboard_proc: subprocess.Popen | None = None
 
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ── Layout skeleton ───────────────────────────────────────────────────────
 
@@ -118,10 +137,7 @@ class AutoForensiqGUI(ctk.CTk):
     # ── Shared card helper ────────────────────────────────────────────────────
 
     def _card(self, title: str):
-        """
-        Create a labelled section card.
-        Returns (card, body_frame, header_frame).
-        """
+        """Create a labelled section card. Returns (card, body_frame, header_frame)."""
         card = ctk.CTkFrame(
             self._scroll,
             fg_color=CARD_BG,
@@ -244,24 +260,34 @@ class AutoForensiqGUI(ctk.CTk):
         self._priority_hint.pack_forget()
 
     def _add_evidence_files(self) -> None:
+        # Multi-select dialog (Ctrl/Shift+click). Tk patterns are case-sensitive on Linux, so each
+        # extension is offered in both cases (dev01-c-drive.E01 / MEMORY.DMP were invisible before).
+        groups = {
+            label: [ext.lstrip(".") for ext, t in _EXT_MAP.items() if t == atype]
+            for atype, label in _TYPE_LABELS
+        }
+        # Conditional in _detect_type, so not in _EXT_MAP — but still selectable here.
+        groups["Email"].append("csv")
+
+        def both_cases(exts: list[str]) -> str:
+            return " ".join(f"*.{e} *.{e.upper()}" for e in exts)
+
         paths = filedialog.askopenfilenames(
             title="Select evidence files",
             filetypes=[
-                ("Forensic artifacts",
-                 "*.dmp *.mem *.raw *.pcap *.pcapng *.img *.dd *.e01 "
-                 "*.dat *.hiv *.log *.evtx *.eml *.msg"),
-                ("Memory dumps",   "*.dmp *.mem *.raw"),
-                ("PCAP",           "*.pcap *.pcapng"),
-                ("Disk images",    "*.img *.dd *.e01"),
-                ("Registry hives", "*.dat *.hiv"),
-                ("Log files",      "*.log *.evtx"),
-                ("Email",          "*.eml *.msg"),
-                ("All files",      "*.*"),
+                ("Forensic artifacts", both_cases([e for exts in groups.values() for e in exts])),
+                *[(label, both_cases(exts)) for label, exts in groups.items()],
+                # Name-based like the CLI's "history" route (F8e), so not in _EXT_MAP/_TYPE_LABELS.
+                ("Browser history", "History history History* history*"),
+                ("All files", "*.*"),
             ],
-            initialdir=str(ROOT_DIR / "data" / "test_cases"),
+            initialdir=str(ROOT_DIR.parent),
         )
+        existing = set(self.get_artifact_order())
         for p in paths:
-            self._add_artifact_row(p)
+            if p not in existing:
+                self._add_artifact_row(p)
+                existing.add(p)
 
     def _add_artifact_row(self, filepath: str) -> None:
         self._empty_label.pack_forget()
@@ -324,8 +350,6 @@ class AutoForensiqGUI(ctk.CTk):
 
     def _load_sample(self, filename: str) -> None:
         self._report_path.set(str(ROOT_DIR / "tests" / "incidents" / filename))
-
-    # ── Header ────────────────────────────────────────────────────────────────
 
     # ── Configuration section ─────────────────────────────────────────────────
 
@@ -422,6 +446,28 @@ class AutoForensiqGUI(ctk.CTk):
         )
         self._all_tools_btn.pack(side="left")
 
+        # Row 4 — per-case known-bad hosts (BUGS 2.1: analyst threat intel → reputation match)
+        row4 = ctk.CTkFrame(body, fg_color="transparent")
+        row4.pack(fill="x", pady=(14, 0))
+
+        ctk.CTkLabel(
+            row4, text="Known-bad",
+            font=(FONT_FAMILY, 12), text_color=TEXT_SECONDARY, width=68,
+        ).pack(side="left")
+
+        self._known_bad_entry = ctk.CTkEntry(
+            row4,
+            textvariable=self._known_bad,
+            placeholder_text="Per-case bad domains / IPs, space- or comma-separated (optional)…",
+            font=(FONT_FAMILY, 12),
+            fg_color=INPUT_BG,
+            border_color=BORDER,
+            text_color=TEXT_PRIMARY,
+            placeholder_text_color=TEXT_MUTED,
+            height=34,
+        )
+        self._known_bad_entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
+
     def _select_all_tools(self) -> None:
         for var in self._tool_vars.values():
             var.set(True)
@@ -453,15 +499,6 @@ class AutoForensiqGUI(ctk.CTk):
     def _build_console(self) -> None:
         _, body, hdr = self._card("PIPELINE OUTPUT")
 
-        ctk.CTkButton(
-            hdr, text="Clear",
-            command=self._clear_console,
-            width=56, height=24, corner_radius=6,
-            fg_color="transparent", hover_color=BORDER,
-            border_width=1, border_color=BORDER,
-            font=(FONT_FAMILY, 10), text_color=TEXT_MUTED,
-        ).pack(side="right")
-
         self._copy_btn = ctk.CTkButton(
             hdr, text="Copy",
             command=self._copy_console,
@@ -470,7 +507,7 @@ class AutoForensiqGUI(ctk.CTk):
             border_width=1, border_color=BORDER,
             font=(FONT_FAMILY, 10), text_color=TEXT_MUTED,
         )
-        self._copy_btn.pack(side="right", padx=(0, 6))
+        self._copy_btn.pack(side="right")
 
         self._console = ctk.CTkTextbox(
             body,
@@ -546,6 +583,10 @@ class AutoForensiqGUI(ctk.CTk):
         if selected_tools and len(selected_tools) < len(_TOOLS):
             cmd += ["--tools"] + selected_tools
 
+        known_bad = self._known_bad.get().replace(",", " ").split()
+        if known_bad:
+            cmd += ["--known-bad"] + known_bad
+
         if not self._mock_mode.get():
             provider = self._provider.get()
             model    = self._model.get()
@@ -569,10 +610,51 @@ class AutoForensiqGUI(ctk.CTk):
             proc.wait()
             status = "✓  Pipeline complete." if proc.returncode == 0 else f"✗  Exit code {proc.returncode}"
             self.after(0, self._console_write, f"\n{status}\n")
+            if proc.returncode == 0:
+                self.after(0, self._launch_dashboard)
         except Exception as exc:
             self.after(0, self._console_write, f"\n[ERROR] {exc}\n")
         finally:
             self.after(0, self._restore_run_btn)
+
+    def _launch_dashboard(self) -> None:
+        """Open the web dashboard once a run finishes. The pipeline already
+        published its data to dashboard/public/data/, so we just start the dev
+        server (which opens the browser itself) — or reopen it if already up.
+
+        We run the vite binary directly rather than via `npm run dev`: npm would
+        spawn vite as a child that survives terminate(), orphaning the server."""
+        url = "http://localhost:5173"
+        dash_dir = ROOT_DIR / "dashboard"
+        # Windows has no executable-bit shebang script, only vite.cmd/vite.ps1 in .bin/ —
+        # a bare "vite" there is a POSIX shell script that CreateProcess can't launch.
+        vite_name = "vite.cmd" if sys.platform == "win32" else "vite"
+        vite_bin = dash_dir / "node_modules" / ".bin" / vite_name
+
+        if not vite_bin.exists():
+            self._console_write(
+                "\n[DASHBOARD] Skipped — run `npm install` in dashboard/ first.\n")
+            return
+
+        # Already running from an earlier run: just bring the browser back.
+        if self._dashboard_proc and self._dashboard_proc.poll() is None:
+            webbrowser.open(url)
+            self._console_write(f"\n[DASHBOARD] Reopened {url}\n")
+            return
+
+        self._dashboard_proc = subprocess.Popen(
+            [str(vite_bin), "--port", "5173", "--strictPort", "--open"],
+            cwd=str(dash_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self._console_write(f"\n[DASHBOARD] Server starting → {url}\n")
+
+    def _on_close(self) -> None:
+        """Stop the dashboard dev server (if we started one) before quitting."""
+        if self._dashboard_proc and self._dashboard_proc.poll() is None:
+            self._dashboard_proc.terminate()
+        self.destroy()
 
     def _restore_run_btn(self) -> None:
         self._pipeline_running = False

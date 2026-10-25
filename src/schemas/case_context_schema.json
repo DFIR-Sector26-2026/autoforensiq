@@ -60,6 +60,24 @@
     "raw_incident_summary": {
       "type": "string",
       "description": "One-sentence LLM summary of the incident report (for audit trail)"
+    },
+    "evidence_sources": {
+      "type": "object",
+      "description": "Runtime enrichment (P3, autoforensiq.py): maps each tool name to the evidence file(s) it read, for source attribution in the report. Added after classification, so not in 'required'."
+    },
+    "evidence_reconciliation": {
+      "type": "object",
+      "description": "Runtime enrichment (P4, issue 1.1): full reconciliation block comparing the narrative classification against recovered evidence."
+    },
+    "reconciled_confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Runtime enrichment: evidence-reconciled confidence (classifier_confidence is left untouched)."
+    },
+    "narrative_evidence_divergence": {
+      "type": "boolean",
+      "description": "Runtime enrichment: true when recovered evidence fails to support the narrative classification."
     }
   },
   "additionalProperties": false

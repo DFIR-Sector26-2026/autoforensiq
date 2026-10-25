@@ -5,24 +5,23 @@ import shutil
 import tempfile
 import csv
 from pathlib import Path
-from src.wrappers.base_wrapper import BaseWrapper
+from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
 
 
 def _resolve_cmd(preferred: str, fallback: str) -> str:
     """Resolve a plaso console script (log2timeline.py / psort.py).
 
-    Under the documented `venv/bin/python autoforensiq.py` invocation, venv/bin
-    is NOT on PATH, so shutil.which() misses a plaso installed via
-    `venv/bin/pip install plaso` (its scripts land in venv/bin). This is the same
-    root cause as the volatility D1 fix, so check the interpreter's own bin dir
-    first, then PATH, then fall back to the bare name (which fails loudly if the
-    binary genuinely isn't installed)."""
+    venv/bin isn't on PATH under `venv/bin/python autoforensiq.py` (D1), so check
+    the interpreter's own bin dir first, then PATH, then the bare name. pip installs
+    a `<name>.exe` launcher on Windows rather than the bare/`.py` names, so probe
+    that too."""
     venv_bin = os.path.dirname(sys.executable)
-    for name in (preferred, fallback):
+    for name in (preferred, fallback, f"{fallback}.exe"):
         candidate = os.path.join(venv_bin, name)
         if os.path.exists(candidate):
             return candidate
-    return shutil.which(preferred) or shutil.which(fallback) or fallback
+    return (shutil.which(preferred) or shutil.which(fallback)
+            or shutil.which(f"{fallback}.exe") or fallback)
 
 
 LOG2TIMELINE = _resolve_cmd("log2timeline.py", "log2timeline")
@@ -39,7 +38,13 @@ SUSPICIOUS_SOURCES = [
     "download"
 ]
 
+# Non-matching rows are sampled at low severity so benign-image runs give the baseline harvester timeline material
+ROUTINE_SAMPLE_CAP = 150
+
 class PlasoWrapper(BaseWrapper):
+    # Timelines a disk image, or event logs directly 
+    consumes = ("disk_image", "log_files")
+
     def __init__(self):
         super().__init__("plaso")
 
@@ -48,22 +53,50 @@ class PlasoWrapper(BaseWrapper):
             print(f"  [ERROR] Source path not found: {source_path}")
             return []
 
-        plaso_dump = Path(tempfile.gettempdir()) / "autoforensiq_plaso.dump"
+        # NOT /tmp: it's tmpfs (RAM) on most systemd distros and the dump alone measured 1.9 GB —
+        # staging it in RAM starves the plaso workers (B-4).
+        temp_dir = Path("/var/tmp") if os.path.isdir("/var/tmp") else Path(tempfile.gettempdir())
+        plaso_dump = temp_dir / "autoforensiq_plaso.dump"
+        csv_output = temp_dir / "autoforensiq_timeline.csv"
+
+        # A timeout-killed run leaves a partial dump; log2timeline RESUMES into it and crashes
+        # ("database disk image is malformed"), and psort refuses to overwrite an existing CSV
+        # (B-4). Always start clean.
+        for stale in (plaso_dump, csv_output):
+            stale.unlink(missing_ok=True)
 
         # STEP 1 — log2timeline
         print("  [PLASO] Running log2timeline (this may take a few minutes)...")
 
-        stdout, stderr, code = self.run_command(
+        _, stderr, code = self.run_command(
             [
                 LOG2TIMELINE,
-                "--status_view",
-                "none",
-                "--storage_file",
-                str(plaso_dump),
+                "--status_view", "none",
+                # Scoped to what _parse_csv's SUSPICIOUS_SOURCES filter keeps — a bare invocation
+                # runs every parser + hashes every file and never finished in 600s. "win7" covers
+                # Win7 AND later (verified on the dev01 Server 2022 E01); winxp adds pre-Win7
+                # formats near-free; prefetch = execution evidence. !filestat (one event per file,
+                # duplicates tsk_fls) and !pe (heavy, never matches the filter) dominate cost and
+                # are excluded.
+                "--parsers", "win7,winxp,prefetch,!filestat,!pe",
+                # Nothing downstream uses plaso hashes; hashing was the biggest time sink.
+                "--hashers", "none",
+                # Non-interactive: multi-partition images prompt with no TTY.
+                "--partitions", "all",
+                # VSS images prompt "VSS identifier(s):" and block forever with no TTY; "none" =
+                # current volume only.
+                "--vss_stores", "none",
+                # Default = one worker per core (15 here) → memory pressure and the 600s timeout
+                # (B-4); the run is I/O-bound anyway.
+                "--workers", "4",
+                "--storage_file", str(plaso_dump),
                 source_path
             ],
             input_files=[source_path],
             output_files=[str(plaso_dump)],
+            # Deliberately 600s (accepted, B-4): the 11 GB E01 measured ~65 min total and mostly
+            # re-corroborates the memory/disk wrappers, so GB-scale images time out; small images
+            # complete fine.
             timeout=600
         )
 
@@ -77,11 +110,9 @@ class PlasoWrapper(BaseWrapper):
             return []
 
         # STEP 2 — psort export
-        csv_output = Path(tempfile.gettempdir()) / "autoforensiq_timeline.csv"
-
         print("  [PLASO] Running psort (exporting timeline to CSV)...")
 
-        stdout, stderr, code = self.run_command(
+        _, stderr, code = self.run_command(
             [
                 PSORT,
                 "-o",
@@ -107,14 +138,8 @@ class PlasoWrapper(BaseWrapper):
         items = self._parse_csv(csv_output)
 
         # cleanup
-        for f in [plaso_dump, csv_output]:
-            try:
-                if isinstance(f, Path):
-                    f.unlink()
-                else:
-                    os.remove(f)
-            except Exception:
-                pass
+        for f in (plaso_dump, csv_output):
+            f.unlink(missing_ok=True)
 
         return items
 
@@ -122,6 +147,13 @@ class PlasoWrapper(BaseWrapper):
         print("  [PLASO] Parsing CSV timeline...")
 
         items = []
+        routine_items = []
+        routine_seen = set()
+
+        # evtx "Strings" blobs exceed csv's 128 KB field limit; the csv.Error silently truncated the
+        # dev01 CSV at ~row 360k of 633k. sys.maxsize overflows the C long backing this on Windows
+        # (32-bit long even on 64-bit builds), so cap at C long's max instead.
+        csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 
         try:
             p = Path(csv_path)
@@ -131,9 +163,12 @@ class PlasoWrapper(BaseWrapper):
 
                 for row in reader:
                     try:
-                        timestamp = row.get("datetime", "")
-                        source = row.get("source", "")
-                        desc = row.get("description", "")
+                        # l2tcsv has no datetime/description columns — the real keys are
+                        # date,time,desc,sourcetype (B-12: wrong keys made even a successful run
+                        # parse 0 items).
+                        timestamp = f'{row.get("date", "")} {row.get("time", "")}'.strip()
+                        source = row.get("sourcetype", "")
+                        desc = row.get("desc", "")
                         filename = row.get("filename", "")
 
                         lower_desc = desc.lower()
@@ -147,14 +182,31 @@ class PlasoWrapper(BaseWrapper):
                         if is_suspicious:
                             items.append(
                                 self.make_evidence_item(
-                                    artifact_id=f"plaso_{abs(hash(timestamp + desc)) % 99999}",
+                                    artifact_id=stable_artifact_id("plaso", timestamp, desc),
                                     evidence_type="timeline_event",
                                     value=f"[{timestamp}] [{source}] {desc} | File: {filename}",
-                                    severity="high",
+                                    # medium, not high: the substring filter is a lead generator
+                                    # (~7.7k mostly-benign keeps on dev01); bad events escalate via
+                                    # ioc_rescorer.
+                                    severity="medium",
                                     confidence=0.72,
                                     timestamp=timestamp
                                 )
                             )
+                        elif len(routine_items) < ROUTINE_SAMPLE_CAP:
+                            key = (source, desc)
+                            if key not in routine_seen:
+                                routine_seen.add(key)
+                                routine_items.append(
+                                    self.make_evidence_item(
+                                        artifact_id=stable_artifact_id("plaso", timestamp, desc),
+                                        evidence_type="timeline_event",
+                                        value=f"[{timestamp}] [{source}] {desc} | File: {filename}",
+                                        severity="low",
+                                        confidence=0.5,
+                                        timestamp=timestamp
+                                    )
+                                )
 
                     except Exception:
                         continue
@@ -162,9 +214,10 @@ class PlasoWrapper(BaseWrapper):
         except Exception as e:
             print(f"  [ERROR] Failed to parse CSV: {e}")
 
-        print(f"  [PLASO] Timeline → {len(items)} suspicious events")
+        print(f"  [PLASO] Timeline → {len(items)} suspicious events "
+              f"+ {len(routine_items)} routine sample")
 
-        return items
+        return items + routine_items
 
 
 if __name__ == "__main__":

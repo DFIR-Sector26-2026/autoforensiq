@@ -1,18 +1,31 @@
+import hashlib
 import subprocess
-import os
 from src.utils.audit_log import log_action
 
+
+def stable_artifact_id(prefix: str, *parts: str) -> str:
+    """Deterministic artifact_id from the item's identifying content (md5 slice). Replaced
+    uuid4/abs(hash())%99999: ids must be stable across runs and not over-collide, or the
+    aggregator's dedup-by-artifact_id misbehaves."""
+    digest = hashlib.md5(
+        "|".join(str(p) for p in parts).encode("utf-8", "replace")
+    ).hexdigest()
+    return f"{prefix}_{digest[:16]}"
+
+
 class BaseWrapper:
+    # The evidence_files key(s) this tool consumes (D2) — a str or tuple of alternatives
+    consumes = None
+
     def __init__(self, tool_name: str):
         self.tool_name = tool_name
 
-    def run_command(self, command: list, input_files: list = [],
-                    output_files: list = [], timeout: int = 300) -> tuple:
-        """
-        Runs a shell command.
-        Returns (stdout, stderr, returncode).
-        Logs to audit log automatically.
-        """
+    def run_command(self, command: list, input_files: list = None,
+                    output_files: list = None, timeout: int = 300) -> tuple:
+        """Runs a shell command. Returns (stdout, stderr, returncode). Logs to audit log
+        automatically."""
+        input_files = input_files or []
+        output_files = output_files or []
         print(f"  [RUNNING] {' '.join(map(str,command))}")
         try:
             result = subprocess.run(
@@ -46,11 +59,9 @@ class BaseWrapper:
                            value: str, severity: str = "medium",
                            confidence: float = 0.7,
                            timestamp: str = "",
-                           linked_artifacts: list = []) -> dict:
-        """
-        Returns a dict matching the agreed evidence_item schema exactly.
-        Every wrapper uses this to produce output.
-        """
+                           linked_artifacts: list = None) -> dict:
+        """Returns a dict matching the agreed evidence_item schema exactly. Every wrapper uses
+        this to produce output."""
         return {
             "artifact_id": artifact_id,
             "source_tool": self.tool_name,
@@ -59,5 +70,5 @@ class BaseWrapper:
             "value": value,
             "severity": severity,
             "confidence": confidence,
-            "linked_artifacts": linked_artifacts
+            "linked_artifacts": linked_artifacts or []
         }

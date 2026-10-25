@@ -1,14 +1,11 @@
-"""
-feature_engineering.py
------------------------
-Converts both baseline_normal.json and mock_unified_evidence.json into a
+"""Converts both baseline_normal.json and unified_evidence.json records into a
 COMMON, fixed-width numeric feature vector.
 
-Feature vector layout (14 dimensions):
+Feature vector layout (15 dimensions):
   [0]  is_system_process      – known Windows system binary
   [1]  is_suspicious_process  – known malware/LOLBin name
   [2]  suspicious_parent      – parent is cmd/powershell/wscript etc.
-  [3]  port_is_nonstandard    – port not in {80,443,0}
+  [3]  port_is_nonstandard    – port not in STANDARD_PORTS {80,443,8080,8443,53,22,21,25,0}
   [4]  port_is_known_c2       – port in common C2 list {4444,1337,8888,9999,...}
   [5]  has_network            – boolean
   [6]  evidence_is_file       – evidence_type == "file"
@@ -18,11 +15,16 @@ Feature vector layout (14 dimensions):
   [10] path_has_exe_in_temp   – .exe dropped in Temp/Downloads
   [11] keyword_c2_indicator   – value has C2/shell/beacon/reverse keywords
   [12] keyword_exfil          – value has exfil/upload/POST/data keywords
-  [13] severity_score         – critical=1.0, high=0.75, medium=0.5, low=0.25, none=0.0
+  [13] has_ioc_match          – IOC engine matched the item against the threat catalog
+  [14] severity_score         – critical=1.0, high=0.75, medium=0.5, low=0.25, none=0.0
 """
 
 import re
 from typing import Dict, Any, List
+
+# Known C2 ports come from the shared catalog (issue D1) so the ML "known C2 port" feature can never
+# drift from what the wrappers/rescorer flag.
+from src.data.threat_intel import C2_PORTS_ALL as KNOWN_C2_PORTS
 
 # ── Threat intelligence lists ─────────────────────────────────────────────────
 
@@ -43,11 +45,6 @@ SYSTEM_PROCESSES = {
 SUSPICIOUS_PARENTS = {
     "cmd.exe", "powershell.exe", "wscript.exe", "cscript.exe",
     "mshta.exe", "python.exe", "python3", "bash", "sh",
-}
-
-KNOWN_C2_PORTS = {
-    4444, 1337, 8888, 9999, 31337, 6666, 12345, 54321,
-    4000, 5555, 7777, 2222, 3333, 6667,
 }
 
 STANDARD_PORTS = {80, 443, 0, 8080, 8443, 53, 22, 21, 25}
@@ -84,6 +81,7 @@ EXE_IN_TEMP = re.compile(
 
 
 def _canonical_evidence_type(evidence_type: str) -> str:
+    # KEEP the substring rules in sync with pipeline._model_scope (finer 8-way view, F8a).
     evidence_type = evidence_type.lower()
 
     if (
@@ -109,10 +107,8 @@ def _canonical_evidence_type(evidence_type: str) -> str:
 
 
 def _record_value(record: Dict[str, Any]) -> str:
-    """
-    Prefer P4's normalized text for ML features, then fall back to display/raw
-    values for older evidence items.
-    """
+    """Prefer P4's normalized text for ML features, then fall back to display/raw values for
+    older evidence items."""
     return str(
         record.get("normalized_value")
         or record.get("value")
@@ -124,10 +120,8 @@ def _record_value(record: Dict[str, Any]) -> str:
 # ── Core extractor ────────────────────────────────────────────────────────────
 
 def extract_features(record: Dict[str, Any]) -> List[float]:
-    """
-    Accept either a baseline record or a unified-evidence record.
-    Always returns a 14-element list of floats in [0, 1].
-    """
+    """Accept either a baseline record or a unified-evidence record. Always returns a 15-element
+    list of floats in [0, 1]."""
 
     # ── Pull raw fields, tolerating missing keys ──────────────────────────────
     evidence_type = _canonical_evidence_type(
@@ -159,7 +153,7 @@ def extract_features(record: Dict[str, Any]) -> List[float]:
                 process_name = exe_match[0].lower()
 
     # ── Derive port only from network evidence with an IP:PORT pattern ───────
-# Avoid treating non-network fields like "(PID:596)" as port observations.
+    # Avoid treating non-network fields like "(PID:596)" as port observations.
     if port == 0 and value and evidence_type == "network":
         port_match = re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}:(\d{2,5})\b", value)
         if port_match:
@@ -179,9 +173,12 @@ def extract_features(record: Dict[str, Any]) -> List[float]:
     f10 = 1.0 if EXE_IN_TEMP.search(value) else 0.0
     f11 = 1.0 if C2_KEYWORDS.search(value) else 0.0
     f12 = 1.0 if EXFIL_KEYWORDS.search(value) else 0.0
-    f13 = SEVERITY_MAP.get(severity_raw, 0.0)
+    # ioc_match is the ioc_engine's catalog-hit list; baseline records never carry the key, so the
+    # feature is 0 across every baseline profile and a hit always reads as novel.
+    f13 = 1.0 if record.get("ioc_match") else 0.0
+    f14 = SEVERITY_MAP.get(severity_raw, 0.0)
 
-    return [f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13]
+    return [f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14]
 
 
 FEATURE_NAMES = [
@@ -198,6 +195,7 @@ FEATURE_NAMES = [
     "path_has_exe_in_temp",
     "keyword_c2_indicator",
     "keyword_exfil",
+    "has_ioc_match",
     "severity_score",
 ]
 

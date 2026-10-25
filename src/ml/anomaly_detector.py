@@ -1,35 +1,14 @@
-"""
-anomaly_detector.py
--------------------
-Trains an IsolationForest on baseline-normal data, then scores new evidence.
-
-Key design decisions
---------------------
-1.  contamination=0.01  – we tell the model the baseline is almost pure normal;
-    this pushes anomaly thresholds outward so real outliers score strongly.
-
-2.  n_estimators=200    – more trees → more stable anomaly scores, important
-    when the training set is small (5 records).
-
-3.  Rule-based score boost – adds a deterministic penalty for features that
-    are always anomalous regardless of the model (C2 ports, EXE in Temp, etc.).
-    This prevents the model from under-scoring obvious threats just because the
-    training set is tiny.
-
-4.  Calibrated confidence – maps the raw IF score (typically -1 to +0.5) to a
-    [0, 1] confidence band that is meaningful for an analyst.
-"""
+"""Baseline-distance novelty detector + a deterministic rule boost. Replaced the IsolationForest,
+which couldn't split on the baseline's zero-variance discriminative features. Model scores are ≤ 0
+(0 = matches a baseline profile), so novelty only ever adds to what the rules already flag."""
 
 import numpy as np
-from sklearn.ensemble import IsolationForest
-from typing import List, Tuple, Dict, Any
-
-from src.ml.feature_engineering import FEATURE_NAMES
+from typing import List, Dict, Any
 
 
 # ── Rule-based booster ────────────────────────────────────────────────────────
 # Maps feature-index → extra negative score to add when feature == 1.
-# Negative = more anomalous (mirrors IsolationForest sign convention).
+# Negative = more anomalous (lower score = more anomalous throughout).
 RULE_BOOSTS: Dict[int, float] = {
     1:  -0.30,   # is_suspicious_process
     2:  -0.20,   # suspicious_parent
@@ -38,60 +17,72 @@ RULE_BOOSTS: Dict[int, float] = {
     10: -0.30,   # path_has_exe_in_temp
     11: -0.35,   # keyword_c2_indicator
     12: -0.20,   # keyword_exfil
+    13: -0.35,   # has_ioc_match — a catalog hit is at least as strong as a known-C2 port
 }
 
-# Severity score (feature 13) amplifier
+# Severity score (feature 14) amplifier
 SEVERITY_AMPLIFIER = -0.25   # maximum penalty at severity=1.0 (critical)
 
 ANOMALY_THRESHOLD = -0.10    # scores below this → anomaly
+
+# ── Distance weights ──────────────────────────────────────────────────────────
+# Severity (feature 14) is excluded from the distance: SEVERITY_AMPLIFIER already prices it, and
+# the harvester admits only low-severity records so it carries no baseline variance anyway.
+SEVERITY_IDX = 14
+# Penalty per feature lit in the evidence but not in the nearest baseline profile.
+NOVEL_FEATURE_PENALTY = 0.12
+# Lacking a feature the profile has is only mildly unusual, not threatening.
+MISSING_FEATURE_PENALTY = 0.03
+MODEL_SCORE_FLOOR = -0.50
 
 
 class AnomalyDetector:
 
     def __init__(self):
-        self.model = IsolationForest(
-            n_estimators=200,
-            contamination=0.01,   # baseline is nearly 100 % clean
-            max_samples="auto",
-            random_state=42,
-            bootstrap=False,
-        )
+        self._profiles = None   # distinct baseline vectors over the binary features
         self._fitted = False
 
     # ── Training ──────────────────────────────────────────────────────────────
 
     def fit(self, X: np.ndarray) -> None:
-        """Train on baseline-normal feature matrix."""
-        self.model.fit(X)
+        """Store the distinct baseline-normal profiles (binary features only)."""
+        Xb = np.asarray(X, dtype=float)
+        self._profiles = np.unique(Xb[:, :SEVERITY_IDX], axis=0)
         self._fitted = True
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 
     def _model_score(self, X: np.ndarray) -> np.ndarray:
-        """Raw IsolationForest decision function scores (higher = more normal)."""
-        return self.model.decision_function(X)
+        """Negative novelty vs the nearest baseline profile (higher = more normal, max 0)."""
+        Xb = np.asarray(X, dtype=float)[:, :SEVERITY_IDX]
+        diff = Xb[:, None, :] - self._profiles[None, :, :]
+        novel   = np.clip(diff, 0.0, None).sum(axis=2)
+        missing = np.clip(-diff, 0.0, None).sum(axis=2)
+        novelty = (NOVEL_FEATURE_PENALTY * novel
+                   + MISSING_FEATURE_PENALTY * missing).min(axis=1)
+        return np.maximum(-novelty, MODEL_SCORE_FLOOR)
 
     def _rule_boost(self, X: np.ndarray) -> np.ndarray:
         """Deterministic penalty vector, one value per sample."""
         boosts = np.zeros(len(X))
         for feat_idx, penalty in RULE_BOOSTS.items():
             boosts += X[:, feat_idx] * penalty
-        # Severity amplifier (feature 13 already in [0,1])
-        boosts += X[:, 13] * SEVERITY_AMPLIFIER
+        # Severity amplifier (already in [0,1])
+        boosts += X[:, SEVERITY_IDX] * SEVERITY_AMPLIFIER
         return boosts
 
     def score_components(self, X: np.ndarray) -> Dict[str, np.ndarray]:
         if not self._fitted:
             raise RuntimeError("Call fit() before score_components().")
 
-        model_scores = self._model_score(X)          # typically (-0.5, +0.5)
+        model_scores = self._model_score(X)          # in [-0.5, 0]
         rule_scores  = self._rule_boost(X)           # always ≤ 0
         final_scores = model_scores + rule_scores
 
         is_anomaly = final_scores < ANOMALY_THRESHOLD
 
-        # Confidence: distance below threshold, clamped and normalised
-        # At threshold → 0.5; at threshold-0.5 → ~1.0; above threshold → < 0.5
+        # Confidence: distance below zero, clamped. At the -0.10 threshold → 0.6; at score -0.5 →
+        # 1.0; benign scores near 0 → ~0.5.
         confidence = np.clip(0.5 - final_scores, 0.0, 1.0)
 
         return {
@@ -101,21 +92,6 @@ class AnomalyDetector:
             "is_anomaly": is_anomaly,
             "confidence": confidence,
         }
-
-    def score_samples(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Returns
-        -------
-        final_scores : ndarray shape (n,)   – combined score; negative = anomalous
-        is_anomaly   : ndarray shape (n,)   – bool array
-        confidence   : ndarray shape (n,)   – float in [0, 1]
-        """
-        components = self.score_components(X)
-        return (
-            components["final_scores"],
-            components["is_anomaly"],
-            components["confidence"],
-        )
 
     # ── Convenience wrapper ───────────────────────────────────────────────────
 

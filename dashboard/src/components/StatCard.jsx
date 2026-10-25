@@ -1,5 +1,3 @@
-import { motion } from "framer-motion";
-
 export default function StatCard({
   title,
   value,
@@ -8,15 +6,9 @@ export default function StatCard({
 
   return (
 
-    <motion.div
-
-      whileHover={{
-        scale: 1.04,
-      }}
-
+    <div
       className="
         bg-slate-900/70
-        backdrop-blur-lg
         border border-slate-700
         p-6
         rounded-2xl
@@ -35,6 +27,6 @@ export default function StatCard({
         {value}
       </p>
 
-    </motion.div>
+    </div>
   );
 }

@@ -1,6 +1,4 @@
-"""
-AutoForensiq — Report Generator
-"""
+"""AutoForensiq — Report Generator"""
 
 import json
 import os
@@ -10,117 +8,18 @@ import yaml
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.data.threat_intel import EXECUTABLE_EXTENSIONS, SEVERITY_ORDER, is_lan_ipv4
+
 
 # ─────────────────────────────────────────────────────────────
 # PATHS
 # ─────────────────────────────────────────────────────────────
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-
 CONFIG_PATH = ROOT_DIR / "config.yaml"
 
-
-# ─────────────────────────────────────────────────────────────
-# MITRE ATT&CK MAPPING
-# ─────────────────────────────────────────────────────────────
-
-MITRE_BY_CASE = {
-    "ransomware": [
-        ("T1486", "Data Encrypted for Impact", "Impact"),
-        ("T1204", "User Execution", "Execution"),
-        ("T1547", "Boot/Logon Autostart Execution", "Persistence"),
-        ("T1083", "File and Directory Discovery", "Discovery"),
-    ],
-    "malware": [
-        ("T1055", "Process Injection", "Defense Evasion"),
-        ("T1059", "Command and Scripting Interpreter", "Execution"),
-        ("T1547", "Boot/Logon Autostart Execution", "Persistence"),
-        ("T1071", "Application Layer Protocol", "C2"),
-    ],
-    "data_exfiltration": [
-        ("T1041", "Exfiltration Over C2 Channel", "Exfiltration"),
-        ("T1048", "Exfiltration Over Alternative Protocol", "Exfiltration"),
-        ("T1560", "Archive Collected Data", "Collection"),
-        ("T1083", "File and Directory Discovery", "Discovery"),
-    ],
-    "insider_threat": [
-        ("T1078", "Valid Accounts", "Persistence"),
-        ("T1213", "Data from Information Repositories", "Collection"),
-        ("T1048", "Exfiltration Over Alternative Protocol", "Exfiltration"),
-    ],
-    "network_intrusion": [
-        ("T1190", "Exploit Public-Facing Application", "Initial Access"),
-        ("T1021", "Remote Services", "Lateral Movement"),
-        ("T1071", "Application Layer Protocol", "C2"),
-        ("T1046", "Network Service Discovery", "Discovery"),
-    ],
-    "phishing": [
-        ("T1566", "Phishing", "Initial Access"),
-        ("T1204", "User Execution", "Execution"),
-        ("T1059", "Command and Scripting Interpreter", "Execution"),
-        ("T1547", "Boot/Logon Autostart Execution", "Persistence"),
-    ],
-    "unknown": [
-        ("T1059", "Command and Scripting Interpreter", "Execution"),
-        ("T1071", "Application Layer Protocol", "C2"),
-    ],
-}
-
-
-# ─────────────────────────────────────────────────────────────
-# RECOMMENDATIONS BY CASE TYPE
-# ─────────────────────────────────────────────────────────────
-
-RECOMMENDATIONS_BY_CASE = {
-    "ransomware": [
-        "Immediately isolate affected systems from the network to prevent further encryption spread.",
-        "Do NOT power off affected systems — preserve volatile memory for forensic analysis.",
-        "Identify and revoke all compromised credentials associated with the initial access vector.",
-        "Restore systems from verified clean backups only after confirming backup integrity.",
-        "Engage law enforcement and notify relevant regulatory bodies as required.",
-    ],
-    "malware": [
-        "Isolate affected hosts and block identified C2 IP addresses and domains at the perimeter firewall.",
-        "Run a full AV/EDR scan with updated signatures on all potentially exposed systems.",
-        "Review and harden PowerShell and script execution policies (constrained language mode).",
-        "Audit scheduled tasks, run keys, and startup folders for persistence mechanisms.",
-        "Deploy network monitoring rules to detect further beaconing activity from identified IOCs.",
-    ],
-    "data_exfiltration": [
-        "Immediately block outbound connections to all identified exfiltration endpoints.",
-        "Determine the full scope of data accessed by reviewing DLP logs and file access audit trails.",
-        "Notify the relevant data protection officer and assess breach notification obligations.",
-        "Rotate all credentials that may have been accessed or exfiltrated during the incident.",
-        "Implement strict egress filtering and monitor for DNS tunnelling or covert channel patterns.",
-    ],
-    "insider_threat": [
-        "Suspend the implicated account(s) pending investigation — do not alert the subject prematurely.",
-        "Preserve all relevant logs, email, and file access records under formal legal hold.",
-        "Engage HR and legal counsel before taking any disciplinary action against the individual.",
-        "Audit access rights across all shared repositories and sensitive data stores.",
-        "Implement User and Entity Behaviour Analytics (UEBA) for ongoing behavioural monitoring.",
-    ],
-    "network_intrusion": [
-        "Patch all externally-facing services and audit for additional exploitation attempts.",
-        "Rotate all service account and privileged credentials on affected systems immediately.",
-        "Review and tighten firewall rules — remove any unnecessary port exposures.",
-        "Conduct a full Active Directory audit for unauthorised account creation or privilege changes.",
-        "Deploy honeypot assets to detect and track further lateral movement attempts.",
-    ],
-    "phishing": [
-        "Reset credentials for all accounts that interacted with the phishing link or opened the attachment.",
-        "Block the phishing sender domain and URL at the email gateway and proxy.",
-        "Conduct targeted security awareness training for all affected users.",
-        "Search mail logs for additional recipients of the same phishing campaign.",
-        "Review endpoint telemetry for post-exploitation activity on systems that executed the attachment.",
-    ],
-    "unknown": [
-        "Conduct a full manual triage of all flagged artifacts with an experienced analyst.",
-        "Preserve all evidence in its current state pending further investigation and chain-of-custody documentation.",
-        "Expand evidence collection to include any missing evidence types identified in the coverage section.",
-        "Review network logs for anomalous outbound connections over the full investigation period.",
-    ],
-}
+# MITRE_BY_CASE / RECOMMENDATIONS_BY_CASE live further down (a duplicate pair here was silently
+# re-bound at import — removed).
 
 
 # ─────────────────────────────────────────────────────────────
@@ -128,15 +27,9 @@ RECOMMENDATIONS_BY_CASE = {
 # ─────────────────────────────────────────────────────────────
 
 def _load_config():
-
     if not CONFIG_PATH.exists():
-
-        raise FileNotFoundError(
-            f"config.yaml not found at {CONFIG_PATH}"
-        )
-
+        raise FileNotFoundError(f"config.yaml not found at {CONFIG_PATH}")
     with open(CONFIG_PATH) as f:
-
         return yaml.safe_load(f)
 
 
@@ -187,10 +80,7 @@ def _score_summary(explanation):
     return {
         "model_score": explanation.get("model_score"),
         "rule_score": explanation.get("rule_score"),
-        "final_score": explanation.get(
-            "final_score",
-            explanation.get("score")
-        ),
+        "final_score": explanation.get("final_score", explanation.get("score")),
         "threshold": explanation.get("threshold"),
         "confidence": explanation.get("confidence"),
         "severity": explanation.get("severity"),
@@ -217,13 +107,10 @@ def _xai_payload(explanation):
 
 def _xai_lookup(shap_explanations, only_anomalies=False):
     lookup = {}
-
     for aid, item in _iter_explanations(shap_explanations):
         if only_anomalies and not item.get("is_anomaly"):
             continue
-
         lookup[aid] = _xai_payload(item)
-
     return lookup
 
 
@@ -241,7 +128,7 @@ def _format_percent(value):
 
 def _format_top_factors(factors):
     if not factors:
-        return "_No SHAP factors recorded._"
+        return "_No contributing factors recorded._"
 
     lines = []
     for factor in factors[:5]:
@@ -249,7 +136,7 @@ def _format_top_factors(factors):
             "- "
             f"{factor.get('feature', 'unknown')}: "
             f"{factor.get('direction', 'unknown impact')} "
-            f"(SHAP {_format_score(factor.get('shap_value'))}) — "
+            f"(impact score {_format_score(factor.get('shap_value'))}) — "
             f"{factor.get('meaning', 'No explanation available.')}"
         )
 
@@ -275,7 +162,7 @@ def _format_baseline_comparison(comparisons):
 
 def _format_correlation_context(correlations):
     if not correlations:
-        return "_No P4 correlation context recorded._"
+        return "_No cross-evidence correlation recorded._"
 
     lines = []
     for item in correlations[:5]:
@@ -310,7 +197,7 @@ def _build_explainability_section(shap_explanations, max_items=8):
     ]
 
     if not items:
-        return "_No anomalous artifacts were available for XAI analysis._"
+        return "_No anomalous artifacts to explain._"
 
     sections = []
 
@@ -323,7 +210,7 @@ def _build_explainability_section(shap_explanations, max_items=8):
             "\n".join([
                 f"### Artifact {aid}",
                 "",
-                f"- **Decision:** Anomalous",
+                "- **Decision:** Anomalous",
                 f"- **Severity:** {scores.get('severity', 'N/A')}",
                 f"- **Confidence:** {_format_percent(scores.get('confidence'))}",
                 f"- **Model Scope:** {exp.get('model_scope', 'N/A')}",
@@ -343,21 +230,15 @@ def _build_explainability_section(shap_explanations, max_items=8):
                 "",
                 "**Baseline Comparison**",
                 "",
-                _format_baseline_comparison(
-                    exp.get("baseline_comparison", [])
-                ),
+                _format_baseline_comparison(exp.get("baseline_comparison", [])),
                 "",
-                "**P4 Correlation Context**",
+                "**Cross-Evidence Correlation**",
                 "",
-                _format_correlation_context(
-                    exp.get("correlation_context", [])
-                ),
+                _format_correlation_context(exp.get("correlation_context", [])),
                 "",
                 "**Recommended Review**",
                 "",
-                _format_recommended_review(
-                    exp.get("recommended_review", [])
-                ),
+                _format_recommended_review(exp.get("recommended_review", [])),
             ])
         )
 
@@ -368,80 +249,36 @@ def _build_explainability_section(shap_explanations, max_items=8):
 # USER PROMPT BUILDER
 # ─────────────────────────────────────────────────────────────
 
-def _build_user_prompt(
-    unified_evidence,
-    shap_explanations,
-    case_context
-):
-
-    xai_lookup = _xai_lookup(
-        shap_explanations,
-        only_anomalies=True
-    )
-
+def _build_user_prompt(unified_evidence, shap_explanations, case_context):
+    xai_lookup = _xai_lookup(shap_explanations, only_anomalies=True)
 
     priority_items = [
-
-        e for e in unified_evidence.get(
-            "evidence_items",
-            []
-        )
-
-        if isinstance(e, dict)
-        and e.get("severity") in (
-            "critical",
-            "high"
-        )
+        e for e in unified_evidence.get("evidence_items", [])
+        if isinstance(e, dict) and e.get("severity") in ("critical", "high")
     ][:20]
-
     if not priority_items:
-
-        priority_items = unified_evidence.get(
-            "evidence_items",
-            []
-        )[:20]
+        priority_items = unified_evidence.get("evidence_items", [])[:20]
 
     for item in priority_items:
-
         if not isinstance(item, dict):
             continue
-
         aid = item.get("artifact_id", "")
-
         if aid in xai_lookup:
-
             item["_xai"] = xai_lookup[aid]
 
     prompt_parts = [
-
         "## Case Context",
-
         json.dumps(case_context, indent=2),
-
         "",
-
         "## Evidence",
-
         json.dumps(priority_items, indent=2),
-
         "",
-
         "## Explainability Analysis",
-
         _build_explainability_section(shap_explanations),
-
         "",
-
         "## Tools",
-
-        ", ".join(
-            unified_evidence.get(
-                "tools_aggregated",
-                []
-            )
-        )
+        ", ".join(unified_evidence.get("tools_aggregated", []))
     ]
-
     return "\n".join(prompt_parts)
 
 
@@ -450,66 +287,29 @@ def _build_user_prompt(
 # ─────────────────────────────────────────────────────────────
 
 def _call_openai(user_prompt, cfg):
-
     from openai import OpenAI
 
-    api_key = os.environ.get(
-        cfg["llm"].get(
-            "openai_api_key_env",
-            "OPENAI_API_KEY"
-        )
-    )
-
+    api_key = os.environ.get(cfg["llm"].get("openai_api_key_env", "OPENAI_API_KEY"))
     client = OpenAI(api_key=api_key)
-
-    model = cfg["llm"].get(
-        "openai_model",
-        "gpt-4o"
-    )
-
+    model = cfg["llm"].get("openai_model", "gpt-4o")
     resp = client.chat.completions.create(
-
         model=model,
-
-        max_tokens=cfg["llm"].get(
-            "max_tokens",
-            2048
-        ),
-
-        temperature=cfg["llm"].get(
-            "temperature",
-            0.2
-        ),
-
+        max_tokens=cfg["llm"].get("max_tokens", 2048),
+        temperature=cfg["llm"].get("temperature", 0.2),
         messages=[
-
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
-
-            {
-                "role": "user",
-                "content": user_prompt
-            }
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
         ]
     )
-
     return resp.choices[0].message.content
 
 
 def _call_deepseek(user_prompt, cfg):
-
     from openai import OpenAI
 
-    api_key = os.environ.get(
-        cfg["llm"].get("deepseek_api_key_env", "DEEPSEEK_API_KEY")
-    )
-
+    api_key = os.environ.get(cfg["llm"].get("deepseek_api_key_env", "DEEPSEEK_API_KEY"))
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-
     model = cfg["llm"].get("deepseek_model", "deepseek-chat")
-
     resp = client.chat.completions.create(
         model=model,
         max_tokens=cfg["llm"].get("max_tokens", 2048),
@@ -519,8 +319,25 @@ def _call_deepseek(user_prompt, cfg):
             {"role": "user",   "content": user_prompt},
         ]
     )
-
     return resp.choices[0].message.content
+
+
+def _call_anthropic(user_prompt, cfg):
+    import anthropic
+
+    api_key = os.environ.get(cfg["llm"].get("anthropic_api_key_env", "ANTHROPIC_API_KEY"))
+    client = anthropic.Anthropic(api_key=api_key)
+    model = cfg["llm"].get("anthropic_model", "claude-sonnet-5")
+    resp = client.messages.create(
+        model=model,
+        max_tokens=cfg["llm"].get("max_tokens", 2048),
+        temperature=cfg["llm"].get("temperature", 0.2),
+        system=SYSTEM_PROMPT,
+        messages=[
+            {"role": "user", "content": user_prompt},
+        ]
+    )
+    return resp.content[0].text
 
 
 # ─────────────────────────────────────────────────────────────
@@ -535,6 +352,19 @@ _SEVERITY_RANK = {
     "informational": 1,
 }
 
+
+def _highest_severity(items):
+    """The case's headline severity = the highest severity corroborated across the evidence set.
+    This is the rule/IOC path's verdict; P5 anomaly detection only adjusts it at the margin (see
+    `_mock_report`). Defaults to "low" for an empty / informational-only set."""
+    best, best_rank = "low", _SEVERITY_RANK["low"]
+    for e in items:
+        sev = str(e.get("severity", "")).lower()
+        rank = _SEVERITY_RANK.get(sev, 0)
+        if rank > best_rank:
+            best, best_rank = sev, rank
+    return best
+
 MITRE_BY_CASE = {
     "ransomware": [
         ("T1486", "Data Encrypted for Impact", "Impact"),
@@ -542,7 +372,7 @@ MITRE_BY_CASE = {
         ("T1547", "Boot/Logon Autostart Execution", "Persistence"),
         ("T1083", "File and Directory Discovery", "Discovery"),
     ],
-    "malware": [
+    "malware_infection": [
         ("T1055", "Process Injection", "Defense Evasion"),
         ("T1059", "Command and Scripting Interpreter", "Execution"),
         ("T1547", "Boot/Logon Autostart Execution", "Persistence"),
@@ -559,7 +389,7 @@ MITRE_BY_CASE = {
         ("T1213", "Data from Information Repositories", "Collection"),
         ("T1048", "Exfiltration Over Alternative Protocol", "Exfiltration"),
     ],
-    "network_intrusion": [
+    "apt_intrusion": [
         ("T1190", "Exploit Public-Facing Application", "Initial Access"),
         ("T1021", "Remote Services", "Lateral Movement"),
         ("T1071", "Application Layer Protocol", "C2"),
@@ -577,6 +407,41 @@ MITRE_BY_CASE = {
     ],
 }
 
+# Keyword → MITRE technique, matched only against already-flagged (critical/high) item values —
+# annotates existing findings, never creates one (e.g. an infostealer's stage=credentials URL).
+EVIDENCE_TECHNIQUES = [
+    ("credential", ("T1555", "Credentials from Password Stores", "Credential Access")),
+    ("wallet", ("T1657", "Financial Theft", "Impact")),
+]
+
+
+def _evidence_techniques(items):
+    """[(tid, tname, tactic, basis_value)] justified by flagged evidence; first hit wins per tid."""
+    found = {}
+    for e in items:
+        if str(e.get("severity", "")).lower() not in ("critical", "high"):
+            continue
+        value = str(e.get("value", ""))
+        lowered = value.lower()
+        for keyword, (tid, tname, tactic) in EVIDENCE_TECHNIQUES:
+            if keyword in lowered and tid not in found:
+                found[tid] = (tid, tname, tactic, _truncate(value, 120))
+    return list(found.values())
+
+
+def _mitre_techniques(case_type, all_items, n_anomalies):
+    """Merged MITRE rows [(tid, tname, tactic, basis)]: static per-case table + evidence-derived
+    rows. Single source for the report table and dashboard.json so the two never disagree."""
+    basis = "Anomaly detected" if n_anomalies > 0 else "Inferred from case type"
+    techniques = {
+        tid: (tname, tactic, basis)
+        for tid, tname, tactic in MITRE_BY_CASE.get(case_type, MITRE_BY_CASE["unknown"])
+    }
+    for tid, tname, tactic, evidence_basis in _evidence_techniques(all_items):
+        techniques[tid] = (tname, tactic, f"Flagged evidence: {evidence_basis}")
+    return [(tid, tname, tactic, row_basis) for tid, (tname, tactic, row_basis) in techniques.items()]
+
+
 RECOMMENDATIONS_BY_CASE = {
     "ransomware": [
         "Immediately isolate affected systems from the network to prevent further encryption spread.",
@@ -585,7 +450,7 @@ RECOMMENDATIONS_BY_CASE = {
         "Restore systems from verified clean backups only after confirming backup integrity.",
         "Engage law enforcement and notify relevant regulatory bodies as required.",
     ],
-    "malware": [
+    "malware_infection": [
         "Isolate affected hosts and block identified C2 IP addresses and domains at the perimeter.",
         "Run a full AV/EDR scan with updated signatures on all potentially exposed systems.",
         "Review and harden PowerShell and script execution policies (constrained language mode).",
@@ -606,7 +471,7 @@ RECOMMENDATIONS_BY_CASE = {
         "Audit access rights across all shared repositories and sensitive data stores.",
         "Implement User and Entity Behaviour Analytics (UEBA) for ongoing behavioural monitoring.",
     ],
-    "network_intrusion": [
+    "apt_intrusion": [
         "Patch all externally-facing services and audit for additional exploitation attempts.",
         "Rotate all service account and privileged credentials on affected systems immediately.",
         "Review and tighten firewall rules - remove any unnecessary port exposures.",
@@ -628,48 +493,20 @@ RECOMMENDATIONS_BY_CASE = {
     ],
 }
 
-_TOOL_TO_EVIDENCE = {
-    "volatility3": "memory_dump",
-    "memprocfs":   "memory_dump",
-    "tshark":      "pcap",
-    "tsk_fls":     "disk_image",
-    "regripper":   "registry_hive",
-    "plaso":       "log_files",
-    "email":       "email",
-    "browser":     "browser",
-}
+# Single source of truth derived from each wrapper's `consumes` attribute (issue D2). Was re-typed
+# here and drifted (plaso said log_files while the orchestrator runs it on the disk image).
+from src.orchestrator import TOOL_EVIDENCE_MAP as _TOOL_TO_EVIDENCE, ACQUIRE_HINTS as _ACQUIRE_NOTES
 
 _ALL_EVIDENCE_TYPES = [
     "memory_dump", "pcap", "disk_image",
     "registry_hive", "log_files", "email", "browser",
 ]
 
-_ACQUIRE_NOTES = {
-    "memory_dump":   "Acquire a memory dump (.dmp/.mem) using WinPmem, DumpIt, or LiME.",
-    "pcap":          "Capture network traffic (.pcap) via Wireshark or tcpdump.",
-    "disk_image":    "Acquire a disk image (.img/.dd/.e01) using FTK Imager or dd.",
-    "registry_hive": "Export registry hives (NTUSER.DAT/SYSTEM/SOFTWARE) from the host.",
-    "log_files":     "Export Windows event logs (.evtx) via Event Viewer or wevtutil.",
-    "email":         "Export email artifacts (.eml/.msg) from the affected mail client.",
-    "browser":       "Export browser History files from the user profile directory.",
-}
-
-
-def _derive_severity(anomaly_items):
-    best = "informational"
-    for item in anomaly_items:
-        sev = str(item.get("severity", "")).lower()
-        if _SEVERITY_RANK.get(sev, 0) > _SEVERITY_RANK.get(best, 0):
-            best = sev
-    return best.capitalize() if best else "Informational"
-
-
 def _is_internal_ip(ip):
-    """True for non-routable / local IPs that don't belong in an external IOC
-    table (loopback, broadcast, link-local, and RFC1918 private ranges). The
-    affected host's own internal IP is reported as an affected system, not an
-    indicator of compromise. Malformed or out-of-range dotted-quads (e.g.
-    999.999.999.999) are also excluded — they aren't real external indicators."""
+    """True for non-routable / local IPs that don't belong in an external IOC table (loopback,
+    broadcast, link-local, and RFC1918 private ranges). The affected host's own internal IP is
+    reported as an affected system, not an indicator of compromise. Malformed or out-of-range
+    dotted-quads (e.g. 999.999.999.999) are also excluded — they aren't real external indicators."""
     octets = ip.split(".")
     if len(octets) != 4 or not all(o.isdigit() for o in octets):
         return True
@@ -694,28 +531,32 @@ _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _HASH_RE = re.compile(r"\b[0-9a-fA-F]{32,64}\b")
 _DOMAIN_RE = re.compile(r"→\s*([a-z0-9][a-z0-9.\-]*\.[a-z]{2,})", re.IGNORECASE)
 _URL_RE = re.compile(r"→\s*(\S+/\S*)")
-# suspicious_domain / suspicious_crypto items carry the bare indicator as their
-# value (no "→" arrow), so they need their own anchored patterns. The domain
-# pattern also matches .onion hidden services (e.g. <16-56 base32>.onion).
+# suspicious_domain / suspicious_crypto items carry the bare indicator as their value (no "→"
+# arrow), so they need their own anchored patterns. The domain pattern also matches .onion hidden
+# services (e.g. <16-56 base32>.onion).
 _SUSP_DOMAIN_RE = re.compile(r"\b([a-z0-9][a-z0-9.\-]*\.[a-z]{2,})\b", re.IGNORECASE)
 _CRYPTO_RE = re.compile(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b")
-_FNAME_EXTS = (".exe", ".dll", ".bat", ".ps1", ".vbs", ".cmd", ".scr")
-# Aggregate items re-list many process names (the whole tree, a parent->child
-# pair); tokenizing them would stamp the aggregate's severity/ioc_match onto
-# every benign name, so files come only from discrete items.
+# plaso timeline_event values embed indicators inline (no "→" arrow): a bare http(s) URL and a
+# "Host: <domain>" token (browser-history events).
+_BARE_URL_RE = re.compile(r"\bhttps?://\S+", re.IGNORECASE)
+_HOST_RE = re.compile(r"\bHost:\s*([a-z0-9][a-z0-9.\-]*\.[a-z]{2,})", re.IGNORECASE)
+# Executable/script filename extensions for IOC extraction — shared with the disk wrapper via
+# threat_intel.EXECUTABLE_EXTENSIONS (was a private _FNAME_EXTS copy). Aggregates re-list many
+# process names — tokenizing them would stamp their severity onto every benign name, so files come
+# only from discrete items.
 _AGG_PROC_TYPES = {"process_tree", "process_relation"}
 
 _IOC_CTX = {
     "network_connection": "Network connection",
     "dns_query": "DNS query",
     "http_request": "HTTP request",
+    "timeline_event": "Timeline event",
 }
 
 
-# Analyst-facing labels for the Key Findings "Type" column. The raw
-# evidence_type values are pipeline-internal (e.g. memprocfs_process, ioc);
-# this maps them to vocabulary a reader of the report expects. Unknown types
-# fall back to a title-cased form of the raw value.
+# Analyst-facing labels for the Key Findings "Type" column. The raw evidence_type values are
+# pipeline-internal (e.g. memprocfs_process, ioc); this maps them to vocabulary a reader of the
+# report expects. Unknown types fall back to a title-cased form of the raw value.
 _FINDING_TYPE_LABEL = {
     "process":            "Process",
     "memprocfs_process":  "Process",
@@ -742,10 +583,10 @@ def _finding_type(etype):
 
 
 def _primary_name(val):
-    """The single-token process/file name in a flagged item's value, e.g.
-    "Suspicious process detected: @WanaDecryptor@" or "@WanaDecryptor@ (PID:740 …)"
-    → "@WanaDecryptor@". Returns None when the value isn't a single bare name
-    (e.g. "Process injection detected") so free-text doesn't become a fake IOC."""
+    """The single-token process/file name in a flagged item's value, e.g. "Suspicious process
+    detected: @WanaDecryptor@" or "@WanaDecryptor@ (PID:740 …)" → "@WanaDecryptor@". Returns None
+    when the value isn't a single bare name (e.g. "Process injection detected") so free-text
+    doesn't become a fake IOC."""
     low = val.lower()
     if "detected:" in low:
         val = val[low.index("detected:") + len("detected:"):]
@@ -754,9 +595,9 @@ def _primary_name(val):
 
 
 def _item_indicators(item):
-    """Atomic IOCs extracted from one evidence item as (type, indicator) tuples
-    (order-stable, undeduped). Shared by the Key Findings inline Indicators
-    column and _extract_iocs (which dedups these across all items)."""
+    """Atomic IOCs extracted from one evidence item as (type, indicator) tuples (order-stable,
+    undeduped). Shared by the Key Findings inline Indicators column and _extract_iocs (which
+    dedups these across all items)."""
     if not isinstance(item, dict):
         return []
     val = str(item.get("value", ""))
@@ -778,11 +619,19 @@ def _item_indicators(item):
             dom = m.group(1).rstrip(".")
             label = "Onion Address" if dom.lower().endswith(".onion") else "Domain"
             out.append((label, dom))
+    elif etype == "timeline_event":
+        # Skip plaso's low-severity routine sample (baseline-harvest material)
+        if (_SEVERITY_RANK.get(str(item.get("severity", "low")).lower(), 0)
+                >= _SEVERITY_RANK["medium"] or item.get("ioc_match")):
+            m = _BARE_URL_RE.search(val)
+            if m:
+                out.append(("URL", m.group(0).rstrip(").,;")))
+            m = _HOST_RE.search(val)
+            if m:
+                out.append(("Domain", m.group(1).rstrip(".")))
     elif etype == "suspicious_crypto":
-        # String-sweep crypto indicator (e.g. a ransom BTC wallet). The value is
-        # the bare address, so fall back to it when the regex (legacy BTC only)
-        # doesn't match — otherwise a bech32/ETH wallet P3 may add later would be
-        # silently dropped, the same failure mode the .onion fix removed.
+        # Fall back to the bare value when the legacy-BTC regex misses, so a bech32/ETH wallet added
+        # later isn't silently dropped.
         m = _CRYPTO_RE.search(val)
         indicator = m.group(0) if m else val.strip()[:80]
         if indicator:
@@ -797,22 +646,22 @@ def _item_indicators(item):
         elif len(h) == 64:
             out.append(("SHA-256 Hash", h))
 
-    # Only surface a filename as an IOC when the item carries actual signal: an
-    # elevated severity or an IOC-catalog match. A bare low-severity process/file
-    # observation isn't an indicator and would just flood with benign binaries.
+    # Only surface a filename as an IOC when the item carries actual signal: an elevated severity or
+    # an IOC-catalog match. A bare low-severity process/file observation isn't an indicator and
+    # would just flood with benign binaries.
     file_signal = (
         _SEVERITY_RANK.get(str(item.get("severity", "low")).lower(), 0)
         >= _SEVERITY_RANK["high"]
         or bool(item.get("ioc_match"))
     )
     if etype not in _AGG_PROC_TYPES and file_signal:
-        ext_tokens = [t for t in val.split() if t.lower().endswith(_FNAME_EXTS)]
+        ext_tokens = [t for t in val.split() if t.lower().endswith(EXECUTABLE_EXTENSIONS)]
         if ext_tokens:
             for tok in ext_tokens:
                 out.append(("Suspicious File", tok[:60]))
         elif etype in ("process", "memprocfs_process", "ioc"):
-            # Some flagged binaries have no extension (e.g. "@WanaDecryptor@").
-            # Recover the bare process/file name so the IOC isn't dropped.
+            # Some flagged binaries have no extension (e.g. "@WanaDecryptor@"). Recover the bare
+            # process/file name so the IOC isn't dropped.
             name = _primary_name(val)
             if name:
                 out.append(("Suspicious File", name[:60]))
@@ -824,12 +673,11 @@ def _item_indicators(item):
 
 
 def _finding_sort_key(item):
-    """Key Findings ordering: severity first, then — within a tier — items
-    carrying a concrete IOC (a catalog ioc_match, or an extractable atomic
-    indicator: domain/onion/wallet/IP/hash/file/registry) ahead of
-    indicator-less ones. Without the tie-break, under KEY_FINDINGS_CAP the
-    high-severity .onion C2 / ransom wallets lose their slots to the many
-    indicator-less ransom-note language files (`*.wnry`) that become
+    """Key Findings ordering: severity first, then — within a tier — items carrying a concrete
+    IOC (a catalog ioc_match, or an extractable atomic indicator:
+    domain/onion/wallet/IP/hash/file/registry) ahead of indicator-less ones. Without the
+    tie-break, under KEY_FINDINGS_CAP the high-severity .onion C2 / ransom wallets lose their
+    slots to the many indicator-less ransom-note language files (`*.wnry`) that become
     finding-eligible only via their XAI note (issue 3.3-I)."""
     sev = -_SEVERITY_RANK.get(str(item.get("severity", "low")).lower(), 0)
     has_ioc = 0 if (item.get("ioc_match") or _item_indicators(item)) else 1
@@ -837,8 +685,8 @@ def _finding_sort_key(item):
 
 
 def _indicators_cell(item):
-    """Render the Key Findings 'Indicators / IOC Match' column for one item:
-    the atomic indicators it yielded plus any IOC-catalog match badge."""
+    """Render the Key Findings 'Indicators / IOC Match' column for one item: the atomic
+    indicators it yielded plus any IOC-catalog match badge."""
     parts, seen = [], set()
     for ioc_type, ind in _item_indicators(item):
         key = (ioc_type, ind)
@@ -849,12 +697,9 @@ def _indicators_cell(item):
     cell = " · ".join(parts)
     matches = sorted(set(item.get("ioc_match") or []))
     if matches:
-        # Put the catalog-match badge on its own line within the same cell.
-        # `<br>` survives _md_cell (no pipe/whitespace) and renders as a line
-        # break in both the dev_report HTML and raw-markdown views. The trailing
-        # &nbsp; indents the badge so it lines up under the indicator above it (a
-        # plain space would be collapsed by the browser after a line break).
-        cell = (cell + "<br>&nbsp;" if cell else "") + f"**IOC: {', '.join(matches)}**"
+        # Catalog-match badge appended inline: markdown table cells can't line-break without <br>
+        # HTML, and the report stays HTML-free.
+        cell = (cell + " · " if cell else "") + f"**IOC: {', '.join(matches)}**"
     return _md_cell(cell or "-")
 
 
@@ -902,6 +747,8 @@ def _extract_iocs(evidence_items, severity_lookup=None):
                 "matches": set(),
                 "tools": set(),
                 "artifact_ids": set(),
+                "ids_by_tool": {},
+                "sample_lines": [],
             }
             records[key] = rec
         # An indicator inherits the highest severity of any item it appeared in.
@@ -913,12 +760,21 @@ def _extract_iocs(evidence_items, severity_lookup=None):
             rec["contexts"].add(context)
         for m in (item.get("ioc_match") or []):
             rec["matches"].add(m)
-        # Track every contributing tool + artifact so the detailed IOC report can
-        # resolve source files and the per-indicator XAI explanation.
+        # Track every contributing tool + artifact so the detailed IOC report can resolve source
+        # files, per-tool artifact-id pointers, and the per-indicator XAI explanation.
         if item.get("source_tool"):
             rec["tools"].add(item["source_tool"])
         if item.get("artifact_id"):
             rec["artifact_ids"].add(item["artifact_id"])
+            if item.get("source_tool"):
+                rec["ids_by_tool"].setdefault(item["source_tool"], set()).add(item["artifact_id"])
+        # The literal source line/value the indicator was found in — so a reader can see exactly
+        # what was matched instead of having to cross-reference the artifact id by hand in
+        # unified_evidence.json. Capped: one indicator can repeat across hundreds of items.
+        raw_value = item.get("value")
+        if raw_value and len(rec["sample_lines"]) < _IOC_SAMPLE_LINES_SHOWN \
+                and raw_value not in rec["sample_lines"]:
+            rec["sample_lines"].append(raw_value)
 
     for item in evidence_items:
         if not isinstance(item, dict):
@@ -952,8 +808,8 @@ def _md_cell(value) -> str:
 
 
 def _truncate(text, limit=100):
-    """Shorten to <= limit chars on a word boundary, adding an ellipsis, so the
-    text isn't cut mid-word (e.g. '...anomaly d'). Short text is returned as-is."""
+    """Shorten to <= limit chars on a word boundary, adding an ellipsis, so the text isn't cut
+    mid-word (e.g. '...anomaly d'). Short text is returned as-is."""
     s = str(text)
     if len(s) <= limit:
         return s
@@ -970,13 +826,14 @@ def _ioc_xai_note(rec, anomaly_lookup, limit=100):
     return "-"
 
 
-# An indicator earns a full row in the main IOC table when the pipeline actually
-# prioritised it — effective severity medium-or-higher, or a fired IOC-catalog /
-# reputation match. Everything below that (the low-severity string-sweep mass,
-# e.g. ~16k bare domains on a Windows memory image) is folded into a collapsed
-# sample so it can't drown the document — but it is never dropped: counts, a
-# confidence-tiered sample, and a pointer to the full evidence JSON are kept.
+# Main-table row = medium-or-higher effective severity or a fired catalog match; the low-severity
+# string-sweep mass folds into a collapsed sample (counts + tiered sample + pointer to the JSON —
+# never dropped).
 _IOC_SURFACE_RANK = _SEVERITY_RANK["medium"]  # medium-or-higher earns a main-table row
+# Artifact-id pointers shown per tool in the Sources cell; the rest are counted (+N more).
+_IOC_IDS_SHOWN = 3
+# Example raw source lines kept per indicator, shown verbatim in the Matched Line column.
+_IOC_SAMPLE_LINES_SHOWN = 2
 # A domain whose wrapper confidence reached the URL-context (anchored) tier.
 _ANCHORED_CONF = 0.45
 _FOLDED_SAMPLE_CAP = 50
@@ -1036,8 +893,8 @@ def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None,
 
     if surfaced:
         rows = [
-            "| Indicator | Type | Severity | IOC Match | Context(s) | Source (tool · file) | Why (XAI) |",
-            "|-----------|------|----------|-----------|------------|----------------------|-----------|",
+            "| Indicator | Type | Severity | IOC Match | Context(s) | Sources (tool · file: artifact ids) | Matched Line(s) | Why flagged |",
+            "|-----------|------|----------|-----------|------------|-------------------------------------|------------------|-----------|",
         ]
         for r in surfaced:
             matches = ", ".join(sorted(r["matches"])) if r["matches"] else "-"
@@ -1045,8 +902,22 @@ def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None,
             srcs = []
             for tool in sorted(r.get("tools") or ([r["tool"]] if r.get("tool") else [])):
                 src_file = tool_sources.get(tool, "-")
-                srcs.append(tool if src_file in ("-", "", None) else f"{tool} · {src_file}")
+                src = tool if src_file in ("-", "", None) else f"{tool} · {src_file}"
+                # Artifact-id pointers: greppable in raw/<tool>_output.json and
+                # unified_evidence.json (wishlist: IOC drill-down to the source items).
+                ids = sorted(r.get("ids_by_tool", {}).get(tool, ()))
+                if ids:
+                    shown = ", ".join(ids[:_IOC_IDS_SHOWN])
+                    extra = len(ids) - _IOC_IDS_SHOWN
+                    src += f": {shown}" + (f" +{extra} more" if extra > 0 else "")
+                srcs.append(src)
             src_cell = "; ".join(srcs) if srcs else "-"
+            # The literal evidence line(s) the indicator was matched in — no need to cross-reference
+            # the artifact id in unified_evidence.json by hand to see what was actually found.
+            lines_cell = (
+                "<br>".join(_truncate(ln, 80) for ln in r.get("sample_lines") or [])
+                or "-"
+            )
             xai = _ioc_xai_note(r, anomaly_lookup)
             rows.append(
                 f"| `{_md_cell(r['indicator'])}` "
@@ -1055,6 +926,7 @@ def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None,
                 f"| {_md_cell(matches)} "
                 f"| {_md_cell(contexts)} "
                 f"| {_md_cell(src_cell)} "
+                f"| {_md_cell(lines_cell)} "
                 f"| {_md_cell(xai)} |"
             )
         parts.append("\n".join(rows) + "\n")
@@ -1068,10 +940,14 @@ def _build_ioc_report(all_items, tool_sources=None, anomaly_lookup=None,
 
 
 def _render_folded_iocs(folded):
-    """Collapsed <details> block summarising the low-severity indicator mass:
+    """Pure-markdown section summarising the low-severity indicator mass:
     per-type counts, a domain anchored/bare tier split, and a capped sample
     ordered by confidence (anchored first). Non-destructive — the full set is in
-    unified_evidence.json."""
+    unified_evidence.json.
+
+    Deliberately avoids the GitHub-only ``<details>``/``<summary>`` HTML: a
+    forensic report is read in many markdown viewers, and a strict/CommonMark
+    renderer prints the raw tags literally."""
     by_type = {}
     for r in folded:
         by_type[r["type"]] = by_type.get(r["type"], 0) + 1
@@ -1098,26 +974,23 @@ def _render_folded_iocs(folded):
         )
 
     return (
-        "\n<details>\n"
-        f"<summary><b>{len(folded)}</b> low-severity / un-elevated indicator(s) "
-        "folded — not flagged by anomaly detection or reputation. "
-        "Expand for a sample.</summary>\n\n"
-        f"By type: {type_breakdown}.{tier_note}\n\n"
+        "\n---\n\n"
+        "#### Folded — low-severity / un-elevated indicators\n\n"
+        f"**{len(folded)}** indicator(s) not flagged by anomaly detection or "
+        f"reputation. By type: {type_breakdown}.{tier_note}\n\n"
         f"Showing top {len(sample)} by confidence (anchored first):\n\n"
         + "\n".join(sample_rows)
         + "\n\n_Full set in `output/unified_evidence.json`._\n"
-        "</details>\n"
     )
 
 
-# Process evidence types we accept into the tree. Deliberately excludes
-# network_connection / injected_code / file_artifact etc. whose free-text value
-# may contain the substring "pid" — those polluted the old heuristic filter.
+# Process evidence types we accept into the tree. Deliberately excludes network_connection /
+# injected_code / file_artifact etc. whose free-text value may contain the substring "pid" — those
+# polluted the old heuristic filter.
 _PROCESS_EVIDENCE_TYPES = {"process", "memprocfs_process"}
 
-# Match PID/PPID across each tool's delimiter style (PID:1940, PID 1234,
-# "pid": 1636). The negative lookbehind on (?<![a-z]) stops the bare-PID pattern
-# from matching the "pid" inside "ppid".
+# Match PID/PPID across each tool's delimiter style (PID:1940, PID 1234, "pid": 1636). The negative
+# lookbehind on (?<![a-z]) stops the bare-PID pattern from matching the "pid" inside "ppid".
 _PID_RE = re.compile(r'(?<![a-z])"?pid"?[\s:=]+(\d+)', re.IGNORECASE)
 _PPID_RE = re.compile(r'"?ppid"?[\s:=]+(\d+)', re.IGNORECASE)
 
@@ -1144,8 +1017,9 @@ def _build_process_tree(evidence_items, anomaly_ids, tool_sources=None):
     JSON), so the hierarchy is rebuilt from the flat ``process`` /
     ``memprocfs_process`` items — each carries PID/PPID and the IOC-rescored
     severity — linked child->parent by PPID. ``process_relation`` items mark
-    suspicious lineage. Only flagged processes and the parent chain that anchors
-    them are shown, with a severity word and the source evidence file per row.
+    suspicious lineage. The full tree is shown (capped at _TREE_ROW_CAP rows),
+    with a severity word per row so flagged lineages stand out without hiding
+    the benign processes an investigator would want the full context of.
     """
     tool_sources = tool_sources or {}
     items = [e for e in evidence_items if isinstance(e, dict)]
@@ -1233,44 +1107,25 @@ def _build_process_tree(evidence_items, anomaly_ids, tool_sources=None):
         if child_pid in nodes:
             nodes[child_pid]["suspicious"] = True
 
-    # Roots: a PID with no PPID, or whose PPID points outside the captured set
-    # (e.g. System's ppid 0, or a parent that wasn't collected). Derived from the
-    # node's own ppid so a real root isn't hidden behind a phantom parent.
+    # Roots: a PID with no PPID, or whose PPID points outside the captured set (e.g. System's ppid
+    # 0, or a parent that wasn't collected). Derived from the node's own ppid so a real root isn't
+    # hidden behind a phantom parent.
     roots = sorted(
         pid for pid in nodes
         if not nodes[pid]["ppid"] or nodes[pid]["ppid"] not in nodes
     )
 
-    # 3) Keep only flagged processes and the ancestor chain that anchors them, so
-    #    benign noise drops out while the lineage to a malicious process stays.
-    def _is_flagged(node):
-        return (node["severity"] in ("critical", "high")
-                or node["suspicious"]
-                or node["aid"] in anomaly_ids
-                or bool(node["ioc_match"]))
-
-    keep: set = set()
-    for pid, node in nodes.items():
-        if not _is_flagged(node):
-            continue
-        keep.add(pid)
-        cur = node["ppid"]            # walk ancestors (bounded to guard cycles)
-        seen = 0
-        while cur in nodes and cur not in keep and seen < len(nodes):
-            keep.add(cur)
-            cur = nodes[cur]["ppid"]
-            seen += 1
-
-    if not keep:
-        return (f"_No flagged processes — {len(nodes)} process(es) captured "
-                "(see output/unified_evidence.json)._")
+    # Show the full tree — every captured process, not just flagged lineages — so an
+    # investigator gets the same complete picture the dashboard already shows. Each row's
+    # severity word still makes flagged processes stand out at a glance.
+    keep: set = set(nodes.keys())
 
     lines: list = []
     emitted: set = set()
 
     def _emit(pid, prefix="", child_prefix=""):
-        # prefix renders before this node's name (box-drawing connectors so the
-        # hierarchy survives renderers that collapse leading whitespace).
+        # prefix renders before this node's name (box-drawing connectors so the hierarchy survives
+        # renderers that collapse leading whitespace).
         if pid not in keep or len(lines) >= _TREE_ROW_CAP or pid in emitted:
             return
         emitted.add(pid)
@@ -1299,77 +1154,92 @@ def _build_process_tree(evidence_items, anomaly_ids, tool_sources=None):
         _emit(pid)
 
     if len(keep) > len(emitted):
-        lines.append(f"  …  ({len(keep)} flagged/anchor processes; output truncated)")
+        lines.append(f"  …  ({len(keep)} processes captured; output truncated at {_TREE_ROW_CAP} rows)")
     return "\n".join(lines)
 
 
-def _evaluate_hypothesis(hypothesis, anomaly_reason_texts, n_anomalies):
+def _evaluate_hypothesis(hypothesis, overall_sev, n_anomalies):
     """
-    Evaluate a single hypothesis against the anomaly evidence.
+    Evaluate a single hypothesis against the case evidence.
 
-    Uses anomaly count as the primary signal — the word-overlap approach
-    was replaced because XAI reason vocabulary never matched forensic
-    hypothesis vocabulary, producing a permanently-inconclusive result.
+    Led by the overall (rule/IOC) severity, with anomaly detection as
+    corroboration — not the other way round (issue 5.3). Per-hypothesis
+    word-overlap with XAI reasons was tried and removed: the XAI reason
+    vocabulary never matched forensic hypothesis vocabulary, producing a
+    permanently-inconclusive result.
     """
-    if n_anomalies == 0:
-        return "**Not Evidenced** — no anomalous artifacts detected in the current evidence set"
-    if n_anomalies >= 3:
-        return "**Supported** — multiple anomalous artifacts corroborate this hypothesis"
-    if n_anomalies >= 1:
-        return "**Partially Supported** — anomalous artifact(s) detected; further manual review recommended"
-    return "**Inconclusive** — anomaly evidence is insufficient to confirm or refute this hypothesis"
+    sev = overall_sev.lower()
+    if sev in ("critical", "high"):
+        tail = " and corroborated by anomaly detection" if n_anomalies else ""
+        return f"**Supported** — elevated-severity findings in the evidence set{tail}"
+    if sev == "medium" or n_anomalies >= 1:
+        return "**Partially Supported** — suspicious artifact(s) detected; further manual review recommended"
+    return "**Not Evidenced** — no elevated-severity or anomalous artifacts in the current evidence set"
 
 
-def _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence):
+def _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence, reconciliation=None):
     ct = case_type.replace("_", " ").title()
     sev_lower = overall_sev.lower()
-    if sev_lower == "critical" or n_anomalies >= 3:
-        _plur = "y" if n_anomalies == 1 else "ies"
-        _verb = "was" if n_anomalies == 1 else "were"
-        return (
-            f"This investigation reveals strong indicators of a confirmed {ct} incident. "
-            f"{n_anomalies} high-confidence anomal{_plur} {_verb} detected across the evidence set. "
-            "Immediate escalation to incident response is warranted."
+    # The verdict is led by the evidence severity; P5 corroboration is mentioned only when anomaly
+    # detection actually fired, not used to drive the tier (issue 5.3).
+    corrob = (
+        f" {n_anomalies} artifact(s) were independently flagged by anomaly detection."
+        if n_anomalies else ""
+    )
+    # The verdict named the narrative case_type as settled fact even when Case Classification, two
+    # sections above it, already flagged that the evidence only weakly supports that same
+    # classification - a reader hits "evidence weakly supports ransomware (14%)... aligns more with
+    # data_exfiltration" immediately followed by "evidence is consistent with Ransomware activity"
+    # with no acknowledgment of the contradiction. Surface the reconciled confidence and the
+    # suggested alternative here too, when reconciliation actually flagged a divergence.
+    reconciliation = reconciliation or {}
+    caveat = ""
+    if reconciliation.get("narrative_evidence_divergence"):
+        rc = reconciliation.get("reconciled_confidence")
+        rc_str = f" (reconciled confidence {rc:.0%})" if isinstance(rc, (int, float)) else ""
+        alt = reconciliation.get("evidence_suggests")
+        alt_str = f" The recovered evidence aligns more strongly with '{alt}'." if alt else ""
+        caveat = (
+            f" However, the evidence only weakly supports the {ct} classification itself{rc_str} "
+            f"— this verdict should be read as evidence-severity-driven, not as a confirmed {ct} "
+            f"determination.{alt_str}"
         )
-    elif sev_lower == "high" or n_anomalies >= 1:
+    if sev_lower == "critical":
         return (
-            f"Evidence is consistent with {ct} activity. "
-            f"{n_anomalies} anomalous artifact(s) were identified with high confidence. "
-            "Analyst review and targeted containment steps are recommended."
+            f"This investigation reveals strong indicators of a confirmed {ct} incident, "
+            f"with critical-severity artifacts corroborated across the evidence set.{corrob} "
+            f"Immediate escalation to incident response is warranted.{caveat}"
         )
-    elif n_anomalies > 0:
+    elif sev_lower == "high":
         return (
-            f"Evidence shows suspicious activity consistent with early-stage {ct} indicators. "
-            f"{n_anomalies} artifact(s) triggered anomaly detection. "
-            "Further monitoring and expanded evidence collection are advised."
+            f"Evidence is consistent with {ct} activity, with high-severity findings in the "
+            f"evidence set.{corrob} Analyst review and targeted containment steps are "
+            f"recommended.{caveat}"
+        )
+    elif sev_lower == "medium":
+        return (
+            f"Evidence shows suspicious activity consistent with early-stage {ct} indicators.{corrob} "
+            f"Further monitoring and expanded evidence collection are advised.{caveat}"
         )
     else:
         return (
-            f"No anomalous artifacts were detected in the current evidence set. "
+            f"No elevated-severity artifacts were detected in the current evidence set. "
             f"The incident report was classified as {ct} with {confidence:.0%} confidence. "
             "Manual review is recommended to confirm benign status or expand evidence scope."
         )
 
 
-# Evidence types that are status/diagnostic markers, not real analysis output.
-# A tool whose only items are of these types ran but produced nothing usable
-# (e.g. MemProcFS emits a single `memory_analysis_status` item when it cannot
-# parse the image), so it must not be credited as having "Analysed" the dump.
-_STATUS_EVIDENCE_TYPES = {"memory_analysis_status"}
+# Status/diagnostic markers, not analysis output — a tool with only these ran but produced nothing
+# usable and must not be credited as "Analysed".
+_STATUS_EVIDENCE_TYPES = {"memory_analysis_status", "evidence_diagnostic"}
 
 
 def _build_evidence_coverage(tools_ran, evidence_items=None):
-    # Map each covered evidence type to the tool(s) that actually analysed it,
-    # so a type backed by more than one tool (e.g. memory_dump via volatility3
-    # and memprocfs) is attributed accurately rather than to a single winner.
-    #
-    # A tool is only credited as "Analysed" when it produced at least one
-    # substantive evidence item. If it emitted only a status/failure marker
-    # (e.g. MemProcFS "unavailable" / "mount failure"), it's reported as
-    # "ran but produced no artifacts" instead of being listed as a successful
-    # analyser — otherwise the report contradicts itself (claims MemProcFS
-    # analysed the dump while the evidence shows it was unavailable).
-    produced = {}  # tool -> produced at least one non-status item
+    # Attribute each evidence type to every tool that analysed it; a tool is credited "Analysed"
+    # only if it produced a substantive (non-status) item, else it's "ran but produced no artifacts"
+    # — the report mustn't claim a tool analysed a dump its own evidence says was unavailable.
+    produced = {}       # tool -> produced at least one non-status item
+    diagnosis = {}       # tool -> specific reason its input file looked unusable, if diagnosed
     for e in (evidence_items or []):
         if not isinstance(e, dict):
             continue
@@ -1378,11 +1248,12 @@ def _build_evidence_coverage(tools_ran, evidence_items=None):
             continue
         substantive = e.get("evidence_type") not in _STATUS_EVIDENCE_TYPES
         produced[tool] = produced.get(tool, False) or substantive
+        if e.get("evidence_type") == "evidence_diagnostic" and tool not in diagnosis:
+            diagnosis[tool] = e.get("value", "")
 
     covered = {}
     for t in tools_ran:
-        ev = _TOOL_TO_EVIDENCE.get(t)
-        if ev:
+        for ev in _TOOL_TO_EVIDENCE.get(t, ()):
             covered.setdefault(ev, []).append(t)
     rows = [
         "| Evidence Type | Status | Forensic Tool | Notes |",
@@ -1391,8 +1262,8 @@ def _build_evidence_coverage(tools_ran, evidence_items=None):
     for ev in _ALL_EVIDENCE_TYPES:
         ev_label = ev.replace("_", " ").title()
         tools_for_ev = sorted(set(covered.get(ev, [])))
-        # Default True keeps backward-compatible behaviour when evidence_items
-        # isn't supplied (every covered tool counts as an analyser).
+        # Default True keeps backward-compatible behaviour when evidence_items isn't supplied (every
+        # covered tool counts as an analyser).
         analysed  = [t for t in tools_for_ev if produced.get(t, True)]
         attempted = [t for t in tools_for_ev if not produced.get(t, True)]
         if analysed:
@@ -1404,16 +1275,118 @@ def _build_evidence_coverage(tools_ran, evidence_items=None):
             rows.append(f"| {ev_label} | Analysed | {tool_str} | {note} |")
         elif attempted:
             tool_str = ", ".join(attempted)
-            rows.append(
-                f"| {ev_label} | Not analysed | {tool_str} | "
-                "Tool ran but could not parse the evidence; no artifacts extracted. |"
+            reasons = list(dict.fromkeys(diagnosis[t] for t in attempted if t in diagnosis))
+            note = (
+                " ".join(reasons) if reasons
+                else "Tool ran but could not parse the evidence; no artifacts extracted."
             )
+            rows.append(f"| {ev_label} | Not analysed | {tool_str} | {note} |")
         else:
             note = _ACQUIRE_NOTES.get(ev, "Collect evidence to enable analysis.")
             rows.append(
                 f"| {ev_label} | Not provided | - | {note} |"
             )
     return "\n".join(rows)
+
+
+def _build_ml_only_section(all_items, anomaly_ids, anomaly_lookup, tool_sources):
+    """Artifacts P5 flagged as anomalous that the rule/IOC path did NOT elevate (severity below
+    high, no IOC match). This is anomaly detection's only genuinely independent contribution —
+    everything else it flags merely re-ranks an item the rules already caught — so it gets its
+    own review callout instead of being folded silently into the full evidence file (issue 5.3)."""
+    ML_ONLY_CAP = 15
+    candidates = [
+        e for e in all_items
+        if isinstance(e, dict)
+        and e.get("artifact_id", "") in anomaly_ids
+        and str(e.get("severity", "")).lower() not in ("critical", "high")
+        and not e.get("ioc_match")
+        and e.get("evidence_type") != "process_tree"
+    ]
+    if not candidates:
+        return (
+            "## ML-Flagged for Review (no rule match)\n\n"
+            "_No artifacts were flagged by anomaly detection beyond those already "
+            "caught by rule/IOC matching._"
+        )
+    candidates.sort(key=_finding_sort_key)
+    shown = candidates[:ML_ONLY_CAP]
+    rows = [
+        "| Type | Artifact | Source · File | Why flagged |",
+        "|------|----------|---------------|-----------|",
+    ]
+    for e in shown:
+        aid      = e.get("artifact_id", "")
+        tool     = e.get("source_tool", "-")
+        src_file = tool_sources.get(tool, "-")
+        src_cell = tool if src_file in ("-", "", None) else f"{tool} · {src_file}"
+        rows.append(
+            f"| {_md_cell(_finding_type(e.get('evidence_type', '')))} "
+            f"| {_md_cell(str(e.get('value', '-'))[:70])} "
+            f"| {_md_cell(src_cell)} "
+            f"| {_md_cell(_truncate(anomaly_lookup.get(aid, '-'), 80))} |"
+        )
+    section = (
+        "## ML-Flagged for Review (no rule match)\n\n"
+        f"Anomaly detection independently flagged **{len(candidates)}** artifact(s) "
+        "that no rule or IOC match elevated — candidates for manual review the model "
+        "found unusual relative to the baseline.\n\n"
+        + "\n".join(rows)
+    )
+    overflow = len(candidates) - len(shown)
+    if overflow > 0:
+        section += (
+            f"\n\n_…and {overflow} more — see `output/unified_evidence.json`._"
+        )
+    return section
+
+
+# Correlation types worth an analyst's attention. same_timestamp is folded to a count: browsing
+# sessions share minute buckets, so it floods plaso runs with noise (48/72 on ubnist1).
+_STRONG_CORRELATION_TYPES = ("linked_artifact", "same_pid", "same_file")
+CORRELATED_FINDINGS_CAP = 15
+
+
+def _build_correlated_findings(findings):
+    """Markdown section for the aggregator's cross-artifact `findings`: strong correlation types
+    as a confidence-sorted table, weak same_timestamp co-occurrences as a one-line count."""
+    findings = [f for f in findings if isinstance(f, dict)]
+    strong = [f for f in findings if f.get("correlation_type") in _STRONG_CORRELATION_TYPES]
+    n_ts = sum(1 for f in findings if f.get("correlation_type") == "same_timestamp")
+    if not strong and not n_ts:
+        return "## Correlated Findings\n\n_No cross-artifact correlations detected._"
+
+    parts = ["## Correlated Findings"]
+    if strong:
+        strong.sort(key=lambda f: -(f.get("confidence") or 0))
+        shown = strong[:CORRELATED_FINDINGS_CAP]
+        rows = [
+            "| Correlation | Confidence | Finding | Artifacts | Tools |",
+            "|-------------|------------|---------|-----------|-------|",
+        ]
+        for f in shown:
+            conf = f.get("confidence")
+            conf_cell = f"{conf:.0%}" if isinstance(conf, (int, float)) else "-"
+            rows.append(
+                f"| {_md_cell(str(f.get('correlation_type', '-')).replace('_', ' '))} "
+                f"| {conf_cell} "
+                f"| {_md_cell(str(f.get('finding', '-'))[:90])} "
+                f"| {len(f.get('artifacts', []))} "
+                f"| {_md_cell(', '.join(f.get('source_tools', [])) or '-')} |"
+            )
+        parts.append(
+            f"**{len(strong)}** cross-artifact correlation(s) — the same PID, file, or "
+            "tool-declared link observed across multiple evidence items.\n\n" + "\n".join(rows)
+        )
+        overflow = len(strong) - len(shown)
+        if overflow > 0:
+            parts.append(f"_…and {overflow} more — see `output/unified_evidence.json`._")
+    if n_ts:
+        parts.append(
+            f"_{n_ts} same-timestamp co-occurrence(s) omitted (weak signal); "
+            "full list in `output/unified_evidence.json`._"
+        )
+    return "\n\n".join(parts)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1433,8 +1406,8 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     # Evidence↔narrative reconciliation (issue 1.1), attached post-aggregation.
     reconciliation = case_context.get("evidence_reconciliation") or {}
 
-    # tool -> source evidence file (recorded by the orchestrator). Lets findings
-    # be attributed to the artifact they came from.
+    # tool -> source evidence file (recorded by the orchestrator). Lets findings be attributed to
+    # the artifact they came from.
     tool_sources = case_context.get("evidence_sources", {})
 
     tools_ran = unified_evidence.get("tools_aggregated", [])
@@ -1444,26 +1417,25 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     # Bridge aliases used by post-resolution code
     anomaly_lookup       = {aid: d.get("summary", "-") for aid, d in xai_lookup.items()}
     anomaly_ids          = set(xai_lookup.keys())
-    anomaly_reason_texts = [d.get("summary", "") for d in xai_lookup.values()]
     n_anomalies          = len(xai_lookup)
-    overall_sev          = "high" if n_anomalies >= 3 else ("medium" if n_anomalies >= 1 else "low")
-
 
     all_items = [e for e in unified_evidence.get("evidence_items", []) if isinstance(e, dict)]
-    # A "finding" worth its own Key Findings row: elevated severity or a fired
-    # IOC match (e.g. a medium ransom-note binary). Bare low-severity anomalies
-    # are left to the full evidence file so they don't flood the table. The
-    # process_tree aggregate is excluded — it has its own Process Tree section.
+
+    # Overall severity = highest rule/IOC severity; P5 anomalies are a tie-breaker only (nudge
+    # medium→high), never the headline — the old anomaly-count formula capped critical cases at HIGH
+    # (5.3).
+    rule_sev    = _highest_severity(all_items)
+    overall_sev = "high" if (rule_sev == "medium" and n_anomalies >= 1) else rule_sev
+    # Key Findings row = elevated severity or a fired IOC match; process_tree is excluded (it has
+    # its own section).
     def _is_finding(e):
         if e.get("evidence_type") == "process_tree":
             return False
         if not (e.get("severity") in ("critical", "high")
                 or bool(e.get("ioc_match"))):
             return False
-        # Drop rows that would render all-dashes: no extractable indicator, no
-        # catalog match, and no XAI explanation. These are low-information echoes
-        # (e.g. ioc_engine's "Process injection detected") of evidence already
-        # shown richer elsewhere; the full set remains in unified_evidence.json.
+        # Drop rows that would render all-dashes (no indicator/match/XAI) — low-information echoes
+        # of evidence shown richer elsewhere.
         has_indicator = bool(_item_indicators(e))
         has_match     = bool(e.get("ioc_match"))
         has_xai       = anomaly_lookup.get(e.get("artifact_id", "")) not in (None, "-")
@@ -1529,16 +1501,14 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     if recon_notes:
         classification += "\n\n" + "\n".join(f"> {note}" for note in recon_notes)
 
-    # MITRE ATT&CK
-    techniques = MITRE_BY_CASE.get(case_type, MITRE_BY_CASE["unknown"])
-    basis      = "Anomaly detected" if n_anomalies > 0 else "Inferred from case type"
+    # MITRE ATT&CK — static per-case techniques plus rows justified by specific flagged evidence.
     mitre_rows = [
         "| Technique ID | Technique Name | Tactic | Evidence Basis |",
         "|--------------|----------------|--------|----------------|",
     ]
-    for tid, tname, tactic in techniques:
+    for tid, tname, tactic, row_basis in _mitre_techniques(case_type, all_items, n_anomalies):
         mitre_rows.append(
-            f"| {_md_cell(tid)} | {_md_cell(tname)} | {_md_cell(tactic)} | {_md_cell(basis)} |"
+            f"| {_md_cell(tid)} | {_md_cell(tname)} | {_md_cell(tactic)} | {_md_cell(row_basis)} |"
         )
     mitre_section = "## MITRE ATT&CK Mapping\n\n" + "\n".join(mitre_rows)
 
@@ -1550,14 +1520,14 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
         "that anchors them are listed._"
     )
 
-    # Key Findings — one row per notable evidence item, with its extracted
-    # indicators inline (replacing the former separate IOC table) and the XAI
-    # explanation. Capped; overflow points to the full evidence file.
+    # Key Findings — one row per notable evidence item, with its extracted indicators inline
+    # (replacing the former separate IOC table) and the XAI explanation. Capped; overflow points to
+    # the full evidence file.
     KEY_FINDINGS_CAP = 30
     shown_findings = priority_items[:KEY_FINDINGS_CAP]
     if shown_findings:
         kf_rows = [
-            "| Severity | Host | Timestamp | Type | Finding | Indicators / IOC Match | Source · File | Why (XAI) |",
+            "| Severity | Host | Timestamp | Type | Finding | Indicators / IOC Match | Source · File | Why flagged |",
             "|----------|------|-----------|------|---------|------------------------|---------------|-----------|",
         ]
         for item in shown_findings:
@@ -1591,8 +1561,8 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
             "_No critical or high-severity findings extracted from evidence._"
         )
 
-    # Indicators of Compromise — brief overview only. The full per-indicator
-    # list (with provenance + XAI) is written to output/ioc_report.md.
+    # Indicators of Compromise — brief overview only. The full per-indicator list (with provenance +
+    # XAI) is written to output/ioc_report.md.
     iocs = _extract_iocs(all_items)
     if iocs:
         by_type = {}
@@ -1618,7 +1588,7 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
 
     hyp_lines = []
     for h in hypotheses:
-        verdict = _evaluate_hypothesis(h, anomaly_reason_texts, n_anomalies)
+        verdict = _evaluate_hypothesis(h, overall_sev, n_anomalies)
         hyp_lines.append(f"**Hypothesis:** {h}  \n**Verdict:** {verdict}\n")
     hyp_section = (
         "## Hypotheses Evaluated\n\n" + "\n".join(hyp_lines)
@@ -1626,7 +1596,7 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     )
 
     # Analyst verdict
-    verdict_text = _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence)
+    verdict_text = _build_analyst_verdict(case_type, overall_sev, n_anomalies, confidence, reconciliation)
     verdict_section = f"## Analyst Verdict\n\n{verdict_text}"
 
     # Recommendations
@@ -1640,22 +1610,213 @@ def _mock_report(unified_evidence, shap_explanations, case_context):
     # Audit trail
     audit_section = (
         "## Audit Trail\n\n"
-        "A SHA-256 audit log was generated at `output/audit_log.json` "
+        "A SHA-256 audit log was generated at `output/audit_log.jsonl` "
         "and can be used to verify evidence integrity for chain-of-custody compliance."
     )
 
+    # P5's independent contribution: anomalies the rules didn't elevate (5.3).
+    ml_only_section = _build_ml_only_section(
+        all_items, anomaly_ids, anomaly_lookup, tool_sources)
+
+    correlation_section = _build_correlated_findings(unified_evidence.get("findings", []))
+
     sections = [
         cover, exec_summary, classification, findings_section,
-        ioc_section, mitre_section, process_section,
-        hyp_section, verdict_section, recs_section,
+        correlation_section, ml_only_section, ioc_section, mitre_section,
+        process_section, hyp_section, verdict_section, recs_section,
         coverage_section, audit_section,
     ]
     return "\n\n---\n\n".join(sections)
 
 
+# Network-graph extraction (D2) — evidence types that carry a "src → dst" pair, and URL-bearing
+# types whose hosts hang off a synthetic "imaged host" subject node (no pair to parse).
+_GRAPH_NET_TYPES = {"network_connection", "dns_query", "http_request", "suspicious_port", "beacon_pattern"}
+_GRAPH_URL_TYPES = {"timeline_event", "suspicious_url"}
+_GRAPH_DISK_SUBJECT = "imaged host"
+_URL_HOST_RE = re.compile(r"https?://([^/\s:?#]+)", re.IGNORECASE)
+
+
+def _build_network_graph(all_items):
+    """Endpoint graph {nodes, links} for the dashboard's Network page (D2) — Network.jsx previously
+    re-parsed the free-text values in JS with its own RFC1918 copy that could silently drift."""
+    nodes, links = {}, {}
+
+    def touch(node_id):
+        return nodes.setdefault(node_id, {"id": node_id, "is_source": False, "rank": 0})
+
+    for e in all_items:
+        etype = e.get("evidence_type")
+        value = str(e.get("value") or "")
+        rank = SEVERITY_ORDER.get(str(e.get("severity", "")).lower(), 0)
+
+        if etype in _GRAPH_URL_TYPES:
+            m = _URL_HOST_RE.search(value)
+            if not m:
+                continue
+            host = m.group(1)
+            touch(_GRAPH_DISK_SUBJECT)["is_source"] = True
+            n = touch(host)
+            n["rank"] = max(n["rank"], rank)
+            links[f"{_GRAPH_DISK_SUBJECT}->{host}"] = {"source": _GRAPH_DISK_SUBJECT, "target": host}
+            continue
+
+        if etype not in _GRAPH_NET_TYPES:
+            continue
+        # Both arrow styles: tshark values use "→", volatility/memprocfs netstat uses "->".
+        parts = re.split(r"→|->", value)
+        if len(parts) < 2:
+            continue
+        left, right = parts[0].split(), parts[1].split()
+        if not left or not right:
+            continue
+        # Strip :port and /path so one host = one node.
+        src = re.split(r"[:/]", left[-1])[0]
+        dst = re.split(r"[:/]", right[0])[0]
+        if not src or not dst:
+            continue
+
+        # The internal subject is the LAN endpoint (reply-direction rows put the C2 on the left);
+        # an external host takes its WORST connecting severity so it shows once across filters.
+        for endpoint in (src, dst):
+            n = touch(endpoint)
+            if is_lan_ipv4(endpoint):
+                n["is_source"] = True
+            else:
+                n["rank"] = max(n["rank"], rank)
+        links[f"{src}->{dst}"] = {"source": src, "target": dst}
+
+    rank_to_sev = {4: "critical", 3: "high", 2: "medium"}
+    return {
+        "nodes": [
+            {"id": n["id"], "is_source": n["is_source"],
+             "severity": rank_to_sev.get(n["rank"], "low")}
+            for n in nodes.values()
+        ],
+        "links": list(links.values()),
+    }
+
+
+def _build_dashboard_summary(unified_evidence, case_context, shap_explanations):
+    """Structured stats + MITRE for the web dashboard, written as a sidecar `dashboard.json`.
+    Mirrors the report's own headline semantics (same `overall_sev` tie-breaker, same
+    `_extract_iocs` count, same MITRE table) so the UI and the markdown report never disagree."""
+    all_items = [e for e in unified_evidence.get("evidence_items", []) if isinstance(e, dict)]
+    by_sev = {s: 0 for s in ("critical", "high", "medium", "low")}
+    for e in all_items:
+        sev = str(e.get("severity", "")).lower()
+        if sev in by_sev:
+            by_sev[sev] += 1
+
+    n_anomalies = len(_xai_lookup(shap_explanations, only_anomalies=True))
+    rule_sev    = _highest_severity(all_items)
+    overall_sev = "high" if (rule_sev == "medium" and n_anomalies >= 1) else rule_sev
+
+    case_type = case_context.get("case_type", "unknown")
+    mitre = [
+        {"id": tid, "name": tname, "tactic": tactic, "basis": row_basis}
+        for tid, tname, tactic, row_basis in _mitre_techniques(case_type, all_items, n_anomalies)
+    ]
+
+    return {
+        "case_id": unified_evidence.get("case_id", case_context.get("case_id", "")),
+        "case_type": case_type,
+        "generated_at": unified_evidence.get("generated_at", ""),
+        "summary": {
+            "total_items": unified_evidence.get("total_items", len(all_items)),
+            "overall_severity": overall_sev,
+            "critical_count": by_sev["critical"],
+            "ioc_count": len(_extract_iocs(all_items)),
+            "severity_distribution": by_sev,
+        },
+        "by_tool": {t: len(v) for t, v in unified_evidence.get("evidence_by_tool", {}).items()},
+        # tool -> source evidence file, so the UI can attribute each finding to the artifact it came
+        # from (issue U4).
+        "evidence_sources": case_context.get("evidence_sources", {}),
+        "mitre": mitre,
+        "graph": _build_network_graph(all_items),
+    }
+
+
 # ─────────────────────────────────────────────────────────────
 # MAIN PUBLIC FUNCTION
 # ─────────────────────────────────────────────────────────────
+
+def _build_per_file_reports(unified_evidence, case_context) -> dict[str, str]:
+    """One short, standalone report per evidence file, alongside the case-wide final_report.md.
+
+    Evidence items only carry which tool produced them, not a literal source-file field (adding
+    one would mean touching every wrapper's make_evidence_item() call site) — but in this
+    pipeline's actual usage, each tool is run against exactly one file per case, and
+    case_context["evidence_sources"] (built in autoforensiq.py) already maps tool -> that file's
+    name. Grouping by tool and labelling with that filename gives a genuine per-file report for
+    the common case, without an invasive schema change across every wrapper. Returns
+    {safe_filename_stem: markdown_text}.
+    """
+    tool_sources = case_context.get("evidence_sources", {})
+    all_items = [e for e in unified_evidence.get("evidence_items", []) if isinstance(e, dict)]
+
+    by_tool: dict[str, list] = {}
+    for item in all_items:
+        tool = item.get("source_tool") or "unknown"
+        by_tool.setdefault(tool, []).append(item)
+
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    reports = {}
+
+    for tool, items in sorted(by_tool.items()):
+        source_file = tool_sources.get(tool) or "(source file not recorded)"
+        substantive = [i for i in items if i.get("evidence_type") not in _STATUS_EVIDENCE_TYPES]
+        overall_sev = _highest_severity(substantive) if substantive else "low"
+
+        by_sev = {}
+        for i in substantive:
+            sev = str(i.get("severity", "low")).lower()
+            by_sev[sev] = by_sev.get(sev, 0) + 1
+        sev_breakdown = ", ".join(
+            f"{by_sev[s]} {s}" for s in ("critical", "high", "medium", "low") if by_sev.get(s)
+        ) or "none"
+
+        lines = [
+            f"# {source_file} — {tool} Findings\n",
+            f"_Generated {generated}_\n",
+            f"| Field | Value |\n|-------|-------|\n"
+            f"| **Source File** | {_md_cell(source_file)} |\n"
+            f"| **Analysed By** | {_md_cell(tool)} |\n"
+            f"| **Total Items** | {len(items)} |\n"
+            f"| **Overall Severity** | **{overall_sev.upper()}** |\n",
+            f"By severity: {sev_breakdown}.\n",
+        ]
+
+        diagnostics = [i for i in items if i.get("evidence_type") == "evidence_diagnostic"]
+        if diagnostics:
+            lines.append("## File-Level Diagnosis\n")
+            for d in diagnostics:
+                lines.append(f"- ⚠ {_md_cell(d.get('value', ''))}")
+            lines.append("")
+
+        if substantive:
+            lines.append("## Findings\n")
+            rows = [
+                "| Evidence Type | Value | Severity | Confidence |",
+                "|---------------|-------|----------|------------|",
+            ]
+            for item in sorted(substantive, key=_finding_sort_key):
+                rows.append(
+                    f"| {_md_cell(item.get('evidence_type'))} "
+                    f"| {_md_cell(_truncate(item.get('value', ''), 140))} "
+                    f"| {_md_cell(str(item.get('severity', '')).upper())} "
+                    f"| {_format_percent(item.get('confidence'))} |"
+                )
+            lines.append("\n".join(rows) + "\n")
+        else:
+            lines.append("_No substantive findings from this file — see File-Level Diagnosis above if present._\n")
+
+        stem = re.sub(r"[^a-z0-9]+", "_", tool.lower()).strip("_") or "unknown"
+        reports[stem] = "\n".join(lines)
+
+    return reports
+
 
 def generate_report(
     unified_evidence,
@@ -1675,7 +1836,8 @@ def generate_report(
                 cfg[k] = v
 
     mock_mode = cfg.get("llm", {}).get("mock_mode", False)
-    provider  = cfg.get("llm", {}).get("provider", "openai")
+    # Default matches intent_classifier — a config with no provider used to split the run across two vendors
+    provider  = cfg.get("llm", {}).get("provider", "anthropic")
 
     if mock_mode:
         print("  [MOCK] Building report from data.")
@@ -1687,7 +1849,7 @@ def generate_report(
             if provider == "deepseek":
                 report_text = _call_deepseek(user_prompt, cfg)
             elif provider == "anthropic":
-                report_text = _call_openai(user_prompt, cfg)  # fallback: no Anthropic in report gen yet
+                report_text = _call_anthropic(user_prompt, cfg)
             else:
                 report_text = _call_openai(user_prompt, cfg)
         except Exception as exc:
@@ -1712,9 +1874,9 @@ def generate_report(
         tool_sources = case_context.get("evidence_sources", {})
         xai = _xai_lookup(shap_explanations, only_anomalies=True)
         anomaly_lookup = {aid: d.get("summary", "-") for aid, d in xai.items()}
-        # Effective severity the pipeline assigned per artifact (P5 anomaly /
-        # reputation), so a string-swept domain emitted `low` but elevated to
-        # High/Critical surfaces in the main IOC table instead of being folded.
+        # Effective severity the pipeline assigned per artifact (P5 anomaly / reputation), so a
+        # string-swept domain emitted `low` but elevated to High/Critical surfaces in the main IOC
+        # table instead of being folded.
         severity_lookup = {}
         for aid, exp in _iter_explanations(shap_explanations):
             sev = str(exp.get("severity", "")).lower()
@@ -1728,5 +1890,29 @@ def generate_report(
         print(f"  [DONE] IOC report written -> {ioc_path}")
     except Exception as exc:
         print(f"  [WARN] IOC report generation failed ({exc})")
+
+    # Dashboard sidecar: structured stats + MITRE for the web UI (data-derived, written in both mock
+    # and live modes alongside unified_evidence.json).
+    try:
+        dashboard = _build_dashboard_summary(unified_evidence, case_context, shap_explanations)
+        dash_path = Path(output_path).parent / "dashboard.json"
+        with open(dash_path, "w", encoding="utf-8") as f:
+            json.dump(dashboard, f, indent=2)
+        print(f"  [DONE] Dashboard data written -> {dash_path}")
+    except Exception as exc:
+        print(f"  [WARN] Dashboard data generation failed ({exc})")
+
+    # One standalone report per evidence file, alongside the case-wide final_report.md.
+    try:
+        per_file_reports = _build_per_file_reports(unified_evidence, case_context)
+        reports_dir = Path(output_path).parent / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        for stem, text in per_file_reports.items():
+            with open(reports_dir / f"{stem}_report.md", "w", encoding="utf-8") as f:
+                f.write(text)
+        if per_file_reports:
+            print(f"  [DONE] {len(per_file_reports)} per-file report(s) written -> {reports_dir}")
+    except Exception as exc:
+        print(f"  [WARN] Per-file report generation failed ({exc})")
 
     return report_text

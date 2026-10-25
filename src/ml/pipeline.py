@@ -1,24 +1,6 @@
-"""
-pipeline.py
------------
-Stage 5 of the AutoForensiq pipeline: ML-based anomaly detection.
-
-Called by autoforensiq.py as:
-
-    shap_explanations = run_ml_pipeline(input_path, output_path, baseline_path)
-
-Contract
---------
-* ALWAYS returns a dict (never None)
-* ALWAYS writes that same dict to output_path as shap_explanations.json
-* Output dict shape:
-    {
-        "explanations": { "<artifact_id>": { is_anomaly, score,
-                                             confidence, severity, reason } },
-        "summary":      { total_items, anomalies_detected, normal_items },
-        "generated_at": "<ISO-8601 timestamp>"
-    }
-"""
+"""Stage 5 (P5): ML anomaly detection. Contract: ALWAYS returns a dict (never None) and writes it
+to output_path as shap_explanations.json — shape: {"explanations": {artifact_id: {is_anomaly,
+score, confidence, severity, reason, ...}}, "summary": {...}, "generated_at": iso-ts}."""
 
 import json
 import logging
@@ -39,9 +21,8 @@ log = logging.getLogger(__name__)
 
 
 def _model_scope(record: Dict[str, Any]) -> str:
-    """
-    Collapse wrapper-specific evidence types into ML model families.
-    """
+    """Collapse wrapper-specific evidence types into ML model families. KEEP the substring rules
+    in sync with feature_engineering._canonical_evidence_type (coarser 4-way view, F8a)."""
     evidence_type = str(record.get("evidence_type", "")).lower()
     source_tool = str(record.get("source_tool", "")).lower()
     value = str(record.get("value", "")).lower()
@@ -111,21 +92,11 @@ def _group_records(records):
     return groups
 
 
-def _build_machine_index(unified_evidence, evidence_records):
+def _build_machine_index(evidence_records):
+    # Build machine_id -> [full item] straight from evidence_records. The unified_evidence
+    # `evidence_by_machine` index now holds artifact_id references rather than full objects (to keep
+    # the file small), so rebuild the grouping here from the authoritative item list.
     machine_index = {}
-
-    if isinstance(unified_evidence, dict):
-        by_machine = unified_evidence.get("evidence_by_machine", {})
-        if isinstance(by_machine, dict):
-            for machine_id, items in by_machine.items():
-                if isinstance(items, list):
-                    machine_index[str(machine_id)] = [
-                        item for item in items if isinstance(item, dict)
-                    ]
-
-    if machine_index:
-        return machine_index
-
     for record in evidence_records:
         machine_id = str(record.get("machine_id", "")).strip()
         if machine_id:
@@ -179,23 +150,8 @@ def run_ml_pipeline(
     output_path:   str,
     baseline_path: str,
 ) -> Dict[str, Any]:
-    """
-    Parameters
-    ----------
-    input_path    : path to unified_evidence.json   (Stage 4 output)
-    output_path   : destination for shap_explanations.json
-    baseline_path : path to baseline_normal.json
-
-    Returns
-    -------
-    dict — always; never None.
-    {
-        "explanations": { artifact_id: { is_anomaly, score, confidence,
-                                         severity, reason } },
-        "summary":      { total_items, anomalies_detected, normal_items },
-        "generated_at": "<ISO timestamp>"
-    }
-    """
+    """unified_evidence.json + baseline_normal.json → shap_explanations.json. Always returns the
+    output dict (see module docstring for the shape)."""
 
     # ── 1. Load data ──────────────────────────────────────────────────────────
     log.info("[P5] Loading baseline from %s", baseline_path)
@@ -203,33 +159,13 @@ def run_ml_pipeline(
 
     log.info("[P5] Loading evidence from %s", input_path)
     unified_evidence = json.loads(Path(input_path).read_text())
-    evidence_records = unified_evidence
+    evidence_records = unified_evidence.get("evidence_items", [])
 
-    # unified_evidence.json may be wrapped in a top-level object:
-    #   { "evidence_items": [...] }  OR just a plain list
-    if isinstance(unified_evidence, dict):
-        evidence_records = (
-            unified_evidence.get("evidence_items")
-            or unified_evidence.get("items")
-            or []
-        )
-
-    machine_index = _build_machine_index(unified_evidence, evidence_records)
-    findings_lookup = _build_finding_lookup(
-        unified_evidence.get("findings", [])
-        if isinstance(unified_evidence, dict)
-        else []
-    )
+    machine_index = _build_machine_index(evidence_records)
+    findings_lookup = _build_finding_lookup(unified_evidence.get("findings", []))
     exfiltration_lookup = _build_finding_lookup(
-        unified_evidence.get("exfiltration_findings", [])
-        if isinstance(unified_evidence, dict)
-        else []
-    )
-    bulk_summary = (
-        unified_evidence.get("bulk_summary", {})
-        if isinstance(unified_evidence, dict)
-        else {}
-    )
+        unified_evidence.get("exfiltration_findings", []))
+    bulk_summary = unified_evidence.get("bulk_summary", {})
 
     # ── 2. Group evidence → train scoped models ───────────────────────────────
     baseline_groups = _group_records(baseline_records)

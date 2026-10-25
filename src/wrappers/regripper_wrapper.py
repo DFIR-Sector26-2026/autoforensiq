@@ -1,6 +1,23 @@
 import os
+import re
 import json
-from src.wrappers.base_wrapper import BaseWrapper
+from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
+
+# A bare checked-path announcement ("Software\Microsoft\...\Run") with nothing else on the line —
+# no " - name/value" pair, no punctuation, just path segments. RegRipper prints one of these before
+# listing (or not finding) a key's contents; it is never itself a finding.
+_BARE_REG_PATH_RE = re.compile(r"^[A-Za-z0-9_ ]+(\\[A-Za-z0-9_ ]+)+$")
+
+# Every plugin prints its own two-line banner before doing anything: a bare "<name> v.<date>"
+# version line, then a "(<hive type(s)>) [<category>] <description>" line. Under a profile (-f) —
+# which runs ~100+ plugins per hive — that is a lot of banners, and a plugin whose own name/
+# category/description happens to mention "run"/"shell"/"startup" (there are many: run, runmru,
+# runvirtual, shellfolders, ...) got reported as a finding despite having said nothing about the
+# hive's actual contents yet.
+_PLUGIN_VERSION_BANNER_RE = re.compile(r"^\w+ v\.\d+$")
+_PLUGIN_DESCRIPTION_BANNER_RE = re.compile(
+    r"^\((?:NTUSER\.DAT|Software|System|SAM|Security)[^)]*\)"
+)
 
 def _resolve_regripper_path() -> str | None:
     candidate_paths = [
@@ -14,7 +31,12 @@ def _resolve_regripper_path() -> str | None:
     for candidate in candidate_paths:
         if not candidate:
             continue
-        resolved = os.path.expanduser(candidate)
+        # expanduser() substitutes ~ with the (backslash-separated) home dir but leaves the
+        # literal "/"s in these candidates untouched, producing a mixed-separator path like
+        # "C:\Users\name/RegRipper3.0/rip.pl". Perl can open that fine, but RegRipper derives its
+        # own plugins/ directory from this path with naive backslash-only parsing, so it silently
+        # resolves to the wrong directory and every plugin lookup fails. normpath() fixes it.
+        resolved = os.path.normpath(os.path.expanduser(candidate))
         if os.path.exists(resolved):
             return resolved
     return None
@@ -25,6 +47,8 @@ SUSPICIOUS_KEYS = [
 ]
 
 class RegRipperWrapper(BaseWrapper):
+    consumes = "registry_hive"
+
     def __init__(self):
         super().__init__("regripper")
 
@@ -43,18 +67,40 @@ class RegRipperWrapper(BaseWrapper):
             return []
 
         all_items = []
-        all_items.extend(self._run_plugin(hive_path, "ntuser", regripper_path))
+        # "ntuser" is a RegRipper *profile* (a curated list of ~100+ plugins for NTUSER.DAT-type
+        # hives), not a plugin itself — `-p ntuser` always fails with "plugins\ntuser.pl not
+        # found" and silently returns 0 items. Run it as a profile via `-f` instead.
+        all_items.extend(self._run_plugin(hive_path, "ntuser", regripper_path, use_profile=True))
         all_items.extend(self._run_plugin(hive_path, "run", regripper_path))
-        all_items.extend(self._run_plugin(hive_path, "autoruns", regripper_path))
+        # "autoruns" was never a real plugin in RegRipper3.0 either — "services" is a genuine
+        # plugin covering another persistence vector already named in SUSPICIOUS_KEYS.
+        all_items.extend(self._run_plugin(hive_path, "services", regripper_path))
         return all_items
 
-    def _run_plugin(self, hive_path: str, plugin: str, regripper_path: str) -> list:
-        print(f"  [REGRIP] Running plugin: {plugin}...")
-        stdout, _, code = self.run_command(
-            ["perl", regripper_path, "-r", hive_path, "-p", plugin],
-            input_files=[hive_path],
-            timeout=60
-        )
+    def _run_plugin(self, hive_path: str, plugin: str, regripper_path: str,
+                    use_profile: bool = False, max_attempts: int = 8) -> list:
+        print(f"  [REGRIP] Running {'profile' if use_profile else 'plugin'}: {plugin}...")
+        flag = "-f" if use_profile else "-p"
+        command = ["perl", regripper_path, "-r", hive_path, flag, plugin]
+
+        stdout = ""
+        for attempt in range(1, max_attempts + 1):
+            stdout, _, code = self.run_command(command, input_files=[hive_path], timeout=60)
+            n_lines = len(stdout.strip().splitlines())
+            # rip.pl's own output on Windows is intermittently truncated to just its two-line
+            # banner (version + description) with none of the actual key content that follows —
+            # confirmed reproducible: the identical command against the identical hive returns
+            # full output roughly half the time and only the banner the other half, with no error
+            # of any kind either way. Even a run that finds NOTHING still prints a "not found."/
+            # "has no subkeys." status line per checked path (a dozen or more), so a genuine
+            # zero-findings result is never this short — retry rather than silently under-report.
+            if n_lines > 3 or not stdout.strip():
+                break
+            if attempt < max_attempts:
+                print(f"  [REGRIP] {plugin}: output looked truncated ({n_lines} lines), "
+                      f"retrying ({attempt}/{max_attempts})...")
+            else:
+                print(f"  [REGRIP] {plugin}: still truncated after {max_attempts} attempts")
 
         if not stdout.strip():
             return []
@@ -64,16 +110,26 @@ class RegRipperWrapper(BaseWrapper):
     def _parse_output(self, output: str, plugin: str) -> list:
         items = []
         lines = output.strip().splitlines()
-        current_section = ""
 
         for line in lines:
             line_stripped = line.strip()
             if not line_stripped or line_stripped.startswith("#"):
                 continue
 
-            # detect section headers
+            # skip section headers
             if line_stripped.endswith(":") or line_stripped.startswith("Launching"):
-                current_section = line_stripped
+                continue
+
+            # RegRipper's own report boilerplate — a negative/status line about a checked
+            # registry path, not an actual finding. Its own path text routinely contains a
+            # SUSPICIOUS_KEYS word as a substring of the checked key's NAME (e.g. "...CurrentVersion
+            # \RunOnce has no subkeys." contains "run"), which used to slip past the keyword filter
+            # below and even get escalated to HIGH severity despite reporting nothing was found.
+            if (line_stripped.endswith((" not found.", " has no subkeys.", " has no values."))
+                    or line_stripped.startswith("LastWrite Time")
+                    or _BARE_REG_PATH_RE.match(line_stripped)
+                    or _PLUGIN_VERSION_BANNER_RE.match(line_stripped)
+                    or _PLUGIN_DESCRIPTION_BANNER_RE.match(line_stripped)):
                 continue
 
             lower = line_stripped.lower()
@@ -87,7 +143,7 @@ class RegRipperWrapper(BaseWrapper):
                 ]) else "medium"
 
                 items.append(self.make_evidence_item(
-                    artifact_id=f"reg_{plugin}_{abs(hash(line_stripped)) % 99999}",
+                    artifact_id=stable_artifact_id(f"reg_{plugin}", line_stripped),
                     evidence_type="registry_entry",
                     value=f"[{plugin}] {line_stripped}",
                     severity=severity,
@@ -99,7 +155,7 @@ class RegRipperWrapper(BaseWrapper):
 
 
 if __name__ == "__main__":
-    import sys, json
+    import sys
     if len(sys.argv) < 2:
         print("Usage: python -m src.wrappers.regripper_wrapper <NTUSER.DAT>")
         sys.exit(1)

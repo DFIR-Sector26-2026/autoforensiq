@@ -1,17 +1,6 @@
-"""
-AutoForensiq — Intent Classifier Agent (P1)
-============================================
-Reads a plain-text incident report and returns a structured case_context.json
-consumed by the Dynamic Tool Selector (P2).
-
-Supports:
-  - Anthropic Claude  (set llm.provider: "anthropic" in config.yaml)
-  - OpenAI GPT-4o     (set llm.provider: "openai"    in config.yaml)
-  - Mock mode         (set llm.mock_mode: true — no API key needed)
-
-Usage (standalone):
-    python -m src.classifier.intent_classifier <path/to/incident_report.txt>
-"""
+"""AutoForensiq — Intent Classifier (P1): plain-text incident report → structured
+case_context.json for the Dynamic Tool Selector (P2). Providers: anthropic / openai / deepseek,
+or mock_mode (no API key). Standalone: python -m src.classifier.intent_classifier <report.txt>"""
 
 import os
 import re
@@ -85,7 +74,8 @@ _MOCK_KEYWORDS = {
     "ransomware":        ["ransom", "encrypt", "decrypt", "bitcoin", "locked", ".crypt", "payment"],
     "apt_intrusion":     ["apt", "advanced persistent", "nation-state", "lateral movement", "spear phish", "c2", "command and control"],
     "data_exfiltration": ["exfil", "data theft", "stolen", "upload", "ftp", "transfer", "leak", "exfiltrat"],
-    "insider_threat":    ["insider", "employee", "disgruntled", "privileged user", "unauthorised access", "unauthorized access"],
+    "insider_threat":    ["insider", "employee", "disgruntled", "privileged user", "unauthorised access",
+                          "unauthorized access", "resignation", "resigned", "usb device"],
     "malware_infection": ["malware", "trojan", "worm", "virus", "injected", "backdoor", "rootkit", "payload"],
     "phishing":          ["phishing", "spear phish", "email", "credential harvest", "fake login", "link clicked"],
 }
@@ -100,11 +90,64 @@ _ARTIFACT_KEYWORDS = {
     "browser_history":["browser", "chrome", "firefox", "history", "cookies"],
 }
 
+# Per-case-type hypotheses / summary sentence for the mock classifier's context.
+_HYPOTHESES_MAP = {
+    "ransomware":        [
+        "Ransomware binary executed via phishing attachment or RDP brute force",
+        "File encryption process spawned from a suspicious parent process",
+        "C2 beacon established prior to encryption to exfiltrate data",
+        "Persistence mechanism installed in registry run keys before detonation",
+    ],
+    "apt_intrusion":     [
+        "Initial access via spear-phishing or supply chain compromise",
+        "Lateral movement using stolen credentials or pass-the-hash",
+        "Long-dwell persistence established via scheduled tasks or WMI subscriptions",
+        "Data staging and exfiltration to attacker-controlled C2 infrastructure",
+    ],
+    "data_exfiltration": [
+        "Sensitive data accessed and staged in a temporary directory",
+        "Exfiltration via encrypted channel to external IP or cloud storage",
+        "Credential theft used to escalate privileges before data access",
+        "Unusual outbound network volume at off-hours indicating transfer",
+    ],
+    "insider_threat":    [
+        "Privileged user accessed data outside normal business hours",
+        "Bulk download or copy of sensitive files to removable media",
+        "Attempts to cover tracks via log clearing or file deletion",
+        "Unusual authentication patterns prior to resignation or termination",
+    ],
+    "malware_infection": [
+        "Malware injected into a legitimate process to evade detection",
+        "Suspicious DLL loaded by a trusted process (DLL hijacking or sideloading)",
+        "Persistence mechanism established in registry or scheduled tasks",
+        "C2 communication established from infected host to attacker infrastructure",
+    ],
+    "phishing":          [
+        "Malicious email link or attachment opened by target user",
+        "Credential harvesting page used to steal user login credentials",
+        "Payload downloaded and executed following link click",
+        "Lateral movement initiated from compromised user account",
+    ],
+    "unknown":           [
+        "Investigate all available artifacts for signs of compromise",
+        "Baseline system state against known-good to identify anomalies",
+        "Review authentication logs for unusual access patterns",
+    ],
+}
+
+_SUMMARIES = {
+    "ransomware":        "Ransomware incident where files were encrypted and a ransom demand was made.",
+    "apt_intrusion":     "Advanced persistent threat intrusion with signs of long-dwell lateral movement.",
+    "data_exfiltration": "Suspected data exfiltration incident with unauthorised access to sensitive files.",
+    "insider_threat":    "Insider threat incident involving unauthorised data access by a privileged user.",
+    "malware_infection": "Malware infection detected with signs of process injection and C2 communication.",
+    "phishing":          "Phishing-initiated compromise resulting in credential theft or payload execution.",
+    "unknown":           "Incident of unknown type requiring broad forensic investigation across all artifacts.",
+}
+
+
 def _mock_classify(report_text: str) -> dict:
-    """
-    Keyword-based mock classifier. Returns a deterministic case_context dict
-    without calling any LLM. Useful for pipeline testing without an API key.
-    """
+    """Deterministic keyword-based classifier — no LLM/API key needed."""
     text_lower = report_text.lower()
 
     # Determine case_type by scoring each category
@@ -127,59 +170,12 @@ def _mock_classify(report_text: str) -> dict:
     if not artifact_types:
         artifact_types = ["memory_dump"]  # safe default
 
-    # Build hypotheses from case type
-    hypotheses_map = {
-        "ransomware":        [
-            "Ransomware binary executed via phishing attachment or RDP brute force",
-            "File encryption process spawned from a suspicious parent process",
-            "C2 beacon established prior to encryption to exfiltrate data",
-            "Persistence mechanism installed in registry run keys before detonation",
-        ],
-        "apt_intrusion":     [
-            "Initial access via spear-phishing or supply chain compromise",
-            "Lateral movement using stolen credentials or pass-the-hash",
-            "Long-dwell persistence established via scheduled tasks or WMI subscriptions",
-            "Data staging and exfiltration to attacker-controlled C2 infrastructure",
-        ],
-        "data_exfiltration": [
-            "Sensitive data accessed and staged in a temporary directory",
-            "Exfiltration via encrypted channel to external IP or cloud storage",
-            "Credential theft used to escalate privileges before data access",
-            "Unusual outbound network volume at off-hours indicating transfer",
-        ],
-        "insider_threat":    [
-            "Privileged user accessed data outside normal business hours",
-            "Bulk download or copy of sensitive files to removable media",
-            "Attempts to cover tracks via log clearing or file deletion",
-            "Unusual authentication patterns prior to resignation or termination",
-        ],
-        "malware_infection": [
-            "Malware injected into a legitimate process to evade detection",
-            "Suspicious DLL loaded by a trusted process (DLL hijacking or sideloading)",
-            "Persistence mechanism established in registry or scheduled tasks",
-            "C2 communication established from infected host to attacker infrastructure",
-        ],
-        "phishing":          [
-            "Malicious email link or attachment opened by target user",
-            "Credential harvesting page used to steal user login credentials",
-            "Payload downloaded and executed following link click",
-            "Lateral movement initiated from compromised user account",
-        ],
-        "unknown":           [
-            "Investigate all available artifacts for signs of compromise",
-            "Baseline system state against known-good to identify anomalies",
-            "Review authentication logs for unusual access patterns",
-        ],
-    }
-
     # Extract affected systems (simple heuristic: look for hostnames/IPs)
     ip_pattern   = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', report_text)
     host_pattern = re.findall(r'\b[A-Z][A-Z0-9\-]{3,}\b', report_text)
-    # Require a hostname *shape* rather than an English word (issue B5): real
-    # machine names carry a digit or hyphen (WIN-VICTIM-22, DC01, WKSTN05) and
-    # fit the 15-char NetBIOS limit, whereas all-caps report headings (INCIDENT,
-    # REPORT, TIMELINE) and the dashed case id (SYN-2026-0615-RANSOM, 20 chars)
-    # do not — so the acronym stop-list no longer has to be exhaustive.
+    # Require a hostname *shape*, not an English word (B5): real machine names carry a digit/hyphen
+    # and fit the 15-char NetBIOS limit; all-caps report headings don't — so the acronym stop-list
+    # needn't be exhaustive.
     host_pattern = [
         h for h in host_pattern
         if len(h) <= 15
@@ -188,30 +184,29 @@ def _mock_classify(report_text: str) -> dict:
     ]
     affected_systems = list(dict.fromkeys(ip_pattern + host_pattern[:3]))[:5]
 
-    # Summary sentence
-    summaries = {
-        "ransomware":        "Ransomware incident where files were encrypted and a ransom demand was made.",
-        "apt_intrusion":     "Advanced persistent threat intrusion with signs of long-dwell lateral movement.",
-        "data_exfiltration": "Suspected data exfiltration incident with unauthorised access to sensitive files.",
-        "insider_threat":    "Insider threat incident involving unauthorised data access by a privileged user.",
-        "malware_infection": "Malware infection detected with signs of process injection and C2 communication.",
-        "phishing":          "Phishing-initiated compromise resulting in credential theft or payload execution.",
-        "unknown":           "Incident of unknown type requiring broad forensic investigation across all artifacts.",
-    }
-
     return {
         "case_id":              str(uuid.uuid4()),
         "case_type":            case_type,
         "artifact_types":       artifact_types,
-        "hypotheses":           hypotheses_map.get(case_type, hypotheses_map["unknown"]),
+        "hypotheses":           _HYPOTHESES_MAP.get(case_type, _HYPOTHESES_MAP["unknown"]),
         "affected_systems":     affected_systems,
         "classifier_confidence": round(confidence, 2),
         "generated_at":         datetime.now(timezone.utc).isoformat(),
-        "raw_incident_summary": summaries.get(case_type, summaries["unknown"]),
+        "raw_incident_summary": _SUMMARIES.get(case_type, _SUMMARIES["unknown"]),
     }
 
 
 # ── Real LLM classifiers ──────────────────────────────────────────────────────
+
+def _get_api_key(cfg: dict, env_key_name: str) -> str:
+    api_key = os.environ.get(cfg["llm"][env_key_name])
+    if not api_key:
+        raise EnvironmentError(
+            f"API key not found. Set the {cfg['llm'][env_key_name]} "
+            "environment variable, or enable mock_mode in config.yaml."
+        )
+    return api_key
+
 
 def _call_anthropic(report_text: str, cfg: dict) -> dict:
     try:
@@ -219,95 +214,50 @@ def _call_anthropic(report_text: str, cfg: dict) -> dict:
     except ImportError:
         raise ImportError("anthropic package not installed. Run: pip install anthropic")
 
-    api_key = os.environ.get(cfg["llm"]["anthropic_api_key_env"])
-    if not api_key:
-        raise EnvironmentError(
-            f"API key not found. Set the {cfg['llm']['anthropic_api_key_env']} "
-            "environment variable, or enable mock_mode in config.yaml."
-        )
-
-    client = anthropic.Anthropic(api_key=api_key)
-    model  = cfg["llm"]["anthropic_model"]
+    client = anthropic.Anthropic(api_key=_get_api_key(cfg, "anthropic_api_key_env"))
 
     message = client.messages.create(
-        model=model,
+        model=cfg["llm"]["anthropic_model"],
         max_tokens=cfg["llm"]["max_tokens"],
         temperature=cfg["llm"]["temperature"],
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": report_text}],
     )
 
-    raw = message.content[0].text.strip()
-    return _parse_llm_json(raw)
+    return _parse_llm_json(message.content[0].text.strip())
 
 
-def _call_openai(report_text: str, cfg: dict) -> dict:
+def _call_openai_compatible(report_text: str, cfg: dict, key_env: str, model_key: str,
+                            base_url: str = None, force_json: bool = False) -> dict:
+    """One client for every OpenAI-SDK provider (DeepSeek differs only in base_url and its lack
+    of response_format support) — was two ~30-line copy-pasted functions."""
     try:
         from openai import OpenAI
     except ImportError:
         raise ImportError("openai package not installed. Run: pip install openai")
 
-    api_key = os.environ.get(cfg["llm"]["openai_api_key_env"])
-    if not api_key:
-        raise EnvironmentError(
-            f"API key not found. Set the {cfg['llm']['openai_api_key_env']} "
-            "environment variable, or enable mock_mode in config.yaml."
-        )
+    client_kwargs = {"api_key": _get_api_key(cfg, key_env)}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    client = OpenAI(**client_kwargs)
 
-    client = OpenAI(api_key=api_key)
-    model  = cfg["llm"]["openai_model"]
-
+    completion_kwargs = {"response_format": {"type": "json_object"}} if force_json else {}
     response = client.chat.completions.create(
-        model=model,
-        max_tokens=cfg["llm"]["max_tokens"],
-        temperature=cfg["llm"]["temperature"],
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": report_text},
-        ],
-    )
-
-    raw = response.choices[0].message.content.strip()
-    return _parse_llm_json(raw)
-
-
-def _call_deepseek(report_text: str, cfg: dict) -> dict:
-    try:
-        from openai import OpenAI
-    except ImportError:
-        raise ImportError("openai package not installed. Run: pip install openai")
-
-    api_key = os.environ.get(cfg["llm"]["deepseek_api_key_env"])
-    if not api_key:
-        raise EnvironmentError(
-            f"API key not found. Set the {cfg['llm']['deepseek_api_key_env']} "
-            "environment variable, or enable mock_mode in config.yaml."
-        )
-
-    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-    model  = cfg["llm"]["deepseek_model"]
-
-    response = client.chat.completions.create(
-        model=model,
+        model=cfg["llm"][model_key],
         max_tokens=cfg["llm"]["max_tokens"],
         temperature=cfg["llm"]["temperature"],
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": report_text},
         ],
+        **completion_kwargs,
     )
 
-    raw = response.choices[0].message.content.strip()
-    return _parse_llm_json(raw)
+    return _parse_llm_json(response.choices[0].message.content.strip())
 
 
 def _parse_llm_json(raw: str) -> dict:
-    """
-    Strip markdown fences if present, parse JSON.
-    Raises ValueError if JSON is invalid.
-    """
-    # Strip ```json ... ``` or ``` ... ``` fences
+    """Strip markdown fences if present, parse JSON; ValueError on invalid."""
     raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
     raw = re.sub(r"\s*```$",          "", raw, flags=re.MULTILINE)
     raw = raw.strip()
@@ -319,8 +269,8 @@ def _parse_llm_json(raw: str) -> dict:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-# Canonical artifact_type ordering (matches the case_context schema enum). Used
-# to render a deterministic, narrowed artifact_types list (issue 1.2).
+# Canonical artifact_type ordering (matches the case_context schema enum). Used to render a
+# deterministic, narrowed artifact_types list (issue 1.2).
 _ARTIFACT_TYPE_ORDER = [
     "memory_dump", "disk_image", "pcap", "registry_hive",
     "log_files", "email_archive", "browser_history",
@@ -328,15 +278,9 @@ _ARTIFACT_TYPE_ORDER = [
 
 
 def _narrow_artifact_types(result: dict, provided_artifact_types) -> None:
-    """Issue 1.2 — replace the over-broad narrative artifact_types dump with the
-    evidence types actually provided to this run, preserving the narrative claim
-    under `artifact_types_claimed` for the divergence report.
-
-    `provided_artifact_types` is the set/list of artifact types (schema enum
-    values) backed by real evidence files. When it's empty/None the run doesn't
-    know what was supplied (e.g. standalone classify, GUI without files), so the
-    narrative list is left untouched for backward compatibility.
-    """
+    """Replace the narrative artifact_types with the evidence types actually provided (1.2),
+    keeping the claim under artifact_types_claimed. No-op when nothing was provided (standalone
+    classify / GUI without files)."""
     if not provided_artifact_types:
         return
 
@@ -350,26 +294,9 @@ def _narrow_artifact_types(result: dict, provided_artifact_types) -> None:
 
 def classify(report_text: str, config_override: dict = None,
              provided_artifact_types=None) -> dict:
-    """
-    Classify an incident report and return a validated case_context dict.
-
-    Args:
-        report_text:     Plain-text content of the incident report.
-        config_override: Optional dict to override config.yaml settings.
-        provided_artifact_types: Optional iterable of artifact types (schema enum
-                         values) backed by evidence files actually supplied. When
-                         given, artifact_types is narrowed to these and the
-                         narrative claim is preserved as artifact_types_claimed
-                         (issue 1.2).
-
-    Returns:
-        Validated case_context dict.
-
-    Raises:
-        jsonschema.ValidationError: If LLM output doesn't match the schema.
-        ValueError:                 If LLM returns unparseable JSON.
-        EnvironmentError:           If API key is missing in live mode.
-    """
+    """Classify an incident report → validated case_context dict. When provided_artifact_types is
+    given, artifact_types is narrowed to it (1.2). Raises on schema violation, unparseable LLM
+    JSON, or missing API key."""
     cfg = _load_config()
     if config_override:
         # Deep merge — only top-level keys for simplicity
@@ -390,10 +317,12 @@ def classify(report_text: str, config_override: dict = None,
         result = _call_anthropic(report_text, cfg)
     elif provider == "openai":
         print(f"[CLASSIFIER] Calling OpenAI ({cfg['llm']['openai_model']})")
-        result = _call_openai(report_text, cfg)
+        result = _call_openai_compatible(report_text, cfg, "openai_api_key_env",
+                                         "openai_model", force_json=True)
     elif provider == "deepseek":
         print(f"[CLASSIFIER] Calling DeepSeek ({cfg['llm']['deepseek_model']})")
-        result = _call_deepseek(report_text, cfg)
+        result = _call_openai_compatible(report_text, cfg, "deepseek_api_key_env",
+                                         "deepseek_model", base_url="https://api.deepseek.com")
     else:
         raise ValueError(f"Unknown LLM provider: '{provider}'. Use 'anthropic', 'openai', or 'deepseek'.")
 
@@ -403,13 +332,13 @@ def classify(report_text: str, config_override: dict = None,
     if "generated_at" not in result or not result["generated_at"]:
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
 
-    # Issue 1.2 — constrain the narrative artifact_types to what was actually
-    # supplied, so P2 doesn't select tools for evidence that was never provided.
+    # Issue 1.2 — constrain the narrative artifact_types to what was actually supplied, so P2
+    # doesn't select tools for evidence that was never provided.
     _narrow_artifact_types(result, provided_artifact_types)
 
     # Validate against schema — raises jsonschema.ValidationError on failure
     validate_case_context(result)
-    print(f"[CLASSIFIER] Schema validation passed ✔")
+    print("[CLASSIFIER] Schema validation passed ✔")
     print(f"[CLASSIFIER] case_type={result['case_type']} "
           f"confidence={result['classifier_confidence']} "
           f"artifacts={result['artifact_types']}")
@@ -420,17 +349,8 @@ def classify(report_text: str, config_override: dict = None,
 def classify_file(report_path: str, output_path: str = None,
                   config_override: dict = None,
                   provided_artifact_types=None) -> dict:
-    """
-    Classify an incident report from a file path and optionally write output.
-
-    Args:
-        report_path:     Path to the plain-text incident report.
-        output_path:     If provided, write case_context.json to this path.
-        config_override: Optional config overrides.
-
-    Returns:
-        Validated case_context dict.
-    """
+    """Classify a report file; optionally write case_context.json to output_path (defaults to
+    config.yaml's paths.case_context_output)."""
     report_path = Path(report_path)
     if not report_path.exists():
         raise FileNotFoundError(f"Incident report not found: {report_path}")
@@ -458,6 +378,9 @@ def classify_file(report_path: str, output_path: str = None,
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    from src.utils.encoding import ensure_utf8_stdio
+    ensure_utf8_stdio()
+
     if len(sys.argv) < 2:
         print("Usage: python -m src.classifier.intent_classifier <path/to/incident_report.txt>")
         print("       python -m src.classifier.intent_classifier <path/to/incident_report.txt> <output/case_context.json>")

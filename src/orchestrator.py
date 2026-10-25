@@ -11,413 +11,123 @@ from src.wrappers.browser_wrapper import BrowserWrapper
 from src.wrappers.memprocfs_wrapper import MemProcFSWrapper
 
 from src.ioc.ioc_engine import extract_iocs
-from src.utils.mitre_mapper import map_mitre
+from src.utils.file_diagnostics import diagnose_evidence_file
 
-
-# ─────────────────────────────────────────────────────────────
-# WRAPPER MAP
-# ─────────────────────────────────────────────────────────────
 
 WRAPPER_MAP = {
-
     "volatility3": VolatilityWrapper,
-
     "memprocfs": MemProcFSWrapper,
-
     "tshark": TsharkWrapper,
-
     "tsk_fls": TSKWrapper,
-
     "regripper": RegRipperWrapper,
-
     "plaso": PlasoWrapper,
-
     "email": EmailWrapper,
-
     "browser": BrowserWrapper,
 }
 
 
-# ─────────────────────────────────────────────────────────────
-# MAIN ORCHESTRATOR
-# ─────────────────────────────────────────────────────────────
+# Single source of truth for "which evidence type each tool consumes" 
+TOOL_EVIDENCE_MAP = {
+    name: cls.consumes if isinstance(cls.consumes, tuple) else (cls.consumes,)
+    for name, cls in WRAPPER_MAP.items()
+    if cls.consumes is not None
+}
+
+# How to acquire each evidence type — shown by the CLI pre-flight check and the report's coverage
+# table; was maintained as near-identical twins in both (review-1 3.2).
+ACQUIRE_HINTS = {
+    "memory_dump":    "Acquire a memory dump (.dmp / .mem) using WinPmem, DumpIt, or LiME.",
+    "pcap":           "Capture network traffic (.pcap) via Wireshark or tcpdump.",
+    "disk_image":     "Acquire a disk image (.img / .dd / .e01) using FTK Imager or dd.",
+    "registry_hive":  "Export registry hives (NTUSER.DAT / SYSTEM / SOFTWARE) from the affected host.",
+    "log_files":      "Export Windows event logs (.evtx) via Event Viewer or wevtutil.",
+    "email":          "Export email artifacts (.eml / .msg) from the affected mail client.",
+    "browser":        "Export browser History files from the user profile directory.",
+}
+
 
 def run_tools(execution_plan: dict, evidence_files: dict):
 
-    tools = sorted(
-        execution_plan["tools"],
-        key=lambda t: t["order"]
-    )
-
+    tools = sorted(execution_plan["tools"], key=lambda t: t["order"])
     all_raw_outputs = {}
-
     merged_items = []
-
-    # ─────────────────────────────────────────
-    # EXECUTE TOOLS
-    # ─────────────────────────────────────────
+    os.makedirs("output/raw", exist_ok=True)
 
     for tool_spec in tools:
-
         name = tool_spec["name"]
 
         print(f"\n{'=' * 50}")
         print(f"  Running: {name}")
         print(f"{'=' * 50}")
 
-        # ─────────────────────────────────────────
-        # UNKNOWN TOOL
-        # ─────────────────────────────────────────
-
         if name not in WRAPPER_MAP:
-
             print(f"  [SKIP] No wrapper found for: {name}")
-
             continue
 
         wrapper = WRAPPER_MAP[name]()
 
-        evidence_path = None
+        # Each wrapper declares the evidence key(s) it consumes
+        evidence_paths = []
+        path_evidence_key = {}
+        for key in TOOL_EVIDENCE_MAP.get(name, ()):
+            paths = evidence_files.get(key)
+            if paths:
+                paths = paths if isinstance(paths, list) else [paths]
+                evidence_paths.extend(paths)
+                for p in paths:
+                    path_evidence_key[p] = key
 
-        # ─────────────────────────────────────────
-        # MEMORY FORENSICS
-        # ─────────────────────────────────────────
-
-        if name in ["volatility3", "memprocfs"]:
-
-            evidence_path = evidence_files.get(
-                "memory_dump"
-            )
-
-        # ─────────────────────────────────────────
-        # NETWORK FORENSICS
-        # ─────────────────────────────────────────
-
-        elif name == "tshark":
-
-            evidence_path = evidence_files.get(
-                "pcap"
-            )
-
-        # ─────────────────────────────────────────
-        # DISK FORENSICS
-        # ─────────────────────────────────────────
-
-        elif name == "tsk_fls":
-
-            evidence_path = evidence_files.get(
-                "disk_image"
-            )
-
-        # ─────────────────────────────────────────
-        # REGISTRY FORENSICS
-        # ─────────────────────────────────────────
-
-        elif name == "regripper":
-
-            evidence_path = evidence_files.get(
-                "registry_hive"
-            )
-
-        # ─────────────────────────────────────────
-        # TIMELINE ANALYSIS
-        # ─────────────────────────────────────────
-
-        elif name == "plaso":
-
-            evidence_path = evidence_files.get(
-                "disk_image"
-            )
-
-        # ─────────────────────────────────────────
-        # EMAIL ANALYSIS
-        # ─────────────────────────────────────────
-
-        elif name == "email":
-
-            evidence_path = evidence_files.get(
-                "email"
-            )
-
-        # ─────────────────────────────────────────
-        # BROWSER ANALYSIS
-        # ─────────────────────────────────────────
-
-        elif name == "browser":
-
-            evidence_path = evidence_files.get(
-                "browser"
-            )
-
-        # ─────────────────────────────────────────
-        # VALIDATE EVIDENCE PATH(S)
-        # ─────────────────────────────────────────
-        # A single evidence type may carry more than one artifact (e.g. two
-        # memory images), so normalise to a list and run the tool on each.
-
-        if not evidence_path:
-
-            print(
-                f"  [SKIP] No evidence file provided for {name}"
-            )
-
+        if not evidence_paths:
+            print(f"  [SKIP] No evidence file provided for {name}")
             all_raw_outputs[name] = []
-
             continue
 
-        evidence_paths = (
-            evidence_path
-            if isinstance(evidence_path, list)
-            else [evidence_path]
-        )
-
-        # ─────────────────────────────────────────
-        # EXECUTE TOOL (once per supplied artifact)
-        # ─────────────────────────────────────────
-
         items = []
-
         for path in evidence_paths:
-
             if not os.path.exists(path):
-
-                print(
-                    f"  [SKIP] Evidence path does not exist: {path}"
-                )
-
+                print(f"  [SKIP] Evidence path does not exist: {path}")
                 continue
 
+            diagnosis = diagnose_evidence_file(path, path_evidence_key.get(path, ""))
+            if diagnosis:
+                print(f"  [DIAGNOSIS] {path}: {diagnosis}")
+                items.append(wrapper.make_evidence_item(
+                    artifact_id=f"{name}_diagnostic_{os.path.basename(path)}",
+                    evidence_type="evidence_diagnostic",
+                    value=f"{os.path.basename(path)}: {diagnosis}",
+                    severity="low",
+                    confidence=0.90,
+                ))
+
             try:
-
                 out = wrapper.run(path)
-
                 if out:
-
                     items.extend(out)
-
             except Exception as e:
-
-                print(
-                    f"  [ERROR] {name} failed on {path}: {e}"
-                )
+                print(f"  [ERROR] {name} failed on {path}: {e}")
 
         all_raw_outputs[name] = items
-
         merged_items.extend(items)
 
-        # ─────────────────────────────────────────
-        # SAVE RAW TOOL OUTPUT (combined across artifacts)
-        # ─────────────────────────────────────────
-
-        os.makedirs(
-            "output/raw",
-            exist_ok=True
-        )
-
-        out_path = (
-            f"output/raw/{name}_output.json"
-        )
-
+        # save raw tool output (combined across artifacts)
+        out_path = f"output/raw/{name}_output.json"
         with open(out_path, "w") as f:
-
-            json.dump(
-                {
-                    "tool": name,
-                    "items": items
-                },
-                f,
-                indent=2
-            )
-
-        print(
-            f"  [SAVED] {len(items)} items → {out_path}"
-        )
-
-    # ─────────────────────────────────────────
-    # IOC EXTRACTION
-    # ─────────────────────────────────────────
+            json.dump({"tool": name, "items": items}, f, indent=2)
+        print(f"  [SAVED] {len(items)} items → {out_path}")
 
     print(f"\n{'=' * 50}")
     print("  IOC EXTRACTION")
     print(f"{'=' * 50}")
 
-    ioc_items = extract_iocs(
-        merged_items
-    )
+    ioc_items = extract_iocs(merged_items)
+    print(f"  [IOC] Extracted {len(ioc_items)} IOC items")
+    merged_items.extend(ioc_items)
 
-    print(
-        f"  [IOC] Extracted {len(ioc_items)} IOC items"
-    )
+    with open("output/raw/ioc_output.json", "w") as f:
+        json.dump({"tool": "ioc_engine", "items": ioc_items}, f, indent=2)
+    print(f"  [SAVED] {len(ioc_items)} IOC items → output/raw/ioc_output.json")
 
-    merged_items.extend(
-        ioc_items
-    )
-
-    # ─────────────────────────────────────────
-    # MITRE MAPPING
-    # ─────────────────────────────────────────
-
-    mitre_items = map_mitre(
-        merged_items
-    )
-
-    merged_items.extend(
-        mitre_items
-    )
-
-    print(
-        f"  [MITRE] Generated {len(mitre_items)} mappings"
-    )
-
-    # ─────────────────────────────────────────
-    # SAVE IOC RAW OUTPUT
-    # ─────────────────────────────────────────
-
-    os.makedirs(
-        "output/raw",
-        exist_ok=True
-    )
-
-    with open(
-        "output/raw/ioc_output.json",
-        "w"
-    ) as f:
-
-        json.dump(
-            {
-                "tool": "ioc_engine",
-                "items": ioc_items
-            },
-            f,
-            indent=2
-        )
-
-    print(
-        f"  [SAVED] {len(ioc_items)} IOC items → output/raw/ioc_output.json"
-    )
-
-    # ─────────────────────────────────────────
-    # REPORT STATS
-    # ─────────────────────────────────────────
-
-    report_stats = {
-
-        "artifact_id":
-            "report_stats",
-
-        "evidence_type":
-            "report_stats",
-
-        "value": {
-
-            "total_items":
-                len(merged_items),
-
-            "ioc_count":
-                len(ioc_items),
-
-            "critical_count":
-                len([
-                    x for x in merged_items
-                    if x.get("severity") == "critical"
-                ])
-        },
-
-        "severity":
-            "info",
-
-        "confidence":
-            1.0
-    }
-
-    merged_items.append(
-        report_stats
-    )
-
-    # ─────────────────────────────────────────
-    # SAVE UNIFIED EVIDENCE
-    # ─────────────────────────────────────────
-
-    os.makedirs(
-        "output",
-        exist_ok=True
-    )
-
-    with open(
-        "output/unified_evidence.json",
-        "w"
-    ) as f:
-
-        json.dump(
-            merged_items,
-            f,
-            indent=2
-        )
-
-    print(
-        f"\n[MERGE] {len(merged_items)} total evidence items saved"
-    )
+    # unified_evidence.json is written only by the P4 aggregator (single owner, dict shape)
+    print(f"\n[MERGE] {len(merged_items)} total evidence items collected")
 
     return all_raw_outputs
-
-
-# ─────────────────────────────────────────────────────────────
-# STANDALONE TEST MODE
-# ─────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-
-    plan_path = "output/execution_plan.json"
-
-    if not os.path.exists(plan_path):
-
-        plan_path = "src/schemas/execution_plan.json"
-
-    with open(plan_path) as f:
-
-        plan = json.load(f)
-
-    evidence = {
-
-        "memory_dump":
-            "data/live_case/memory.dmp",
-
-        "pcap":
-            "data/live_case/capture.pcap",
-
-        "disk_image":
-            "data/live_case/disk.img",
-
-        "registry_hive":
-            "data/live_case/SYSTEM",
-
-        "email":
-            "data/live_case/phish.eml",
-
-        "browser":
-            "data/live_case/History"
-    }
-
-    results = run_tools(
-        plan,
-        evidence
-    )
-
-    print(f"\n{'=' * 50}")
-    print("  ORCHESTRATOR COMPLETE")
-    print(f"{'=' * 50}")
-
-    for tool, items in results.items():
-
-        if len(items) > 0:
-
-            print(
-                f"  ✔ {tool}: {len(items)} items (SUCCESS)"
-            )
-
-        else:
-
-            print(
-                f"  ⚠ {tool}: no data / skipped"
-            )
-

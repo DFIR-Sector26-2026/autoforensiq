@@ -3,6 +3,7 @@ import {
   Activity,
   Network,
   AlertTriangle,
+  HardDrive,
   FileText,
   BrainCircuit,
 } from "lucide-react";
@@ -17,6 +18,7 @@ export default function Sidebar({
     { icon: Activity, label: "Processes" },
     { icon: Network, label: "Network" },
     { icon: AlertTriangle, label: "Threats" },
+    { icon: HardDrive, label: "Files" },
     { icon: FileText, label: "Reports" },
     { icon: BrainCircuit, label: "MITRE" },
   ];
@@ -57,7 +59,6 @@ export default function Sidebar({
                 w-full
                 flex items-center gap-4
                 p-4 rounded-xl
-                transition-all duration-300
 
                 ${
                   currentPage === item.label

@@ -9,9 +9,9 @@ from __future__ import annotations
 import argparse
 import copy
 import json
-import os
-import shutil
 from typing import Any
+
+from src.utils.io import load_json, write_json
 
 
 DEFAULT_ONTOLOGY_PATH = "src/data/tool_ontology.json"
@@ -20,8 +20,8 @@ DEFAULT_OUTPUT_PATH = "output/execution_plan.json"
 # The selector only needs these fields from P1's case_context.json.
 REQUIRED_CONTEXT_FIELDS = ("case_type", "artifact_types")
 
-# Every ontology tool must expose these fields so the selector can decide
-# eligibility, ranking, ordering, and final execution_plan args.
+# Every ontology tool must expose these fields so the selector can decide eligibility, ranking,
+# ordering, and final execution_plan args.
 REQUIRED_TOOL_FIELDS = (
     "name",
     "input_types",
@@ -31,8 +31,7 @@ REQUIRED_TOOL_FIELDS = (
     "args_template",
 )
 
-# Keep this aligned with src/orchestrator.py. If a tool name is not listed
-# here, the orchestrator will skip it because no wrapper exists for it.
+# Keep aligned with orchestrator.WRAPPER_MAP — unlisted tools get skipped there.
 SUPPORTED_WRAPPER_NAMES = {
     "volatility3",
     "tshark",
@@ -40,65 +39,14 @@ SUPPORTED_WRAPPER_NAMES = {
     "regripper",
     "plaso",
     "memprocfs",
-    # email + browser wrappers exist in orchestrator.WRAPPER_MAP but were absent
-    # here and from the ontology, so the DTSA could never select them — an
-    # email_archive / browser_history case silently ran no tool (issue D4).
+    # email/browser were once missing here + in the ontology, so the DTSA could never select them
+    # (D4).
     "email",
     "browser",
 }
 
-# How to detect whether each tool's underlying binary is actually installed.
-# Mirrors the commands the P3 wrappers invoke (src/wrappers/*). Each tool maps
-# to a list of REQUIREMENTS; a tool is available only if every requirement is
-# satisfied. A requirement is a list of candidate probes and passes if ANY
-# candidate resolves — a probe is ("which", <exe>) checked on PATH, or
-# ("path", <file>) checked on disk (~ is expanded). An empty list means the
-# tool is pure-Python and always available.
-_TOOL_BINARIES: dict[str, list[list[tuple[str, str]]]] = {
-    # volatility_wrapper calls ./venv/bin/vol; fall back to vol on PATH.
-    "volatility3": [[("path", "./venv/bin/vol"), ("which", "vol")]],
-    "tshark":      [[("which", "tshark")]],          # tshark_wrapper
-    "tsk_fls":     [[("which", "fls")]],             # tsk_wrapper (sleuthkit)
-    # regripper_wrapper runs `perl ~/regripper/rip.pl ...` — needs both.
-    "regripper":   [[("which", "perl")], [
-        ("path", "~/regripper/rip.pl"),
-        ("path", "~/RegRipper3.0/rip.pl"),
-        ("path", "~/RegRipper/rip.pl"),
-        ("path", "~/Desktop/RegRipper3.0/rip.pl"),
-    ]],
-    # plaso_wrapper resolves either the .py or bare name via shutil.which.
-    "plaso":       [[("which", "log2timeline.py"), ("which", "log2timeline")]],
-    "email":       [],   # email_wrapper — pure Python
-    "browser":     [],   # browser_wrapper — pure Python
-}
-
-
-def _probe(kind: str, target: str) -> bool:
-    """Resolve a single availability probe (PATH lookup or filesystem path)."""
-    if kind == "which":
-        return shutil.which(target) is not None
-    if kind == "path":
-        return os.path.exists(os.path.expanduser(target))
-    return False
-
-
-def check_tool_available(tool_name: str) -> tuple[bool, list[str]]:
-    """Check whether a tool's underlying binary/binaries are installed.
-
-    Returns (available, unmet) where `unmet` lists human-readable descriptions
-    of each unsatisfied requirement (e.g. "log2timeline.py or log2timeline").
-    Unknown tools are treated as available (no probe defined → nothing to fail).
-    """
-    requirements = _TOOL_BINARIES.get(tool_name, [])
-    unmet: list[str] = []
-    for candidates in requirements:
-        if not any(_probe(kind, target) for kind, target in candidates):
-            unmet.append(" or ".join(target for _, target in candidates))
-    return (not unmet, unmet)
-
-
-# Built-in paths for learning and quick testing.
-# Use with: python3 -m src.agents.tool_selector --sample ransomware_all --stdout
+# Built-in paths for learning and quick testing. Use with: python3 -m src.agents.tool_selector
+# --sample ransomware_all --stdout
 SAMPLE_CASE_CONTEXT_PATHS = {
     "ransomware_all": ".selector_test_cases/ransomware_all.json",
     "pcap_only_network_intrusion": ".selector_test_cases/pcap_only_network_intrusion.json",
@@ -109,52 +57,26 @@ SAMPLE_CASE_CONTEXT_PATHS = {
 }
 
 
-def load_json(path: str) -> dict[str, Any]:
-    """Load a JSON object from disk."""
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return data
-
-
-def write_json(path: str, data: dict[str, Any]) -> None:
-    """Write a JSON object to disk, creating the parent directory if needed."""
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-
-
-def validate_case_context(context: dict[str, Any]) -> None:
+def validate_selector_contract(context: dict[str, Any]) -> None:
     """Validate the minimum selector input contract."""
     missing = []
-    
-    # Check if case_type and artifact_types fields exist in the report
+
     for field in REQUIRED_CONTEXT_FIELDS:
         if field not in context:
             missing.append(field)
 
-    # Return error if missing
     if missing:
         missing_fields = ", ".join(missing)
         raise ValueError(f"case_context missing required fields: {missing_fields}")
 
-    # Return error if case_type is not a string
     case_type = context["case_type"]
     if not isinstance(case_type, str) or not case_type.strip():
         raise ValueError("case_context.case_type must be a non-empty string")
 
-    # Return error if artifact_types is not a list
     artifact_types = context["artifact_types"]
     if not isinstance(artifact_types, list) or not artifact_types:
         raise ValueError("case_context.artifact_types must be a non-empty list")
 
-    # Return error if any artifact in artifact_types is not a string
     for artifact_type in artifact_types:
         if not isinstance(artifact_type, str) or not artifact_type.strip():
             raise ValueError("case_context.artifact_types must contain only strings")
@@ -163,49 +85,40 @@ def validate_case_context(context: dict[str, Any]) -> None:
 def validate_ontology(ontology: dict[str, Any]) -> None:
     """Validate ontology structure and wrapper compatibility."""
     tools = ontology.get("tools")
-    
-    # Return empty if tools does not exist or isn't a list
+
     if not isinstance(tools, list) or not tools:
         raise ValueError("tool ontology must contain a non-empty 'tools' list")
 
     seen_names: set[str] = set()
-    
-    # Iterate through all tools in tool_ontology
+
     for index, tool in enumerate(tools):
-        
-        # Return error if tool is not an object with keys and values
+
         if not isinstance(tool, dict):
             raise ValueError(f"ontology tool at index {index} must be an object")
 
-        # Add all essential tool fields that are missing
         missing = []
         for field in REQUIRED_TOOL_FIELDS:
             if field not in tool:
                 missing.append(field)
 
-        # Return an error for all the missing fields
         if missing:
             name = tool.get("name", f"index {index}")
             missing_fields = ", ".join(missing)
             raise ValueError(f"ontology tool {name} missing fields: {missing_fields}")
 
         name = tool["name"]
-        
-        # Return error if tool name is not a string
+
         if not isinstance(name, str) or not name.strip():
             raise ValueError(f"ontology tool at index {index} has invalid name")
 
-        # Return error if tool name is a duplicate
         if name in seen_names:
             raise ValueError(f"duplicate ontology tool name: {name}")
         seen_names.add(name)
 
-        # Catch ontology/orchestrator drift early. P2 owns the ontology, but P3's
-        # orchestrator owns the actual wrapper names the execution plan can use.
+        # Catch ontology/orchestrator drift early — P3 owns the wrapper names.
         if name not in SUPPORTED_WRAPPER_NAMES:
             raise ValueError(f"ontology tool '{name}' is not supported by orchestrator")
 
-        # Return error if attributes don't match the expect data type
         if not isinstance(tool["input_types"], list):
             raise ValueError(f"ontology tool '{name}' input_types must be a list")
 
@@ -224,8 +137,6 @@ def validate_ontology(ontology: dict[str, Any]) -> None:
 
 def tool_matches_artifacts(tool: dict[str, Any], artifact_types: set[str]) -> bool:
     """Return True if the tool can process at least one available artifact."""
-    # Example: a tool with input_types ["pcap"] is eligible when the case
-    # context contains artifact_types ["pcap", "memory_dump"].
     for input_type in tool["input_types"]:
         if input_type in artifact_types:
             return True
@@ -236,7 +147,7 @@ def tool_matches_artifacts(tool: dict[str, Any], artifact_types: set[str]) -> bo
 def relevance_score(tool: dict[str, Any], case_type: str) -> float:
     """Return case-specific relevance, falling back to unknown or neutral."""
     relevance = tool.get("case_relevance", {})
-    # Unknown case types should not break planning. The ontology can provide an "unknown" fallback; otherwise use a neutral score.
+    # Unknown case types must not break planning: "unknown" fallback, else 0.5.
     score = relevance.get(case_type, relevance.get("unknown", 0.5))
     try:
         return float(score)
@@ -249,26 +160,23 @@ def select_tools(
     ontology: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Filter and rank tools using artifact availability and case relevance."""
-    validate_case_context(context)
+    validate_selector_contract(context)
     validate_ontology(ontology)
 
     artifact_types = set(context["artifact_types"])
     case_type = context["case_type"]
 
-    # First gate: only keep tools that can process evidence actually available
-    # for this case. This prevents PCAP-only cases from selecting disk/memory tools.
+    # Gate by artifact availability so a pcap-only case doesn't select disk/memory tools.
     selected = []
-    
-    # If the tool input type contains an artifact from case context -> add the tool to selected
+
     for tool in ontology["tools"]:
         if tool_matches_artifacts(tool, artifact_types):
             selected.append(copy.deepcopy(tool))
 
-    # Add a private transient score used only for sorting. It is not written to execution_plan.json.
+    # Transient sort key only — not written to execution_plan.json.
     for tool in selected:
         tool["_relevance_score"] = relevance_score(tool, case_type)
 
-    # Rank by usefulness first, then by stable default order to avoid arbitrary output when scores tie.
     selected.sort(key=tool_sort_key)
     return selected
 
@@ -296,8 +204,8 @@ def resolve_dependencies(selected_tools: list[dict[str, Any]]) -> list[dict[str,
     permanent: set[str] = set()
 
     def visit(name: str) -> None:
-        # DFS-based topological ordering. temporary detects dependency cycles;
-        # permanent marks tools already added to the final order.
+        # DFS-based topological ordering. temporary detects dependency cycles; permanent marks tools
+        # already added to the final order.
         if name in permanent:
             return
         if name in temporary:
@@ -306,7 +214,8 @@ def resolve_dependencies(selected_tools: list[dict[str, Any]]) -> list[dict[str,
         temporary.add(name)
         tool = by_name[name]
         for dependency in tool.get("dependencies", []):
-            # Missing dependencies are ignored because artifact filtering may have excluded them. The selector should not invent tools for unavailable evidence.
+            # Unselected dependencies are ignored (artifact filtering may have excluded them) —
+            # don't invent tools for unavailable evidence.
             if dependency in by_name:
                 visit(dependency)
 
@@ -331,8 +240,8 @@ def build_execution_plan(selected_tools: list[dict[str, Any]]) -> dict[str, Any]
     plan_tools = []
 
     for order, tool in enumerate(ordered_tools, start=1):
-        # args_template is copied directly from the ontology because the current
-        # orchestrator expects args keys like image/pcap/hive/source.
+        # args_template is copied directly from the ontology because the current orchestrator
+        # expects args keys like image/pcap/hive/source.
         plan_tools.append(
             {
                 "name": tool["name"],
@@ -353,57 +262,6 @@ def generate_execution_plan(
     return build_execution_plan(selected_tools)
 
 
-def validate_tools(
-    case_context: dict[str, Any],
-    ontology: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Pre-flight check: confirm each selected tool's binary is installed.
-
-    Selects tools exactly as the planner does, then checks each tool's
-    underlying binary via check_tool_available().
-
-    Missing *evidence files* are intentionally NOT checked here: the P3
-    orchestrator already skips any tool with no input file
-    (src/orchestrator.py), so the pipeline does what it can with whatever
-    evidence is provided. This pre-flight only catches the gap P3 doesn't —
-    a selected tool whose binary is not installed at all.
-
-    Returns a display-ready report for P1's pre-flight panel:
-        {
-          "ok": bool,                       # True when every selected tool is runnable
-          "selected_tools": [<name>, ...],
-          "ready":   [{"tool"}, ...],
-          "missing": [{"tool", "reason"}, ...],
-        }
-    """
-    if ontology is None:
-        ontology = load_json(DEFAULT_ONTOLOGY_PATH)
-
-    selected = select_tools(case_context, ontology)
-    ready: list[dict[str, Any]] = []
-    missing: list[dict[str, Any]] = []
-
-    for tool in selected:
-        name = tool["name"]
-        installed, unmet_binaries = check_tool_available(name)
-        if installed:
-            ready.append({"tool": name})
-        else:
-            missing.append(
-                {
-                    "tool": name,
-                    "reason": f"tool not installed (missing: {', '.join(unmet_binaries)})",
-                }
-            )
-
-    return {
-        "ok": not missing,
-        "selected_tools": [tool["name"] for tool in selected],
-        "ready": ready,
-        "missing": missing,
-    }
-
-
 def load_case_context(args: argparse.Namespace) -> dict[str, Any]:
     """Load case context either from a file or from built-in examples."""
     if args.sample:
@@ -414,44 +272,37 @@ def load_case_context(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    # Instance of argparser
     parser = argparse.ArgumentParser(description="Generate AutoForensiq execution_plan.json")
-    
-    # --context argument (case_context.json)
+
     parser.add_argument(
         "--context",
         required=False,
         help="Path to case_context.json from the intent classifier",
     )
-    
-    # --sample argument (for sample/test cases)
+
     parser.add_argument(
         "--sample",
         help="Use a built-in sample case context instead of --context",
     )
-    
-    # --ontology argument (tool_ontology.json)
+
     parser.add_argument(
         "--ontology",
         default=DEFAULT_ONTOLOGY_PATH,
         help=f"Path to tool ontology JSON. Default: {DEFAULT_ONTOLOGY_PATH}",
     )
-    
-    # --output argument (execution_plan.json)
+
     parser.add_argument(
         "--output",
         default=DEFAULT_OUTPUT_PATH,
         help=f"Path to write execution plan. Default: {DEFAULT_OUTPUT_PATH}",
     )
-    
-    # --stdout argument (print to terminal instead of writing to file)
+
     parser.add_argument(
         "--stdout",
         action="store_true",
         help="Print generated execution plan to stdout instead of writing a file",
     )
-    
-    # Add the extracted data in argparse object
+
     args = parser.parse_args()
 
     if not args.context and not args.sample:

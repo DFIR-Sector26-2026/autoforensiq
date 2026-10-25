@@ -58,3 +58,18 @@ def test_unknown_provided_types_are_ignored():
     )
     assert len(result["artifact_types"]) == 7
     assert "artifact_types_claimed" not in result
+
+
+def test_insider_threat_sample_report_not_misread_as_data_exfiltration():
+    # The bundled insider_threat sample scored an exact tie (3-3) between
+    # insider_threat and data_exfiltration ("employee"/"insider" vs.
+    # "upload"/"transfer") — data_exfiltration won only because it's declared
+    # earlier in _MOCK_KEYWORDS, so max() picked it first on the tie. A
+    # resignation-then-USB-exfiltration pattern is a defining insider-threat
+    # signal in general, not specific to this one sample, so those keywords
+    # were added to break the tie correctly rather than reordering the dict.
+    from pathlib import Path
+    report_path = Path(__file__).resolve().parents[1] / "tests" / "incidents" / "04_insider_threat.txt"
+    report_text = report_path.read_text()
+    result = classify(report_text, config_override=_MOCK)
+    assert result["case_type"] == "insider_threat"

@@ -1,6 +1,4 @@
-"""
-Reusable GUI widgets for AutoForensiq launcher.
-"""
+"""Reusable GUI widgets for AutoForensiq launcher."""
 
 from __future__ import annotations
 

@@ -1,18 +1,29 @@
 """Tests for report table rendering robustness under multi-tool input.
 
-Covers the Process Tree builder (flat-item PID/PPID hierarchy, prune-to-flagged,
-severity + source-file rendering, no cross-type leakage) and the markdown cell
-sanitizer used by the IOC / MITRE / Critical Findings tables.
+Covers the Process Tree builder (flat-item PID/PPID hierarchy, full-tree
+rendering, severity + source-file rendering, no cross-type leakage) and the
+markdown cell sanitizer used by the IOC / MITRE / Critical Findings tables.
 """
 
+import json
+from pathlib import Path
+
 from src.report_generator.report_generator import (
+    MITRE_BY_CASE,
+    RECOMMENDATIONS_BY_CASE,
+    _build_analyst_verdict,
+    _build_correlated_findings,
+    _build_dashboard_summary,
     _build_evidence_coverage,
     _build_ioc_report,
+    _build_ml_only_section,
     _build_process_tree,
+    _evidence_techniques,
     _extract_iocs,
     _finding_sort_key,
     _indicators_cell,
     _item_indicators,
+    _build_per_file_reports,
     _md_cell,
     _mock_report,
     _parse_flat_pids,
@@ -87,7 +98,9 @@ def test_process_tree_hierarchy_severity_and_source_file():
     assert "memdump.raw" in child
 
 
-def test_process_tree_prunes_benign_keeps_ancestors():
+def test_process_tree_shows_full_tree_including_benign():
+    # The report shows the same complete tree the dashboard does — benign siblings
+    # of a flagged process stay in, distinguished only by their severity word.
     items = [
         _proc(1636, 1608, "explorer.exe", severity="low"),
         _proc(1940, 1636, "tasksche.exe", severity="critical"),
@@ -95,11 +108,11 @@ def test_process_tree_prunes_benign_keeps_ancestors():
     ]
     tree = _build_process_tree(items, anomaly_ids=set())
     assert "tasksche.exe" in tree     # flagged
-    assert "explorer.exe" in tree     # ancestor of a flagged node -> kept
-    assert "notepad.exe" not in tree  # benign, no flagged descendant -> pruned
+    assert "explorer.exe" in tree     # ancestor
+    assert "notepad.exe" in tree      # benign sibling — full tree, not pruned
 
 
-def test_process_relation_flags_low_severity_child():
+def test_process_relation_shown_alongside_full_tree():
     items = [
         _proc(1636, 1608, "explorer.exe", severity="low"),
         _proc(1900, 1636, "winword.exe", severity="low"),
@@ -111,18 +124,21 @@ def test_process_relation_flags_low_severity_child():
          "linked_artifacts": ["proc_1900", "proc_2000"]},
     ]
     tree = _build_process_tree(items, anomaly_ids=set())
-    assert "powershell.exe" in tree  # flagged via process_relation despite low sev
-    assert "winword.exe" in tree     # ancestor kept
-    assert "calc.exe" not in tree    # unrelated benign pruned
+    assert "powershell.exe" in tree  # flagged via process_relation
+    assert "winword.exe" in tree     # ancestor
+    assert "calc.exe" in tree        # unrelated benign — full tree, not pruned
 
 
-def test_process_tree_no_flagged_processes_sentinel():
+def test_process_tree_shows_all_processes_even_when_none_flagged():
+    # No dedicated "nothing flagged" sentinel any more — the full tree renders
+    # regardless, since an investigator wants the complete picture either way.
     items = [
         _proc(1636, 1608, "explorer.exe", severity="low"),
         _proc(5000, 1636, "notepad.exe", severity="low"),
     ]
     out = _build_process_tree(items, anomaly_ids=set())
-    assert out.startswith("_No flagged processes")
+    assert "explorer.exe" in out
+    assert "notepad.exe" in out
 
 
 def test_extract_iocs_skips_aggregate_process_items():
@@ -237,6 +253,30 @@ def test_item_indicators_surfaces_string_sweep_iocs():
         _item_indicators(reg)
 
 
+def test_item_indicators_extracts_url_and_host_from_timeline_event():
+    # plaso timeline_event values embed the URL inline (no "→" arrow); before the branch existed,
+    # plaso-only runs (ubnist1 E01) reported ioc_count 0 despite 177 URL-bearing events.
+    ev = {"evidence_type": "timeline_event", "source_tool": "plaso",
+          "value": "[12/28/2008 21:30:03] [Firefox History] "
+                   "http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A1.doc "
+                   "(FCC-08-281A1.doc) [count: 0] Host: hraunfoss.fcc.gov visited from: "
+                   "http://www.fcc.gov/ (www.fcc.gov) Transition: DOWNLOAD",
+          "severity": "medium", "artifact_id": "tl_1"}
+    inds = _item_indicators(ev)
+    assert ("URL", "http://hraunfoss.fcc.gov/edocs_public/attachmatch/FCC-08-281A1.doc") in inds
+    assert ("Domain", "hraunfoss.fcc.gov") in inds
+
+    # events without an embedded URL/host (e.g. filesystem timestamps) yield nothing
+    fs = {"evidence_type": "timeline_event", "source_tool": "plaso",
+          "value": "[12/28/2008 21:30:03] [FILE] atime /home/ubuntu/Desktop/report.doc",
+          "severity": "low", "artifact_id": "tl_2"}
+    assert _item_indicators(fs) == []
+
+    # plaso's low-severity routine sample must not feed the IOC table even when URL-bearing
+    routine = dict(ev, severity="low", artifact_id="tl_3")
+    assert _item_indicators(routine) == []
+
+
 def test_finding_sort_key_ranks_ioc_bearing_above_indicatorless():
     # Within the same severity tier, an item carrying a concrete IOC (a .onion
     # C2 here) must sort ahead of an indicator-less item (a ransom-note language
@@ -271,8 +311,9 @@ def test_indicators_cell_renders_atoms_and_match_badge():
     cell = _indicators_cell(item)
     assert "`tasksche.exe` (Suspicious File)" in cell
     assert "**IOC: wannacry_dropper**" in cell
-    # Match badge sits on its own (indented) line within the cell.
-    assert "(Suspicious File)<br>&nbsp;**IOC: wannacry_dropper**" in cell
+    # Match badge follows inline via " · " (no raw <br> HTML, portable markdown).
+    assert "(Suspicious File) · **IOC: wannacry_dropper**" in cell
+    assert "<br>" not in cell
 
 
 def test_indicators_cell_empty_for_plain_finding():
@@ -323,6 +364,9 @@ def test_build_ioc_report_lists_indicators_with_provenance():
     assert "ransomware dropper" in md
     # Critical indicator sorts above the high one.
     assert md.index("tasksche.exe") < md.index("185.62.1.2")
+    # Matched Line(s) column shows the literal source text, not just an artifact-id pointer.
+    assert "tasksche.exe (PID:1940 PPID:1636)" in md
+    assert "TCP 10.0.0.5:1100 -> 185.62.1.2:4444 [EST]" in md
 
 
 def test_build_ioc_report_empty_sentinel():
@@ -369,15 +413,14 @@ def test_process_tree_empty_when_no_processes():
 
 def test_process_tree_raises_severity_on_repeat_observation():
     # Same PID seen first as low (e.g. pslist) then high (IOC-rescored copy).
-    # The merge must keep the highest severity so the process stays flagged and
-    # is not pruned out of the tree.
+    # The merge must keep the highest severity, not the first-seen value.
     items = [
         _proc(1940, 1636, "tasksche.exe", severity="low"),
         _proc(1940, 1636, "tasksche.exe", severity="high",
               ioc_match=["wannacry_dropper"]),
     ]
     tree = _build_process_tree(items, anomaly_ids=set())
-    assert "tasksche.exe" in tree     # survives the prune-to-flagged step
+    assert "tasksche.exe" in tree
     assert "HIGH" in tree             # highest severity wins, not first-seen low
 
 
@@ -532,11 +575,11 @@ def test_ioc_report_surfaces_elevated_low_domain():
          "artifact_id": "dom_2"},
     ]
     md = _build_ioc_report(items, severity_lookup={"dom_1": "critical"})
-    main = md.split("<details>")[0]
+    main = md.split("#### Folded")[0]
     assert "`beaconads.com`" in main          # elevated -> surfaced
     assert "`across.com`" not in main         # un-elevated low -> folded out of table
     assert "`across.com`" in md               # ...but NOT dropped (folded sample)
-    assert "<details>" in md
+    assert "#### Folded" in md
 
 
 def test_ioc_report_folds_low_severity_mass_with_cap():
@@ -550,8 +593,8 @@ def test_ioc_report_folds_low_severity_mass_with_cap():
     ]
     md = _build_ioc_report(items)
     assert "120" in md                                   # full folded count reported
-    assert "<details>" in md
-    sample_row_count = md.split("<details>", 1)[1].count("\n| `")
+    assert "#### Folded" in md
+    sample_row_count = md.split("#### Folded", 1)[1].count("\n| `")
     assert sample_row_count <= 50                        # sample is capped
 
 
@@ -566,6 +609,327 @@ def test_ioc_report_folded_sample_orders_anchored_before_bare():
          "value": "anchored-host.io", "severity": "low", "confidence": 0.45,
          "artifact_id": "d2"},
     ]
-    fold = _build_ioc_report(items).split("<details>", 1)[1]
+    fold = _build_ioc_report(items).split("#### Folded", 1)[1]
     assert fold.index("anchored-host.io") < fold.index("bare-token.ru")
     assert "anchored" in fold and "bare" in fold
+
+
+# ─────────────────────────────────────────────────────────────
+# Overall severity: rule/IOC evidence is primary, P5 is a tie-breaker (5.3)
+# ─────────────────────────────────────────────────────────────
+
+def _ue(items):
+    return {"evidence_items": items, "total_items": len(items),
+            "tools_aggregated": sorted({e["source_tool"] for e in items})}
+
+
+def _item(sev, aid="x1", etype="file_artifact", **extra):
+    item = {"evidence_type": etype, "source_tool": "tsk_fls",
+            "value": f"artifact {aid}", "severity": sev, "artifact_id": aid}
+    item.update(extra)
+    return item
+
+
+def test_overall_severity_is_driven_by_evidence_not_anomaly_count():
+    # A critical-IOC case with ZERO P5 anomalies must still read CRITICAL — the
+    # old formula (high if n_anomalies>=3 ...) both capped at HIGH and ignored the
+    # rule/IOC severities entirely (issue 5.3).
+    items = [_item("critical", "f1", ioc_match=["wannacry_dropper"]),
+             _item("high", "f2"), _item("low", "f3")]
+    report = _mock_report(_ue(items), {"explanations": {}}, {"case_type": "ransomware"})
+    assert "Overall case severity: **CRITICAL**" in report
+
+
+def test_p5_breaks_tie_only_at_the_medium_high_margin():
+    # Highest evidence severity is medium. With no anomaly it stays MEDIUM; one
+    # independent P5 anomaly nudges it to HIGH (the tie-breaker), nothing more.
+    items = [_item("medium", "f1"), _item("low", "f2")]
+    quiet = _mock_report(_ue(items), {"explanations": {}}, {"case_type": "malware_infection"})
+    assert "Overall case severity: **MEDIUM**" in quiet
+
+    shap = {"explanations": {"f1": {"is_anomaly": True, "reason": "outlier"}}}
+    nudged = _mock_report(_ue(items), shap, {"case_type": "malware_infection"})
+    assert "Overall case severity: **HIGH**" in nudged
+
+
+def test_p5_cannot_override_or_manufacture_severity():
+    # P5 silence does not downgrade a critical case...
+    crit = [_item("critical", "f1", ioc_match=["c2_port"])]
+    r1 = _mock_report(_ue(crit), {"explanations": {}}, {"case_type": "ransomware"})
+    assert "Overall case severity: **CRITICAL**" in r1
+
+    # ...and P5 anomalies on an otherwise-low case do not manufacture a higher
+    # headline (the tie-breaker only spans medium<->high).
+    low = [_item("low", "f1"), _item("low", "f2")]
+    shap = {"explanations": {"f1": {"is_anomaly": True}, "f2": {"is_anomaly": True}}}
+    r2 = _mock_report(_ue(low), shap, {"case_type": "unknown"})
+    assert "Overall case severity: **LOW**" in r2
+
+
+# ─────────────────────────────────────────────────────────────
+# ML-only callout: P5's genuinely independent flags (5.3)
+# ─────────────────────────────────────────────────────────────
+
+def test_ml_only_section_lists_anomalies_without_rule_match():
+    # A low-severity item with no IOC match, flagged anomalous by P5, is the kind
+    # of independent signal the section exists to surface.
+    items = [_item("low", "d1", etype="suspicious_domain", value="oddhost.example")]
+    section = _build_ml_only_section(
+        items, anomaly_ids={"d1"}, anomaly_lookup={"d1": "statistical outlier"},
+        tool_sources={})
+    assert "oddhost.example" in section
+    assert "**1** artifact" in section
+    assert "statistical outlier" in section
+
+
+def test_ml_only_section_excludes_rule_caught_anomalies():
+    # Items the rules already elevated (critical / IOC match) are NOT ML-only,
+    # even when also flagged anomalous — they belong in Key Findings, not here.
+    items = [
+        _item("critical", "c1", ioc_match=["c2_port"]),   # rule-caught
+        _item("low", "i1", ioc_match=["wannacry_payload"]),  # low but IOC-matched
+    ]
+    section = _build_ml_only_section(
+        items, anomaly_ids={"c1", "i1"}, anomaly_lookup={"c1": "x", "i1": "y"},
+        tool_sources={})
+    assert "No artifacts were flagged" in section  # rule-caught items excluded
+    assert "artifact c1" not in section and "artifact i1" not in section
+
+
+def test_ml_only_section_empty_when_no_independent_anomalies():
+    items = [_item("high", "h1")]
+    section = _build_ml_only_section(
+        items, anomaly_ids=set(), anomaly_lookup={}, tool_sources={})
+    assert "No artifacts were flagged by anomaly detection" in section
+
+
+def test_dashboard_summary_mirrors_report_headline_and_mitre():
+    # The dashboard sidecar must agree with the report it ships beside: same
+    # severity counts, same overall-severity tie-breaker, same MITRE table.
+    items = [_item("critical", "f1", ioc_match=["wannacry_dropper"]),
+             _item("high", "f2"), _item("medium", "f3"), _item("low", "f4")]
+    ue = _ue(items)
+    ue["evidence_by_tool"] = {"tsk_fls": items}
+    dash = _build_dashboard_summary(ue, {"case_type": "ransomware"}, {"explanations": {}})
+
+    assert dash["summary"]["total_items"] == 4
+    assert dash["summary"]["severity_distribution"] == {
+        "critical": 1, "high": 1, "medium": 1, "low": 1}
+    assert dash["summary"]["critical_count"] == 1
+    # critical evidence + zero anomalies still reads critical (5.3 tie-breaker)
+    assert dash["summary"]["overall_severity"] == "critical"
+    assert [m["id"] for m in dash["mitre"]] == ["T1486", "T1204", "T1547", "T1083"]
+    assert dash["by_tool"] == {"tsk_fls": 4}
+
+
+def test_dashboard_summary_anomaly_breaks_medium_tie():
+    # No critical/high evidence, one medium item, and a P5 anomaly → nudged HIGH.
+    items = [_item("medium", "m1")]
+    shap = {"explanations": {"m1": {"is_anomaly": True, "summary": "unusual"}}}
+    dash = _build_dashboard_summary(_ue(items), {"case_type": "malware_infection"}, shap)
+    assert dash["summary"]["overall_severity"] == "high"
+
+
+def test_evidence_techniques_map_flagged_stealer_stages():
+    # macOS case gap: stage=credentials / stage=wallets URLs justified T1555/T1657
+    # but the static case table couldn't know that. Flagged (critical/high) items
+    # now map with the item value as the basis; low-severity items never map.
+    items = [
+        {"value": "http://94.232.249.129/api/metrics/run?uid=1&stage=credentials",
+         "severity": "critical"},
+        {"value": "http://94.232.249.129/api/metrics/run?uid=1&stage=wallets",
+         "severity": "critical"},
+        {"value": "credential note in an unflagged item", "severity": "low"},
+    ]
+    rows = _evidence_techniques(items)
+    assert {tid for tid, _, _, _ in rows} == {"T1555", "T1657"}
+    basis = next(b for tid, _, _, b in rows if tid == "T1555")
+    assert "stage=credentials" in basis
+
+
+def test_dashboard_mitre_includes_evidence_derived_techniques():
+    items = [_item("critical", "u1", etype="http_request",
+                   value="http://x/api/metrics/run?stage=wallets")]
+    dash = _build_dashboard_summary(_ue(items), {"case_type": "data_exfiltration"}, {})
+    by_id = {row["id"]: row for row in dash["mitre"]}
+    assert "T1657" in by_id
+    assert "stage=wallets" in by_id["T1657"]["basis"]
+    # Static case-table techniques are kept alongside.
+    assert "T1041" in by_id
+
+
+def test_case_tables_cover_every_schema_case_type():
+    # D3 regression: keys once mismatched the classifier's case types ("malware" vs
+    # "malware_infection") and silently fell through to "unknown" — pin both tables to the enum.
+    schema = json.loads(
+        (Path(__file__).parent.parent / "src/schemas/case_context_schema.json").read_text())
+    case_types = set(schema["properties"]["case_type"]["enum"])
+    assert set(MITRE_BY_CASE) == case_types
+    assert set(RECOMMENDATIONS_BY_CASE) == case_types
+
+
+def test_ioc_sources_cell_lists_artifact_id_pointers():
+    # Wishlist (IOC drill-down): each surfaced IOC row points at its contributing
+    # artifact_ids per tool, capped at 3 with a +N more counter.
+    items = [
+        {"artifact_id": f"proc_{n}", "source_tool": "volatility3",
+         "evidence_type": "process", "value": f"tasksche.exe (PID:{n})",
+         "severity": "critical", "ioc_match": ["wannacry_dropper"]}
+        for n in (1, 2, 3, 4, 5)
+    ]
+    out = _build_ioc_report(items, tool_sources={"volatility3": "memory.raw"})
+    row = next(l for l in out.splitlines() if "tasksche.exe" in l)
+    assert "volatility3 · memory.raw: proc_1, proc_2, proc_3 +2 more" in row
+
+
+def test_correlated_findings_table_strong_types_and_folded_timestamps():
+    # Strong correlations (linked_artifact/same_pid/same_file) render confidence-sorted; the noisy
+    # same_timestamp co-occurrences fold to a one-line count instead of flooding the table.
+    findings = [
+        {"correlation_type": "same_pid", "confidence": 0.87,
+         "finding": "PID 596 observed across multiple artifacts",
+         "artifacts": ["a", "b", "c"], "source_tools": ["volatility3"]},
+        {"correlation_type": "linked_artifact", "confidence": 0.99,
+         "finding": "Tool-declared link across 5 artifacts",
+         "artifacts": ["a", "b", "c", "d", "e"],
+         "source_tools": ["ioc_engine", "volatility3"]},
+        {"correlation_type": "same_timestamp", "confidence": 0.96,
+         "finding": "Shared timestamp bucket", "artifacts": ["x", "y"],
+         "source_tools": ["plaso"]},
+    ]
+    out = _build_correlated_findings(findings)
+    rows = [l for l in out.splitlines() if l.startswith("|") and "%" in l]
+    assert "99%" in rows[0] and "87%" in rows[1]   # confidence-sorted, strong types only
+    assert "ioc_engine, volatility3" in rows[0]
+    assert "Shared timestamp bucket" not in out
+    assert "1 same-timestamp co-occurrence(s) omitted" in out
+
+
+def test_correlated_findings_empty_sentinel():
+    assert "_No cross-artifact correlations detected._" in _build_correlated_findings([])
+
+
+# ─────────────────────────────────────────────────────────────
+# Dashboard network graph (review-2 D2 — parsing moved server-side)
+# ─────────────────────────────────────────────────────────────
+
+def _graph(items):
+    from src.report_generator.report_generator import _build_network_graph
+    return _build_network_graph(items)
+
+
+def test_network_graph_parses_both_arrow_styles():
+    items = [
+        {"evidence_type": "network_connection", "severity": "high",
+         "value": "TCP 192.168.1.5:49152 → 93.184.216.34:443"},
+        {"evidence_type": "network_connection", "severity": "medium",
+         "value": "ESTABLISHED 10.0.0.2:5555 -> 4.4.4.4:4444 (svchost.exe)"},
+    ]
+    g = _graph(items)
+    by_id = {n["id"]: n for n in g["nodes"]}
+    assert by_id["192.168.1.5"]["is_source"] and by_id["10.0.0.2"]["is_source"]
+    assert by_id["93.184.216.34"]["severity"] == "high"
+    assert by_id["4.4.4.4"]["severity"] == "medium"
+    assert {(l["source"], l["target"]) for l in g["links"]} == {
+        ("192.168.1.5", "93.184.216.34"), ("10.0.0.2", "4.4.4.4"),
+    }
+
+
+def test_network_graph_url_hosts_hang_off_imaged_host():
+    items = [
+        {"evidence_type": "timeline_event", "severity": "critical",
+         "value": "[2017-05-12] http://evil.example.com/payload.exe fetched"},
+        {"evidence_type": "file_artifact", "severity": "critical",
+         "value": "DELETED file: /tmp/x.exe"},  # non-network: must not appear
+    ]
+    g = _graph(items)
+    by_id = {n["id"]: n for n in g["nodes"]}
+    assert by_id["imaged host"]["is_source"]
+    assert by_id["evil.example.com"]["severity"] == "critical"
+    assert len(g["nodes"]) == 2
+
+
+def test_network_graph_external_node_keeps_worst_severity():
+    items = [
+        {"evidence_type": "dns_query", "severity": "medium", "value": "1.1.1.1 → bad.tld"},
+        {"evidence_type": "http_request", "severity": "critical", "value": "1.1.1.1 → bad.tld/beacon"},
+    ]
+    g = _graph(items)
+    by_id = {n["id"]: n for n in g["nodes"]}
+    assert by_id["bad.tld"]["severity"] == "critical"
+
+
+# ─────────────────────────────────────────────────────────────
+# Per-evidence-file standalone reports
+# ─────────────────────────────────────────────────────────────
+
+def test_per_file_reports_split_by_tool_and_label_source_file():
+    unified_evidence = {"evidence_items": [
+        {"evidence_type": "http_request", "source_tool": "tshark",
+         "value": "HTTP 10.0.0.5 → evil.com/gate.php", "severity": "high",
+         "confidence": 0.8, "artifact_id": "http_1"},
+        {"evidence_type": "registry_entry", "source_tool": "regripper",
+         "value": "[run] Updater - C:\\Users\\Public\\svchost32.exe", "severity": "high",
+         "confidence": 0.8, "artifact_id": "reg_1"},
+    ]}
+    case_context = {"evidence_sources": {
+        "tshark": "capture.pcap", "regripper": "demo_ntuser_run.dat",
+    }}
+
+    reports = _build_per_file_reports(unified_evidence, case_context)
+
+    assert set(reports) == {"tshark", "regripper"}
+    assert "capture.pcap" in reports["tshark"]
+    assert "evil.com/gate.php" in reports["tshark"]
+    assert "demo_ntuser_run.dat" in reports["regripper"]
+    assert "Updater" in reports["regripper"]
+    # Each tool's report is self-contained — no cross-contamination between files.
+    assert "evil.com" not in reports["regripper"]
+    assert "Updater" not in reports["tshark"]
+
+
+def test_per_file_reports_surface_diagnosis_and_empty_findings():
+    unified_evidence = {"evidence_items": [
+        {"evidence_type": "evidence_diagnostic", "source_tool": "volatility3",
+         "value": "memory.dmp: This file is empty (0 bytes) — it contains no data to analyse.",
+         "severity": "low", "confidence": 0.9, "artifact_id": "diag_1"},
+    ]}
+    case_context = {"evidence_sources": {"volatility3": "memory.dmp"}}
+
+    reports = _build_per_file_reports(unified_evidence, case_context)
+
+    assert "memory.dmp" in reports["volatility3"]
+    assert "File-Level Diagnosis" in reports["volatility3"]
+    assert "empty (0 bytes)" in reports["volatility3"]
+    assert "No substantive findings" in reports["volatility3"]
+
+
+def test_per_file_reports_empty_evidence_returns_no_reports():
+    assert _build_per_file_reports({"evidence_items": []}, {}) == {}
+
+
+# ─────────────────────────────────────────────────────────────
+# Analyst verdict acknowledges narrative/evidence divergence
+# ─────────────────────────────────────────────────────────────
+
+def test_analyst_verdict_flags_divergence_instead_of_asserting_case_type():
+    # Case Classification can say "evidence weakly supports ransomware (14%) ... aligns more with
+    # data_exfiltration" while the verdict, two sections later, used to say "Evidence is consistent
+    # with Ransomware activity" with no acknowledgment at all - a reader hits a flat contradiction.
+    reconciliation = {
+        "narrative_evidence_divergence": True,
+        "reconciled_confidence": 0.61,
+        "evidence_suggests": "data_exfiltration",
+    }
+    verdict = _build_analyst_verdict("ransomware", "high", 346, 0.95, reconciliation)
+    assert "weakly supports" in verdict
+    assert "61%" in verdict
+    assert "data_exfiltration" in verdict
+
+
+def test_analyst_verdict_unchanged_when_no_divergence():
+    # No reconciliation flag -> no caveat text, and omitting the argument entirely must still work
+    # (existing callers/tests didn't pass one).
+    verdict = _build_analyst_verdict("ransomware", "high", 346, 0.95)
+    assert "weakly supports" not in verdict
+    assert "Evidence is consistent with Ransomware activity" in verdict

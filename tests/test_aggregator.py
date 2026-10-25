@@ -9,6 +9,7 @@ from src.aggregator.evidence_aggregator import (
     sort_evidence_items,
     build_indices,
     aggregate_evidence,
+    aggregate_bulk_evidence,
     enrich_evidence_items,
     build_correlations,
     reconcile_memprocfs_processes,
@@ -59,9 +60,14 @@ def test_sort_rule_match_outranks_heuristic_within_tier():
 
 
 def test_catalog_matches_wannacry_network_iocs():
-    """The IOC catalog must match the WannaCry killswitch / .onion C2 / BTC
-    ransom wallets so they get an ioc_match (→ become Key Findings) and are
-    escalated. Regression for 3.3-I (network IOCs were absent from the catalog).
+    """The IOC catalog must MATCH the WannaCry killswitch / .onion C2 / BTC
+    ransom wallets so they get an ioc_match (→ become Key Findings indicators).
+    Regression for 3.3-I (network IOCs were absent from the catalog).
+
+    Note (B-2): a string-only `suspicious_domain` keeps its match tag but is NOT
+    severity-boosted without network corroboration — see
+    test_string_domain_needs_network_corroboration_to_escalate. The BTC wallet is
+    a `suspicious_crypto` type (not a domain), so it is not gated and escalates.
     """
     from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
     cat = load_ioc_catalog()
@@ -79,24 +85,84 @@ def test_catalog_matches_wannacry_network_iocs():
     ]
     rescore_items(items, cat, {})
     by_id = {i["artifact_id"]: i for i in items}
-    # killswitch: gains a match and is escalated medium -> high
+    # killswitch: gains a match tag; stays medium (string-only, uncorroborated)
     assert by_id["dom_1"]["ioc_match"] == ["wannacry_killswitch"]
-    assert by_id["dom_1"]["severity"] == "high"
-    # any .onion matches the general Tor-hidden-service rule (high floor)
-    assert by_id["onion_1"]["ioc_match"] == ["tor_hidden_service"]
+    assert by_id["dom_1"]["severity"] == "medium"
+    # a KNOWN WannaCry onion matches the general Tor rule AND the named
+    # attribution rule (PF-1a); still uncorroborated, so severity is not boosted
+    assert by_id["onion_1"]["ioc_match"] == ["tor_hidden_service", "wannacry_c2"]
     assert by_id["onion_1"]["severity"] == "high"
-    # BTC ransom wallet matches the curated named-intel rule and escalates
+    # BTC ransom wallet matches the curated named-intel rule and escalates (not a
+    # domain type, so the corroboration gate does not apply)
     assert by_id["btc_1"]["ioc_match"] == ["wannacry_ransom_wallet"]
     assert by_id["btc_1"]["severity"] == "critical"
 
     # The .onion rule is general, not a WannaCry enumeration: an arbitrary
-    # (non-WannaCry) hidden service must match too.
+    # (non-WannaCry) hidden service must still match (gain the tag).
     novel = [{"artifact_id": "onion_2", "evidence_type": "suspicious_domain",
               "value": "abcdef0123456789deadbeef.onion", "severity": "medium",
               "source_tool": "volatility3"}]
     rescore_items(novel, cat, {})
     assert novel[0]["ioc_match"] == ["tor_hidden_service"]
-    assert novel[0]["severity"] == "high"
+    assert novel[0]["severity"] == "medium"
+
+
+def test_named_onion_attribution_escalates_when_contacted():
+    """PF-1a: wannacry_c2 adds family attribution over the generic tor rule — a contacted known
+    onion (dns_query, not corroboration-gated) floors critical with both tags; an unknown onion
+    keeps the generic high floor."""
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        {"artifact_id": "dns_known", "evidence_type": "dns_query",
+         "value": "DNS query: gx7ekbenv2riucmf.onion", "severity": "low",
+         "source_tool": "tshark"},
+        {"artifact_id": "dns_novel", "evidence_type": "dns_query",
+         "value": "DNS query: abcdef0123456789deadbeef.onion", "severity": "low",
+         "source_tool": "tshark"},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    assert by_id["dns_known"]["ioc_match"] == ["tor_hidden_service", "wannacry_c2"]
+    assert by_id["dns_known"]["severity"] == "critical"
+    assert by_id["dns_novel"]["ioc_match"] == ["tor_hidden_service"]
+    assert by_id["dns_novel"]["severity"] == "high"
+
+
+def test_string_domain_needs_network_corroboration_to_escalate():
+    """B-2: a string-only `suspicious_domain` (e.g. a ransomware domain scraped
+    from memory strings) keeps its ioc_match tag but is NOT severity-boosted
+    unless the host was actually contacted. This kills the dev01 false CRITICAL,
+    where an EDR threat-intel feed resident in memory surfaced six ransomware
+    families' domains no host ever talked to. The same domain, once corroborated
+    by a real DNS/connection item, escalates as a genuine finding.
+    """
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+
+    # Uncorroborated: memory string only → tag kept, severity unchanged.
+    uncorroborated = [
+        {"artifact_id": "dom_ks", "evidence_type": "suspicious_domain",
+         "value": "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+         "severity": "medium", "source_tool": "volatility3"},
+    ]
+    rescore_items(uncorroborated, cat, {})
+    assert uncorroborated[0]["ioc_match"] == ["wannacry_killswitch"]
+    assert uncorroborated[0]["severity"] == "medium"
+
+    # Corroborated: a DNS query to the same host is present → escalates.
+    corroborated = [
+        {"artifact_id": "dom_ks", "evidence_type": "suspicious_domain",
+         "value": "www.iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+         "severity": "medium", "source_tool": "volatility3"},
+        {"artifact_id": "dns_ks", "evidence_type": "dns_query", "source_tool": "tshark",
+         "value": "DNS query from 10.0.0.5 -> iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com",
+         "severity": "low"},
+    ]
+    rescore_items(corroborated, cat, {})
+    by_id = {i["artifact_id"]: i for i in corroborated}
+    assert by_id["dom_ks"]["ioc_match"] == ["wannacry_killswitch"]
+    assert by_id["dom_ks"]["severity"] == "high"
 
 
 def test_affected_system_ip_does_not_escalate_benign_traffic():
@@ -172,6 +238,69 @@ def test_c2_port_not_matched_from_byte_or_packet_count():
     assert "c2_port" not in by_id["n2"].get("ioc_match", [])
     assert by_id["n3"]["severity"] == "critical"
     assert "c2_port" in by_id["n3"]["ioc_match"]
+
+
+def test_c2_port_tiers_high_vs_watch():
+    """Issue D1: the centralised C2-port catalog is tiered. A high-confidence
+    port (4444) floors at critical under id 'c2_port'; a dual-use watch port
+    (8888) only floors at medium under id 'c2_port_watch', so a Jupyter/IRC-style
+    connection is surfaced without being escalated to a critical C2 finding."""
+    from src.data.threat_intel import c2_port_severity
+    assert c2_port_severity(4444) == "high"
+    assert c2_port_severity("8888") == "medium"      # accepts digit strings
+    assert c2_port_severity(2222) is None            # dropped: usually legitimate
+    assert c2_port_severity(443) is None
+
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        {"artifact_id": "hi", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCP 10.0.0.5 -> 9.9.9.9:4444 beacon"},
+        {"artifact_id": "watch", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCP 10.0.0.5 -> 9.9.9.9:8888 session"},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    assert by_id["hi"]["severity"] == "critical"
+    assert "c2_port" in by_id["hi"]["ioc_match"]
+    # watch-tier port is noted at medium, NOT escalated to critical
+    assert by_id["watch"]["severity"] == "medium"
+    assert "c2_port_watch" in by_id["watch"]["ioc_match"]
+
+
+def test_lateral_movement_ports_flag_sessions_not_listeners():
+    """B-6: remote-interactive admin channels (WinRM 5985 / RDP 3389) are the
+    lateral-movement backbone of an internal LOTL intrusion and must surface as
+    medium watch signals — but ONLY for a session with a real remote peer. Every
+    Windows host listens on 3389/5985 itself, so the bare listening socket
+    (0.0.0.0:3389 / :::5985) must stay low, as must benign internal service
+    traffic (Elasticsearch :9200)."""
+    from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+    cat = load_ioc_catalog()
+    items = [
+        # N1: outbound WinRM to a remote host -> medium + tag
+        {"artifact_id": "winrm_out", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCPv4 172.16.4.9:59494 -> 172.16.5.21:5985 (PID:-)"},
+        # N4: established RDP session (dev01 is the server; peer is real) -> medium + tag
+        {"artifact_id": "rdp_est", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCPv4 172.16.4.9:3389 -> 172.16.5.26:54708 (PID:-)"},
+        # The host's own listeners: at most one real IP -> must NOT match
+        {"artifact_id": "rdp_listen4", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCPv4 0.0.0.0:3389 -> 0.0.0.0:0 (PID:432)"},
+        {"artifact_id": "winrm_listen6", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCPv6 :::5985 -> :::0 (PID:4)"},
+        # Benign internal service traffic -> untouched (negative control)
+        {"artifact_id": "es_9200", "evidence_type": "network_connection", "severity": "low",
+         "value": "TCPv4 172.16.4.9:54768 -> 172.16.4.8:9200 (PID:-)"},
+    ]
+    rescore_items(items, cat, {})
+    by_id = {i["artifact_id"]: i for i in items}
+    for flagged in ("winrm_out", "rdp_est"):
+        assert by_id[flagged]["severity"] == "medium", flagged
+        assert "lateral_movement_port" in by_id[flagged]["ioc_match"], flagged
+    for quiet in ("rdp_listen4", "winrm_listen6", "es_9200"):
+        assert by_id[quiet]["severity"] == "low", quiet
+        assert "lateral_movement_port" not in by_id[quiet].get("ioc_match", []), quiet
 
 
 def test_same_pid_requires_information_adding_evidence():
@@ -493,6 +622,94 @@ def test_aggregate_evidence_builds_correlations_and_exfiltration():
         assert exfil["bytes_transferred"] == 1500000
 
 
+def test_exfiltration_temporal_match_is_labelled_honestly():
+    """Issue 5.1: a plain TCP connection never names the transferred file, so the
+    exfil finding rests on temporal proximity only. It must be marked
+    match_type='temporal' and must NOT claim the file path 'matched' disk/
+    timeline evidence (the old finding text over-stated what was checked)."""
+    from src.aggregator.evidence_aggregator import (
+        enrich_evidence_items, _build_exfiltration_findings,
+    )
+    items = [
+        {"artifact_id": "net1", "source_tool": "tshark",
+         "evidence_type": "network_connection",
+         "value": "TCP 10.0.0.5 -> 9.9.9.9:4444 (1500000 bytes, 12 packets)",
+         "severity": "high", "confidence": 0.8,
+         "timestamp": "2026-05-08T12:05:00Z", "linked_artifacts": []},
+        {"artifact_id": "file1", "source_tool": "tsk_fls",
+         "evidence_type": "file_artifact",
+         "value": "Suspicious file: C:/Users/admin/AppData/Temp/payload.exe",
+         "severity": "medium", "confidence": 0.75,
+         "timestamp": "2026-05-08T12:01:00Z", "linked_artifacts": []},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "c"})
+    findings = _build_exfiltration_findings(enriched, signals)
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["match_type"] == "temporal"
+    assert f["file"].endswith("payload.exe")
+    assert not any("matched disk/timeline" in c for c in f["what_confirmed_it"])
+    assert any("Temporal correlation only" in c for c in f["what_confirmed_it"])
+
+
+def test_exfiltration_filename_match_is_strong():
+    """When the connection value DOES name the file (shared file key), it is a
+    filename match: the stronger claim and a higher confidence than temporal."""
+    from src.aggregator.evidence_aggregator import (
+        enrich_evidence_items, _build_exfiltration_findings,
+    )
+    items = [
+        {"artifact_id": "net1", "source_tool": "tshark",
+         "evidence_type": "network_connection",
+         "value": "TCP 10.0.0.5 -> 9.9.9.9:443 POST /upload/payload.exe (1500000 bytes)",
+         "severity": "high", "confidence": 0.8,
+         "timestamp": "2026-05-08T12:05:00Z", "linked_artifacts": []},
+        {"artifact_id": "file1", "source_tool": "tsk_fls",
+         "evidence_type": "file_artifact",
+         "value": "Suspicious file: C:/Users/admin/AppData/Temp/payload.exe",
+         "severity": "medium", "confidence": 0.75,
+         "timestamp": "2026-05-08T12:01:00Z", "linked_artifacts": []},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "c"})
+    findings = _build_exfiltration_findings(enriched, signals)
+    assert len(findings) == 1
+    assert findings[0]["match_type"] == "filename"
+    assert any("file name matched" in c for c in findings[0]["what_confirmed_it"])
+
+
+def test_exfiltration_network_only_requires_flagged_flow():
+    """A pcap-only case has no file events, so a large outbound transfer could never
+    produce an exfiltration finding (macOS case: the 11.6 MB flow stayed in the generic
+    network bucket). A flagged large flow now yields a network-only finding; an
+    unflagged one still doesn't — volume alone is not evidence (cloud sync/backups
+    exceed the threshold too)."""
+    from src.aggregator.evidence_aggregator import (
+        enrich_evidence_items, _build_exfiltration_findings,
+    )
+    items = [
+        {"artifact_id": "net1", "source_tool": "tshark",
+         "evidence_type": "network_connection",
+         "value": "TCP 10.5.11.101 -> 165.245.215.18:80 (12139599 bytes, 8556 packets)",
+         "severity": "high", "confidence": 0.8,
+         "ioc_match": ["bad_host", "data_exfiltration"],
+         "timestamp": "", "linked_artifacts": []},
+        {"artifact_id": "net2", "source_tool": "tshark",
+         "evidence_type": "network_connection",
+         "value": "TCP 10.5.11.101 -> 34.120.0.9:443 (52000000 bytes, 40000 packets)",
+         "severity": "low", "confidence": 0.5,
+         "timestamp": "", "linked_artifacts": []},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "c"})
+    findings = _build_exfiltration_findings(enriched, signals)
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["match_type"] == "network_only"
+    assert "165.245.215.18" in f["destination"]
+    assert f["bytes_transferred"] == 12139599
+    assert any("No file-system evidence" in c for c in f["what_confirmed_it"])
+    assert any("bad_host" in c for c in f["what_confirmed_it"])
+
+
 def test_run_bulk_aggregation_writes_summary():
     """Test that the CLI bulk helper aggregates multiple machine bundles."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -549,6 +766,77 @@ def test_run_bulk_aggregation_writes_summary():
         assert result["bulk_summary"]["machines"][0]["findings"] >= 0
 
 
+def test_bulk_aggregation_isolates_one_machine_failure(monkeypatch):
+    # At fleet scale, some fraction of machines will always have a raw-output collection that
+    # blows up aggregate_evidence() for reasons unrelated to any other machine (truncated JSON,
+    # a wrapper's schema drift, a permissions error). That must not lose every other machine's
+    # results in the same batch.
+    import src.aggregator.evidence_aggregator as agg_mod
+
+    real_aggregate_evidence = agg_mod.aggregate_evidence
+
+    def flaky_aggregate_evidence(case_context, raw_outputs_dir, output_path):
+        if "machine_bad" in raw_outputs_dir:
+            raise RuntimeError("simulated corrupt raw output")
+        return real_aggregate_evidence(case_context, raw_outputs_dir, output_path)
+
+    monkeypatch.setattr(agg_mod, "aggregate_evidence", flaky_aggregate_evidence)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        good_raw = Path(tmpdir) / "machine_good" / "raw"
+        bad_raw = Path(tmpdir) / "machine_bad" / "raw"
+        good_raw.mkdir(parents=True)
+        bad_raw.mkdir(parents=True)
+        with (good_raw / "volatility_output.json").open("w") as f:
+            json.dump({"tool": "volatility3", "items": [{
+                "artifact_id": "proc_1", "source_tool": "volatility3",
+                "evidence_type": "process", "value": "cmd.exe (PID:1 PPID:0)",
+                "severity": "low", "confidence": 0.5, "linked_artifacts": [],
+            }]}, f)
+
+        machine_runs = {
+            "machine_good": {"raw_outputs_dir": str(good_raw),
+                              "case_context": {"case_id": "c1"}},
+            "machine_bad": {"raw_outputs_dir": str(bad_raw),
+                             "case_context": {"case_id": "c2"}},
+        }
+        summary = agg_mod.aggregate_bulk_evidence(machine_runs, output_root=str(Path(tmpdir) / "out"))
+
+    assert len(summary["machines"]) == 1
+    assert summary["machines"][0]["machine_name"] == "machine_good"
+    assert len(summary["failed_machines"]) == 1
+    assert summary["failed_machines"][0]["machine_name"] == "machine_bad"
+    assert "simulated corrupt raw output" in summary["failed_machines"][0]["error"]
+
+
+def test_bulk_aggregation_survives_many_machines():
+    # No literal 1200-machine dataset is feasible in a unit test, but the loop must not fall over
+    # as machine count grows — this proves it holds well past the 2-machine case the rest of the
+    # suite otherwise only exercises.
+    n_machines = 60
+    with tempfile.TemporaryDirectory() as tmpdir:
+        machine_runs = {}
+        for i in range(n_machines):
+            raw_dir = Path(tmpdir) / f"machine_{i}" / "raw"
+            raw_dir.mkdir(parents=True)
+            with (raw_dir / "volatility_output.json").open("w") as f:
+                json.dump({"tool": "volatility3", "items": [{
+                    "artifact_id": f"proc_{i}", "source_tool": "volatility3",
+                    "evidence_type": "process", "value": f"proc{i}.exe (PID:{i} PPID:0)",
+                    "severity": "low", "confidence": 0.5, "linked_artifacts": [],
+                }]}, f)
+            machine_runs[f"machine_{i}"] = {
+                "raw_outputs_dir": str(raw_dir),
+                "case_context": {"case_id": f"case-{i}"},
+            }
+
+        summary = aggregate_bulk_evidence(machine_runs, output_root=str(Path(tmpdir) / "out"))
+
+    assert len(summary["machines"]) == n_machines
+    assert summary["failed_machines"] == []
+    assert summary["total_items"] == n_machines
+
+
 def test_process_tree_does_not_contaminate_correlations():
     """The process_tree aggregate names every PID in a subtree. It must not
     join (nor anchor) PID correlation groups, and correlations must not be
@@ -587,6 +875,75 @@ def test_process_tree_does_not_contaminate_correlations():
     for item in annotated:
         entries = [json.dumps(c, sort_keys=True) for c in item.get("correlations", [])]
         assert len(entries) == len(set(entries)), f"duplicate on {item['artifact_id']}"
+
+
+def test_same_file_links_memory_and_disk_views_by_filename():
+    """A file seen by volatility filescan (root-relative \\Users\\... value —
+    which the old drive/UNC-only path regex didn't extract at all) and by
+    tsk_fls (unix-style path, different prefix) must group under same_file via
+    the shared filename key. os.path.basename never split the backslashed
+    paths on POSIX, so this cross-tool link silently never fired."""
+    items = [
+        {"artifact_id": "vol_file_1", "evidence_type": "file_artifact",
+         "source_tool": "volatility3", "severity": "high",
+         "value": "\\Users\\bob\\AppData\\Roaming\\payload_x.exe"},
+        {"artifact_id": "tsk_file_1", "evidence_type": "file_artifact",
+         "source_tool": "tsk_fls", "severity": "medium",
+         "value": "Staged file: /Users/bob/AppData/Roaming/payload_x.exe"},
+        # A dotless last segment is a directory / space-truncated fragment,
+        # not a filename — it must NOT become a grouping key (on dev01 the
+        # generic words "windows"/"user"/"edge" formed 20-70-item junk groups).
+        {"artifact_id": "vol_dir_1", "evidence_type": "file_artifact",
+         "source_tool": "volatility3", "severity": "low",
+         "value": "\\ProgramData\\Microsoft\\Windows"},
+        {"artifact_id": "tsk_dir_1", "evidence_type": "file_artifact",
+         "source_tool": "tsk_fls", "severity": "low",
+         "value": "Dir: /Users/x/Microsoft/Windows"},
+        # A registry key's backslashed tail is not a path (left boundary is
+        # alphanumeric), so "run" never becomes a file key.
+        {"artifact_id": "reg_1", "evidence_type": "registry_entry",
+         "source_tool": "regripper", "severity": "medium",
+         "value": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "X"})
+    annotated, findings = build_correlations(enriched, signals)
+
+    same_file = [f for f in findings if f["correlation_type"] == "same_file"]
+    payload = [f for f in same_file if f.get("signal") == "payload_x.exe"]
+    assert len(payload) == 1, "memory and disk views must link by filename"
+    assert set(payload[0]["artifacts"]) == {"vol_file_1", "tsk_file_1"}
+
+    assert "payload_x.exe" in signals["vol_file_1"]["file_keys"]
+    assert not any("windows" == f.get("signal") for f in same_file)
+    assert signals["reg_1"]["file_keys"] == []
+
+
+def test_date_and_http_version_fragments_are_not_file_keys():
+    """Plaso values embed dates ("12/29/2008") and "HTTP/1.1" mid-token; the
+    unboundaried unix-path regex turned them into same_file keys ("\\29\\2008",
+    "1.1") that grouped up to 145 unrelated artifacts on the ubnist1 image."""
+    items = [
+        {"artifact_id": f"tl_{i}", "evidence_type": "timeline_event",
+         "source_tool": "plaso", "severity": "medium",
+         "value": f"[12/29/2008 05:29:5{i}] [Firefox Cache] Fetched 1 time(s) "
+                  "[HTTP/1.1 200 OK] POST http://safebrowsing.clients.google.com/x"}
+        for i in range(2)
+    ] + [
+        # A genuine unix path in a timeline value must still key.
+        {"artifact_id": "tl_real", "evidence_type": "timeline_event",
+         "source_tool": "plaso", "severity": "medium",
+         "value": "mtime 12/29/2008 /home/ubuntu/.mozilla/places.sqlite"},
+    ]
+    enriched, signals = enrich_evidence_items(items, {"case_id": "X"})
+    _, findings = build_correlations(enriched, signals)
+
+    for aid in ("tl_0", "tl_1"):
+        junk = [k for k in signals[aid]["file_keys"]
+                if k in ("\\29\\2008", "\\1.1", "1.1", "\\2008")]
+        assert junk == [], f"{aid} grew junk file keys: {junk}"
+    assert "places.sqlite" in signals["tl_real"]["file_keys"]
+    same_file = [f for f in findings if f["correlation_type"] == "same_file"]
+    assert not any(f.get("signal") in ("\\29\\2008", "1.1", "\\1.1") for f in same_file)
 
 
 def test_domain_correlation_links_pcap_dns_to_memory_string():
@@ -755,3 +1112,19 @@ def test_reconcile_does_not_confuse_ppid_with_pid():
     kept, removed = reconcile_memprocfs_processes(items)
     assert removed == 0
     assert any(i["artifact_id"] == "memprocfs_proc_7777" for i in kept)
+
+
+def test_reconcile_elevates_memprocfs_only_pid_as_hiding_signal():
+    # A PID MemProcFS sees but Volatility's own process list doesn't, despite
+    # Volatility having successfully enumerated processes at all, is a
+    # process-hiding/rootkit signal — not just a quiet fallback entry.
+    hidden = _mpfs(4242, 880, "secret.exe")
+    hidden["severity"] = "medium"
+    items = [_vol(880, 1944), hidden]
+    kept, removed = reconcile_memprocfs_processes(items)
+    assert removed == 0
+    survivor = next(i for i in kept if i["artifact_id"] == "memprocfs_proc_4242")
+    assert survivor["severity"] == "high"
+    assert "not enumerated by volatility3" in survivor["value"].lower()
+    # The original list is untouched (a copy is elevated, not mutated in place).
+    assert hidden["severity"] == "medium"

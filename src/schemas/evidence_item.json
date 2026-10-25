@@ -81,31 +81,5 @@
         }
       }
     }
-    ,
-    "raw_value": {
-      "type": "string",
-      "description": "Original tool-provided human readable value"
-    },
-    "normalized_value": {
-      "type": "string",
-      "description": "Normalized value used for correlation (trimmed, canonicalized)"
-    },
-    "machine_id": {
-      "type": "string",
-      "description": "Identifier for the machine/host this evidence belongs to"
-    },
-    "correlations": {
-      "type": "array",
-      "description": "Correlation entries attached to this item",
-      "items": {
-        "type": "object",
-        "properties": {
-          "artifact_id": { "type": "string" },
-          "correlation_type": { "type": "string" },
-          "matches": { "type": "array", "items": { "type": "string" } },
-          "confidence": { "type": "number" }
-        }
-      }
-    }
   }
 }

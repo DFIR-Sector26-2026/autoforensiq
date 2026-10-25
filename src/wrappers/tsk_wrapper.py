@@ -2,14 +2,86 @@ import os
 import re
 import json
 import tempfile
-from src.wrappers.base_wrapper import BaseWrapper
+from src.wrappers.base_wrapper import BaseWrapper, stable_artifact_id
+from src.data.threat_intel import RANSOM_EXTENSIONS, EXECUTABLE_EXTENSIONS
+from src.aggregator.ioc_rescorer import load_ioc_catalog
 
-SUSPICIOUS_EXTENSIONS = [".exe", ".dll", ".bat", ".ps1", ".vbs",
-                          ".js", ".jar", ".scr", ".locked", ".encrypted"]
-SUSPICIOUS_DIRS = ["temp", "tmp", "appdata\\roaming", "recycle",
-                   "programdata", "windows\\temp"]
+
+# EXECUTABLE_EXTENSIONS are notable only inside a staging dir (or deleted) — extension alone flooded
+# a real disk with ~65k benign binaries. RANSOM_EXTENSIONS flag anywhere. Both centralised in
+# threat_intel.
+
+# User-writable staging dirs, matched as /-delimited path segments (TSK emits '/' even for NTFS) so
+# a file merely *named* like a temp file isn't flagged (B6).
+STAGING_DIRS = (
+    "/temp/", "/tmp/", "/appdata/", "/downloads/", "/users/public/",
+    "/programdata/", "/$recycle", "/perflogs/",
+)
+
+
+# OS-managed servicing dirs whose "/temp/" segments are NOT user-writable staging (GAC ngen cache +
+# WinSxS servicing — 140 of 141 dev01 staging flags, B-9c).
+_OS_SERVICING_DIRS = ("/windows/assembly/", "/windows/winsxs/")
+
+
+def _in_staging_dir(lower_path: str) -> bool:
+    if any(seg in lower_path for seg in _OS_SERVICING_DIRS):
+        return False
+    return any(seg in lower_path for seg in STAGING_DIRS)
+
+
+# Catalog-named files (tasksche.exe, mimikatz, …) are notable ANYWHERE
+_NAME_RULE_CATEGORIES = ("known_malware", "ransomware_marker", "attacker_tooling")
+
+# Bundled library trees are name-collision farms — never name-flag inside them.
+_LIBRARY_DIRS = ("/node_modules/",)
+
+_catalog_name_tokens = [
+    tok for rule in load_ioc_catalog().get("indicators", [])
+    if rule.get("category") in _NAME_RULE_CATEGORIES
+    for tok in rule.get("match", [])
+]
+# Filename-shaped tokens (tasksche.exe, @wanadecryptor@) match anywhere in the basename,
+# boundary-aware like volatility's marker regex (B-9b): a letter on either side disqualifies.
+_KNOWN_BAD_NAME_RE = re.compile("|".join(
+    f"(?<![a-z]){re.escape(tok)}(?![a-z])"
+    for tok in _catalog_name_tokens if "." in tok or "@" in tok
+) or "(?!x)x")
+# Bare family/tool names ("maze", "mimikatz") only flag as the exact stem of an executable
+_KNOWN_BAD_STEMS = frozenset(
+    tok for tok in _catalog_name_tokens if "." not in tok and "@" not in tok
+)
+
+
+def _file_signal(filepath: str):
+    """Return (severity, label) if the path is a notable file artifact by extension + location or
+    catalog-known name, else None. 
+    Payload/encrypted extensions and catalog names count anywhere;
+    executable/script extensions count only inside a staging directory.
+    Deleted- file handling stays in the caller (it needs the fls deletion flag)."""
+    lower = filepath.lower()
+    base = lower.rsplit("/", 1)[-1]
+    if base.endswith(RANSOM_EXTENSIONS):
+        return "high", "Payload/encrypted file"
+    if base.endswith(EXECUTABLE_EXTENSIONS) and _in_staging_dir(lower):
+        return "medium", "Executable in staging directory"
+    if not any(seg in lower for seg in _LIBRARY_DIRS):
+        if _KNOWN_BAD_NAME_RE.search(base):
+            return "medium", "Known-malware filename"
+        stem, _, ext = base.rpartition(".")
+        if "." + ext in EXECUTABLE_EXTENSIONS and stem in _KNOWN_BAD_STEMS:
+            return "medium", "Known-malware filename"
+    # PowerShell transcripts: deliberately LOW — GPO transcription is often fleet-wide, so existence
+    # alone is weak; correlation is the lift. Scoring by filename/location would flood or overfit to
+    # one image (B-6/B-7, N5).
+    if base.startswith("powershell_transcript.") and base.endswith(".txt"):
+        return "low", "PowerShell transcript"
+    return None
+
 
 class TSKWrapper(BaseWrapper):
+    consumes = "disk_image"
+
     def __init__(self):
         super().__init__("tsk_fls")
 
@@ -24,15 +96,9 @@ class TSKWrapper(BaseWrapper):
         return all_items
 
     def _enumerate_fs_offsets(self, image_path: str) -> list:
-        """Return the sector offsets of candidate filesystems in a partitioned
-        image, via `mmls`. An empty list means there is no partition table
-        (a bare filesystem) — the caller then runs `fls` with no `-o`.
-
-        Without this, `fls -r -m /` is given a partitioned disk and reports
-        "Cannot determine file system type", yielding 0 items (issue D2). The
-        Windows Server E01 keeps its NTFS at sector 2048; only the Ubuntu casper
-        image is a bare filesystem at offset 0.
-        """
+        """Sector offsets of candidate filesystems via `mmls`; [] = no partition table, caller
+        runs fls with no -o. Without offsets, fls on a partitioned disk yields 0 items ("Cannot
+        determine file system type", D2)."""
         stdout, _, code = self.run_command(
             ["mmls", image_path],
             input_files=[image_path],
@@ -56,9 +122,9 @@ class TSKWrapper(BaseWrapper):
 
             slot, start, desc = m.group(1), m.group(2), m.group(3).strip().lower()
 
-            # Skip the partition-table meta row and unallocated gaps; everything
-            # else is a candidate (fls is tolerant — unreadable/foreign slots
-            # simply produce no output and are skipped below).
+            # Skip the partition-table meta row and unallocated gaps; everything else is a candidate
+            # (fls is tolerant — unreadable/foreign slots simply produce no output and are skipped
+            # below).
             if slot == "Meta" or "unallocated" in desc:
                 continue
 
@@ -74,34 +140,35 @@ class TSKWrapper(BaseWrapper):
             if len(parts) < 2:
                 continue
             try:
-                filepath = parts[1].strip() if len(parts) > 1 else line
-                # mactime body field 3 is the type/mode string ("r/rrwxrwxrwx"
-                # for files, "d/drwxrwxrwx" for directories). Skip directory
-                # nodes (issue B3): the dir itself matches SUSPICIOUS_DIRS by
-                # path substring, but it isn't a file artifact — the malware is
-                # the files *inside* it, which are flagged on their own rows.
+                filepath = parts[1].strip()
+                # Field 3 is the type/mode string; skip directory nodes ("d/...") — the signal is
+                # the files inside, on their own rows (B3).
                 mode = parts[3].strip() if len(parts) > 3 else ""
                 if mode.startswith("d/"):
                     continue
                 is_deleted = line.startswith("r/r *") or "* " in parts[0]
-                lower_path = filepath.lower()
 
-                suspicious = (
-                    any(filepath.endswith(ext) for ext in SUSPICIOUS_EXTENSIONS) or
-                    any(d in lower_path for d in SUSPICIOUS_DIRS) or
-                    is_deleted
-                )
+                # Body fields 7-10 are atime|mtime|ctime|crtime epochs; "0" means unknown (F4b).
+                mtime  = parts[8].strip()  if len(parts) > 8  else ""
+                crtime = parts[10].strip() if len(parts) > 10 else ""
+                ts = next((t for t in (mtime, crtime) if t not in ("", "0")), "")
 
-                if suspicious:
-                    severity = "high" if is_deleted else "medium"
-                    label = "DELETED file" if is_deleted else "Suspicious file"
-                    items.append(self.make_evidence_item(
-                        artifact_id=f"file_{abs(hash(filepath)) % 99999}",
-                        evidence_type="file_artifact",
-                        value=f"{label}: {filepath}",
-                        severity=severity,
-                        confidence=0.75
-                    ))
+                if is_deleted:
+                    severity, label = "high", "DELETED file"
+                else:
+                    signal = _file_signal(filepath)
+                    if not signal:
+                        continue
+                    severity, label = signal
+
+                items.append(self.make_evidence_item(
+                    artifact_id=stable_artifact_id("file", filepath),
+                    evidence_type="file_artifact",
+                    value=f"{label}: {filepath}",
+                    severity=severity,
+                    confidence=0.75,
+                    timestamp=ts
+                ))
             except Exception:
                 continue
         return items
@@ -181,17 +248,19 @@ class TSKWrapper(BaseWrapper):
                 continue
             try:
                 timestamp = parts[0].strip()
-                filepath  = parts[3].strip() if len(parts) > 3 else ""
-                activity  = parts[2].strip() if len(parts) > 2 else ""
-                lower = filepath.lower()
+                filepath  = parts[3].strip()
+                activity  = parts[2].strip()
 
-                if any(filepath.endswith(ext) for ext in SUSPICIOUS_EXTENSIONS) or \
-                   any(d in lower for d in SUSPICIOUS_DIRS):
+                signal = _file_signal(filepath)
+                if signal:
+                    # Timeline events for high/medium file signals stay medium (historical
+                    # behavior); a low signal (transcripts) must not be elevated by appearing in the
+                    # timeline.
                     items.append(self.make_evidence_item(
-                        artifact_id=f"timeline_{abs(hash(filepath+timestamp)) % 99999}",
+                        artifact_id=stable_artifact_id("timeline", filepath, timestamp),
                         evidence_type="timeline_event",
                         value=f"[{timestamp}] {activity} → {filepath}",
-                        severity="medium",
+                        severity="low" if signal[0] == "low" else "medium",
                         confidence=0.70,
                         timestamp=timestamp
                     ))

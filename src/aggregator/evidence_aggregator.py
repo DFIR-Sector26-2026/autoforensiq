@@ -1,68 +1,43 @@
-"""
-Evidence Aggregator (P4) — Normalize and consolidate forensic evidence
-
-Responsibilities:
-  1. Read all raw/<tool>_output.json files from P3
-  2. Validate each evidence item against evidence_item.json schema (warns on violation)
-  3. Deduplicate by artifact_id (keep first occurrence)
-  4. Sort by severity (critical → low) then confidence (high → low)
-  5. Build lookup indices (by type, by tool)
-  6. Validate output against unified_evidence.json schema (warns on violation)
-  7. Write consolidated result
-
-Usage (standalone):
-    python -m src.aggregator.evidence_aggregator
-"""
+"""Evidence Aggregator (P4): load raw/<tool>_output.json, schema-validate (warn-only), dedupe by
+artifact_id, IOC-rescore, enrich, correlate, sort, index, and write unified_evidence.json.
+Standalone: python -m src.aggregator.evidence_aggregator"""
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
 from datetime import datetime, timezone
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Any
 import jsonschema
+from referencing import Registry, Resource
 
 from src.aggregator.ioc_rescorer import load_ioc_catalog, rescore_items
+from src.data.threat_intel import (
+    HOST_TOKEN_RE as HOST_RE, SEVERITY_ORDER, is_allowlisted_dns, is_lan_ipv4,
+    normalize_host as _normalize_host,
+)
+from src.utils.io import load_json, write_json
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 # Severity ranking for sorting
-SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
-
 # IOC catalog for post-aggregation severity re-scoring (loaded once).
 _IOC_CATALOG = load_ioc_catalog()
-
-
-def load_json(path: str) -> dict[str, Any]:
-    """Load a JSON file."""
-    p = Path(path)
-    with p.open("r", encoding="utf-8") as f:
-        return json.load(f)
 
 
 _SCHEMAS_DIR = ROOT_DIR / "src" / "schemas"
 _EVIDENCE_ITEM_SCHEMA = load_json(str(_SCHEMAS_DIR / "evidence_item.json")) if (_SCHEMAS_DIR / "evidence_item.json").exists() else None
 _UNIFIED_EVIDENCE_SCHEMA = load_json(str(_SCHEMAS_DIR / "unified_evidence.json")) if (_SCHEMAS_DIR / "unified_evidence.json").exists() else None
-
-
-def write_json(path: str, data: dict[str, Any]) -> None:
-    """Write a JSON file, creating parent directory if needed."""
-    p = Path(path)
-    if p.parent:
-        p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
+# Compiled once: jsonschema.validate() recompiles the schema per call, which is ~13k compilations
+# on a large run.
+_EVIDENCE_ITEM_VALIDATOR = jsonschema.Draft7Validator(_EVIDENCE_ITEM_SCHEMA) if _EVIDENCE_ITEM_SCHEMA else None
 
 
 def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
-    """
-    Load all raw/<tool>_output.json files.
-    Returns a dict mapping tool names to lists of evidence items.
-    """
+    """Load all raw/<tool>_output.json files. Returns a dict mapping tool names to lists of
+    evidence items."""
     all_outputs = {}
 
     if not os.path.isdir(raw_dir):
@@ -70,9 +45,6 @@ def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
         return all_outputs
 
     raw_path = Path(raw_dir)
-    if not raw_path.exists():
-        return all_outputs
-
     for filename in sorted([p.name for p in raw_path.iterdir() if p.is_file()]):
         if not filename.endswith("_output.json"):
             continue
@@ -83,10 +55,10 @@ def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
             tool_name = data.get("tool", filename.replace("_output.json", ""))
             items = data.get("items", [])
             if items:
-                if _EVIDENCE_ITEM_SCHEMA:
+                if _EVIDENCE_ITEM_VALIDATOR:
                     for item in items:
                         try:
-                            jsonschema.validate(instance=item, schema=_EVIDENCE_ITEM_SCHEMA)
+                            _EVIDENCE_ITEM_VALIDATOR.validate(item)
                         except jsonschema.ValidationError as ve:
                             print(f"    [WARN] Schema violation in {filename}: {ve.message}")
                 all_outputs[tool_name] = items
@@ -100,12 +72,9 @@ def load_raw_outputs(raw_dir: str) -> dict[str, list[dict]]:
 
 
 def deduplicate_items(all_items: list[dict]) -> tuple[list[dict], int]:
-    """
-    Deduplicate evidence items by artifact_id.
-    Keeps first occurrence, removes duplicates.
-    Returns (deduplicated_list, count_removed).
-    """
-    seen = {}
+    """Deduplicate evidence items by artifact_id. Keeps first occurrence, removes duplicates.
+    Returns (deduplicated_list, count_removed)."""
+    seen = set()
     deduplicated = []
     removed_count = 0
 
@@ -117,22 +86,22 @@ def deduplicate_items(all_items: list[dict]) -> tuple[list[dict], int]:
             continue
         if artifact_id not in seen:
             deduplicated.append(item)
-            seen[artifact_id] = True
+            seen.add(artifact_id)
         else:
             removed_count += 1
 
     return deduplicated, removed_count
 
 
-# A process's OWN pid in a value like "svchost.exe (PID:880 PPID:1944)" or
-# "svchost.exe (PID 880, PPID 1944)" — the negative lookbehind skips the P of
-# PPID so the parent pid is never mistaken for the process pid.
+# A process's OWN pid in a value like "svchost.exe (PID:880 PPID:1944)" or "svchost.exe (PID 880,
+# PPID 1944)" — the negative lookbehind skips the P of PPID so the parent pid is never mistaken for
+# the process pid.
 _OWN_PID_RE = re.compile(r"(?<!P)PID[\s:]+(\d+)", re.IGNORECASE)
 
 
 def _own_process_pid(item: dict) -> str | None:
-    """The process's own PID, from the value (PID, not PPID) or, failing that,
-    a MemProcFS `memprocfs_proc_<pid>` artifact_id."""
+    """The process's own PID, from the value (PID, not PPID) or, failing that, a MemProcFS
+    `memprocfs_proc_<pid>` artifact_id."""
     match = _OWN_PID_RE.search(str(item.get("value", "")))
     if match:
         return match.group(1)
@@ -140,16 +109,16 @@ def _own_process_pid(item: dict) -> str | None:
     return aid.group(1) if aid else None
 
 
-def reconcile_memprocfs_processes(items: list[dict]) -> tuple[list[dict], int]:
-    """Drop MemProcFS process items that duplicate a Volatility one by PID (D6).
+_SEVERITY_AT_LEAST_HIGH = {"low", "medium"}
 
-    MemProcFS emits an unanalysed flat process inventory at medium severity; when
-    Volatility has already produced a richer, properly-scored `process` list for
-    the same PIDs, those copies are pure noise (one medium item per benign
-    process). Suppress a `memprocfs_process` only when Volatility covered its PID
-    — PIDs unique to MemProcFS are kept, and if Volatility produced no process
-    list at all, MemProcFS is left intact as the fallback.
-    """
+
+def reconcile_memprocfs_processes(items: list[dict]) -> tuple[list[dict], int]:
+    """Drop MemProcFS process items whose PID Volatility already covered (D6) — its flat
+    medium-severity inventory is noise next to Volatility's scored list. PIDs unique to
+    MemProcFS are kept and elevated to at least "high": a process a live-memory tool (MemProcFS)
+    can see that a memory-forensics tool built to enumerate every process (Volatility) can't is a
+    known process-hiding/rootkit signal, not just a second opinion to skim past. With no
+    Volatility process list at all, MemProcFS stays intact as the fallback, unelevated."""
     vol_pids = {
         _own_process_pid(i)
         for i in items
@@ -167,6 +136,13 @@ def reconcile_memprocfs_processes(items: list[dict]) -> tuple[list[dict], int]:
             if pid is not None and pid in vol_pids:
                 removed += 1
                 continue
+            if pid is not None and item.get("severity") in _SEVERITY_AT_LEAST_HIGH:
+                item = dict(item)
+                item["severity"] = "high"
+                item["value"] = (
+                    f"{item.get('value', '')} — NOT enumerated by Volatility3's process "
+                    "list despite one being present (possible process-hiding/rootkit technique)"
+                )
         kept.append(item)
     return kept, removed
 
@@ -180,9 +156,8 @@ def sort_evidence_items(items: list[dict]) -> list[dict]:
     """
     def sort_key(item: dict) -> tuple:
         severity_val = SEVERITY_ORDER.get(item.get("severity", "low"), 0)
-        # Within a tier, rule-based catalog matches (ioc_match populated by the
-        # re-scorer) outrank pure-heuristic items so real IOCs survive the
-        # downstream findings cap
+        # Within a tier, rule-based catalog matches (ioc_match populated by the re-scorer) outrank
+        # pure-heuristic items so real IOCs survive the downstream findings cap
         has_ioc = 1 if item.get("ioc_match") else 0
         confidence_val = -item.get("confidence", 0.5)  # negative for desc order
         tool = item.get("source_tool", "")
@@ -192,22 +167,18 @@ def sort_evidence_items(items: list[dict]) -> list[dict]:
 
 
 def build_indices(items: list[dict]) -> dict[str, dict]:
-    """
-    Build lookup indices for evidence items.
-    Returns {
-      'by_type': {evidence_type: [items]},
-      'by_tool': {source_tool: [items]},
-      'by_machine': {machine_id: [items]}
-    }
-    """
+    """by_type / by_tool / by_machine indices of artifact_id REFERENCES, not full item copies —
+    embedding copies quadrupled the file (843 MB on a real disk run). Consumers resolve full
+    objects from evidence_items."""
     by_type = defaultdict(list)
     by_tool = defaultdict(list)
     by_machine = defaultdict(list)
 
     for item in items:
-        by_type[item.get("evidence_type", "unknown")].append(item)
-        by_tool[item.get("source_tool", "unknown")].append(item)
-        by_machine[item.get("machine_id", "unknown")].append(item)
+        artifact_id = item.get("artifact_id", "")
+        by_type[item.get("evidence_type", "unknown")].append(artifact_id)
+        by_tool[item.get("source_tool", "unknown")].append(artifact_id)
+        by_machine[item.get("machine_id", "unknown")].append(artifact_id)
 
     return {
         "by_type": dict(by_type),
@@ -219,39 +190,36 @@ def build_indices(items: list[dict]) -> dict[str, dict]:
 # --- Normalisation / signal extraction helpers --------------------------------
 PID_RE = re.compile(r"\bpid[:\s#]*(\d+)\b", re.IGNORECASE)
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-WINDOWS_PATH_RE = re.compile(r"(?:[A-Za-z]:\\[^|<>\"\r\n\t]+|\\\\[^|<>\"\r\n\t]+)")
-UNIX_PATH_RE = re.compile(r"(?:/(?:[^\s\"'<>|]+))")
+# Three branches: drive (C:\), UNC (\\), and root-relative (\Users\... — what volatility filescan
+# emits; without it same_file never linked memory and disk views, B-13). Root-relative needs >= 2
+# segments + a non-alphanumeric left boundary so registry tails aren't paths. Runs to a delimiter,
+# not whitespace (paths contain spaces) — prose glued after a path pollutes the key (accepted:
+# trimming heuristics could fabricate keys for paths that don't exist).
+WINDOWS_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:\\[^|<>\"\r\n\t]+"
+    r"|\\\\[^|<>\"\r\n\t]+"
+    r"|(?<![A-Za-z0-9])\\[^\\|<>\"\r\n\t]+(?:\\[^|<>\"\r\n\t]+)+)"
+)
+# Same left boundary as the root-relative branch above: without it dates ("12/29/2008") and
+# "HTTP/1.1" matched mid-token and flooded same_file with junk keys on plaso runs.
+UNIX_PATH_RE = re.compile(r"(?<![A-Za-z0-9])/[^\s\"'<>|]+")
 BYTES_RE = re.compile(r"(\d[\d,]*)\s+bytes", re.IGNORECASE)
 DESTINATION_RE = re.compile(
     r"(?P<dst>(?:\d{1,3}\.){3}\d{1,3})(?::(?P<port>\d+))?\s*(?:\(|$)"
 )
-# A hostname / domain token: dot-separated labels ending in an alphabetic TLD
-# (≥2). Mirrors `ioc_rescorer._HOST_TOKEN_RE`; kept local to avoid coupling the
-# aggregator to the rescorer. The alpha-TLD requirement means an IPv4 literal is
-# never mis-extracted as a host (issue B1 / P4-DOMAIN).
-HOST_RE = re.compile(
-    r"\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}\b", re.IGNORECASE
-)
-# Only these evidence types carry a hostname we want to correlate on. Gating by
-# type keeps file/process/registry values (which contain dotted filenames) out
-# of the domain signal; the file-extension guard below is a second line.
+# Only these types carry a correlatable hostname — keeps dotted filenames in file/process/registry
+# values out of the domain signal.
 _DOMAIN_BEARING_TYPES = {"dns_query", "http_request", "suspicious_domain"}
-# Final-label tokens that look like a host but are really a filename — the host
-# regex would otherwise grab "tasksche.exe" out of an http path like
-# "host.xyz/tasksche.exe".
+# Final labels that are really file extensions ("tasksche.exe" in an http path).
 _NON_DOMAIN_TLDS = {
     "exe", "dll", "sys", "bin", "dat", "tmp", "pf", "res", "pky",
     "bmp", "png", "jpg", "jpeg", "gif", "ico", "txt", "log", "ini",
     "json", "js", "doc", "docx", "xls", "pdf", "zip", "rar",
     "wnry", "wncry", "wcry",
 }
-# Evidence types that all describe the *same process's identity* from a single
-# volatility process enumeration (issue 4.7). A PID having a process row AND its
-# command line AND its tree position is the same fact three ways, not corroboration
-# — every process trivially produces these, so a same_pid group confined to them
-# (System PID 4, svchosts, lsass) is near-zero signal. A same_pid finding earns
-# its keep only when the PID *also* appears in evidence that adds information
-# (injected_code, a network connection, a touched file) or across >= 2 tools.
+# Types that restate the same process's identity from one enumeration (4.7): a same_pid group
+# confined to these is the same fact three ways, near-zero signal — it earns its keep only via
+# information-adding evidence or >= 2 tools.
 _PROCESS_IDENTITY_TYPES = {"process", "commandline", "process_tree"}
 
 EXFIL_BYTES_THRESHOLD = 1_000_000
@@ -326,6 +294,24 @@ def _extract_ips(text: str) -> list[str]:
     return sorted(set(IP_RE.findall(text)))
 
 
+# Network evidence is attributed to the LAN (RFC1918) endpoint in the value, not the case_context
+# default (B4). RFC1918-only — not is_private — so reversed in-addr.arpa octets aren't mistaken for
+# a host.
+_NETWORK_EVIDENCE_TYPES = {
+    "network_connection", "dns_query", "http_request", "suspicious_port",
+    "http_body", "host_identity",
+}
+
+
+def _host_from_network_item(item: dict) -> str | None:
+    if item.get("evidence_type") not in _NETWORK_EVIDENCE_TYPES:
+        return None
+    for ip in _extract_ips(str(item.get("value", ""))):
+        if is_lan_ipv4(ip):
+            return ip
+    return None
+
+
 def _extract_paths(text: str) -> list[str]:
     candidates = []
     for match in WINDOWS_PATH_RE.findall(text):
@@ -342,16 +328,6 @@ def _extract_paths(text: str) -> list[str]:
     return deduplicated
 
 
-def _normalize_host(host: str) -> str:
-    """Lowercase, strip a trailing dot and a leading `www.` so a bare host and
-    its `www.`-prefixed form collapse to one key (issue B1: the pcap saw the
-    killswitch as `iuqerf…com`, memory as `www.iuqerf…com`)."""
-    host = host.strip().strip(".").lower()
-    if host.startswith("www."):
-        host = host[len("www."):]
-    return host
-
-
 def _extract_domains(text: str) -> list[str]:
     domains = []
     seen = set()
@@ -365,6 +341,53 @@ def _extract_domains(text: str) -> list[str]:
             seen.add(normalized)
             domains.append(normalized)
     return domains
+
+
+# Session co-occurrence (B1): once a machine has a confirmed bad_host match, its other external
+# non-allowlisted domains floor at medium — catches readable C2 domains the entropy gate misses;
+# never fires on clean traffic.
+_COOCCURRENCE_TYPES = {"dns_query", "http_request"}
+
+
+def _is_allowlisted_domain(domain: str) -> bool:
+    return is_allowlisted_dns(domain)
+
+
+def _has_bad_host_match(item: dict) -> bool:
+    return any(str(tag).startswith("bad_host:") for tag in (item.get("ioc_match") or []))
+
+
+def apply_session_cooccurrence(items: list[dict]) -> int:
+    """Floor a compromised machine's non-allowlisted external domains low -> medium. A machine is
+    compromised if any of its items carries a bad_host reputation match. Returns the number of
+    items elevated."""
+    compromised = {
+        item.get("machine_id")
+        for item in items
+        if item.get("machine_id") and _has_bad_host_match(item)
+    }
+    if not compromised:
+        return 0
+
+    elevated = 0
+    for item in items:
+        if item.get("machine_id") not in compromised:
+            continue
+        if item.get("evidence_type") not in _COOCCURRENCE_TYPES:
+            continue
+        if item.get("severity") != "low":
+            continue
+        external = [
+            d for d in _extract_domains(str(item.get("value", "")))
+            if not _is_allowlisted_domain(d)
+        ]
+        if not external:
+            continue
+        item["severity"] = "medium"
+        existing = item.get("ioc_match") if isinstance(item.get("ioc_match"), list) else []
+        item["ioc_match"] = list(dict.fromkeys(existing + [f"associated_host:{external[0]}"]))
+        elevated += 1
+    return elevated
 
 
 def _extract_bytes(text: str) -> int:
@@ -394,6 +417,29 @@ def _default_machine_id(case_context: dict) -> str:
     return str(case_context.get("case_id", "unknown"))
 
 
+def _resolve_subject_host(items: list[dict], case_context: dict) -> str:
+    """Host all non-network evidence is attributed to. Normally the narrative's
+    affected_systems[0]; but when that is a bare IP literal owning ZERO network evidence it's a
+    phantom (B-1) — defer to the LAN host owning the most network items. Hostnames and
+    connection-owning IPs are kept as-is."""
+    narrative = _default_machine_id(case_context)
+
+    # Only a bare IP literal can be a phantom; hostnames are left untouched.
+    if _extract_ips(narrative) != [narrative]:
+        return narrative
+
+    counts: Counter = Counter()
+    for item in items:
+        if item.get("evidence_type") not in _NETWORK_EVIDENCE_TYPES:
+            continue
+        lan_ips = {ip for ip in _extract_ips(str(item.get("value", ""))) if is_lan_ipv4(ip)}
+        counts.update(lan_ips)
+
+    if counts and counts.get(narrative, 0) == 0:
+        return counts.most_common(1)[0][0]
+    return narrative
+
+
 def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
     artifact_id = str(item.get("artifact_id", ""))
     source_tool = str(item.get("source_tool", ""))
@@ -405,12 +451,9 @@ def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
     timestamp_value = item.get("timestamp", "")
     timestamp_dt = _parse_timestamp(timestamp_value)
 
-    # The process_tree aggregate summarises an entire subtree, so its value
-    # names every PID/path it contains. Extracting correlation signals from it
-    # would make it spuriously join — and, being high-confidence, anchor —
-    # every PID group, duplicating correlations the per-PID process/cmdline
-    # items already carry. Treat it as a non-participant: keep the item but give
-    # it no correlation signals.
+    # process_tree names every PID/path it contains — extracting signals would make it join (and
+    # anchor) every PID group, duplicating the per-PID items' correlations (4.7). Keep the item,
+    # give it no signals.
     if evidence_type == "process_tree":
         pids, ips, paths = [], [], []
     else:
@@ -423,13 +466,17 @@ def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
     for path in paths:
         normalized_path = _normalize_path(path)
         file_keys.append(normalized_path.lower())
-        file_name = os.path.basename(normalized_path)
-        if file_name:
+        # NOT os.path.basename (POSIX basename doesn't split backslashes — the filename key silently
+        # never fired on Linux, B-13); it's the only key linking the memory and disk views of a
+        # file. Dot required: dotless last segments are dirs/truncated fragments that formed junk
+        # groups.
+        file_name = normalized_path.rsplit("\\", 1)[-1]
+        if "." in file_name:
             file_keys.append(file_name.lower())
     file_keys = sorted(set(file_keys))
 
-    # Domain correlation signal (issue B1): only for domain-bearing types, read
-    # from the clean value so artifact-id fragments don't leak in.
+    # Domain signal (B1): domain-bearing types only, read from the clean value so artifact-id
+    # fragments don't leak in.
     if evidence_type in _DOMAIN_BEARING_TYPES:
         domains = _extract_domains(normalized_value)
     else:
@@ -457,7 +504,9 @@ def _extract_item_signals(item: dict, default_machine: str) -> dict[str, Any]:
 
 
 def enrich_evidence_items(items: list[dict], case_context: dict) -> tuple[list[dict], dict[str, dict[str, Any]]]:
-    default_machine = _default_machine_id(case_context)
+    # Attribute non-network evidence to the real subject host, guarding against a phantom narrative
+    # IP that owns no connections (B-1).
+    default_machine = _resolve_subject_host(items, case_context)
     enriched_items = []
     signals_by_artifact = {}
 
@@ -466,7 +515,11 @@ def enrich_evidence_items(items: list[dict], case_context: dict) -> tuple[list[d
         artifact_id = str(enriched_item.get("artifact_id", ""))
         enriched_item["raw_value"] = str(enriched_item.get("value", ""))
         enriched_item["normalized_value"] = _normalize_whitespace(enriched_item.get("value", ""))
-        enriched_item["machine_id"] = str(enriched_item.get("machine_id") or default_machine)
+        enriched_item["machine_id"] = str(
+            enriched_item.get("machine_id")
+            or _host_from_network_item(enriched_item)
+            or default_machine
+        )
         if not isinstance(enriched_item.get("correlations"), list):
             enriched_item["correlations"] = []
         signals_by_artifact[artifact_id] = _extract_item_signals(enriched_item, default_machine)
@@ -519,9 +572,9 @@ def _make_finding(
         "correlation_type": correlation_type,
         "finding": finding,
         "what_confirmed_it": what_confirmed_it,
-        # Deduped: the anchor is selected from related_items, so its id is also
-        # in related_artifacts; without dedup it would appear twice and each
-        # consumer (annotate_item_correlations) would record the finding twice.
+        # Deduped: the anchor is selected from related_items, so its id is also in
+        # related_artifacts; without dedup it would appear twice and each consumer
+        # (annotate_item_correlations) would record the finding twice.
         "artifacts": list(dict.fromkeys(
             [anchor.get("artifact_id", "")] + [artifact for artifact in related_artifacts if artifact]
         )),
@@ -552,22 +605,16 @@ def _group_items_by_signal(
     for key, related_items in grouped.items():
         if len(related_items) < 2:
             continue
-        # The domain signal only earns its keep as a *cross-artifact* link; a
-        # group confined to one tool and one evidence type (e.g. www/non-www
-        # copies of the same benign host in a single memory image) is the
-        # near-zero-signal noise issue 4.7 flags, so skip it.
+        # A domain group confined to one tool AND one evidence type is near-zero-signal noise (4.7)
+        # — skip it.
         if require_cross_source:
             tools = {i.get("source_tool", "") for i in related_items}
             types = {i.get("evidence_type", "") for i in related_items}
             if len(tools) < 2 and len(types) < 2:
                 continue
-        # Suppress near-zero-signal same_pid groups (issue 4.7): a PID seen only
-        # through the process-identity types (process row + command line + tree
-        # position, all from one enumeration) is the same fact restated, not a
-        # cross-artifact link. Keep it only when the PID also surfaces in
-        # information-adding evidence (injected_code / network / file) or across
-        # >= 2 tools — that's what distinguishes an injected/beaconing PID from
-        # System PID 4 and the svchost crowd.
+        # Suppress identity-only same_pid groups (4.7): keep only when the PID also surfaces in
+        # information-adding evidence or across >= 2 tools — what distinguishes an injected PID from
+        # System PID 4 / the svchosts.
         if key_name == "pids":
             tools = {i.get("source_tool", "") for i in related_items}
             types = {i.get("evidence_type", "") for i in related_items}
@@ -631,8 +678,7 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
             continue
         if signal.get("bytes_transferred", 0) < EXFIL_BYTES_THRESHOLD:
             continue
-        if signal.get("timestamp_dt") is None:
-            continue
+        # No timestamp gate: file-correlation checks it per pair; the network-only path needs none.
         network_events.append({"item": item, "signal": signal})
 
     findings = []
@@ -644,6 +690,9 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
             destination = f"{destination}:{network_signal['destination_port']}"
 
         matching_file_events = []
+        # Filename match (connection named the file) is the strong-but-rare case; otherwise the
+        # match is purely temporal. Track which, so the finding claims only what was checked (5.1).
+        filename_matched = False
         for file_event in file_events:
             file_signal = file_event["signal"]
             file_dt = file_signal.get("timestamp_dt")
@@ -656,35 +705,87 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
                 continue
 
             shared_keys = set(file_signal.get("file_keys", [])) & set(network_signal.get("file_keys", []))
-            path_overlap = shared_keys or file_signal.get("paths")
-            if not path_overlap:
-                continue
+            # Temporal proximity alone is enough to surface the pair; a shared file name strengthens
+            # it but is not required (a TCP connection can't carry one).
+            if shared_keys:
+                filename_matched = True
 
             matching_file_events.append(file_event)
 
         if not matching_file_events:
+            # Network-only fallback (pcap-only cases have no file events): the flow must already be
+            # flagged (IOC tag or critical/high) — volume alone would fire on benign bulk uploads.
+            anchor = network_event["item"]
+            tags = anchor.get("ioc_match") or []
+            if tags or str(anchor.get("severity", "")).lower() in ("critical", "high"):
+                flagged_as = ", ".join(tags) if tags else f"{anchor.get('severity')} severity"
+                bytes_transferred = network_signal.get("bytes_transferred", 0)
+                findings.append(_make_finding(
+                    anchor=anchor,
+                    related_items=[],
+                    correlation_type="exfiltration",
+                    finding=(
+                        f"Large outbound transfer to {destination} "
+                        f"({bytes_transferred:,} bytes; flagged: {flagged_as})"
+                    ),
+                    what_confirmed_it=[
+                        "Large outbound traffic exceeded the exfiltration threshold",
+                        f"The flow was independently flagged ({flagged_as})",
+                        "No file-system evidence available to identify the transferred data",
+                    ],
+                    confidence=_correlation_confidence([anchor], base=0.62),
+                    extra={
+                        "file": "",
+                        "destination": destination,
+                        "timestamp": network_signal.get("timestamp", ""),
+                        "bytes_transferred": bytes_transferred,
+                        "match_type": "network_only",
+                    },
+                ))
             continue
 
         anchor = network_event["item"]
         supporting_items = [event["item"] for event in matching_file_events]
         primary_file = matching_file_events[0]["signal"].get("paths", [])
         primary_file_path = primary_file[0] if primary_file else matching_file_events[0]["item"].get("normalized_value", matching_file_events[0]["item"].get("value", ""))
+
+        if filename_matched:
+            finding_text = f"Large outbound transfer of {primary_file_path} to {destination}"
+            confirmations = [
+                "Large outbound traffic exceeded the exfiltration threshold",
+                "File activity was observed before the outbound transfer",
+                "The transferred file name matched disk/timeline evidence",
+            ]
+            base_confidence = 0.82
+        else:
+            # Temporal correlation only — the connection did not name the file, so don't assert the
+            # file path "matched"; report the sequence honestly and at a lower confidence than a
+            # true filename match.
+            window_hours = EXFIL_TIME_WINDOW_SECONDS // 3600
+            finding_text = (
+                f"Large outbound transfer to {destination} shortly after file "
+                f"activity ({primary_file_path} staged within {window_hours}h)"
+            )
+            confirmations = [
+                "Large outbound traffic exceeded the exfiltration threshold",
+                "File activity was observed before the outbound transfer",
+                "Temporal correlation only — the connection did not name the file",
+            ]
+            base_confidence = 0.70
+
         findings.append(_make_finding(
             anchor=anchor,
             related_items=supporting_items,
             correlation_type="exfiltration",
-            finding=f"Large outbound transfer of {primary_file_path} to {destination}",
-            what_confirmed_it=[
-                "Large outbound traffic exceeded the exfiltration threshold",
-                "File activity was observed before the outbound transfer",
-                "The file path matched disk/timeline evidence from TSK",
-            ],
-            confidence=_correlation_confidence([anchor] + supporting_items, base=0.82),
+            finding=finding_text,
+            what_confirmed_it=confirmations,
+            confidence=_correlation_confidence([anchor] + supporting_items, base=base_confidence),
             extra={
                 "file": primary_file_path,
                 "destination": destination,
                 "timestamp": network_signal.get("timestamp", ""),
                 "bytes_transferred": network_signal.get("bytes_transferred", 0),
+                "match_type": "filename" if filename_matched else "temporal",
             },
         ))
 
@@ -692,13 +793,9 @@ def _build_exfiltration_findings(items: list[dict], signals: dict[str, dict[str,
 
 
 def _resolve_linked_target(target: str, by_id: dict[str, dict]) -> list[dict]:
-    """Resolve a wrapper-emitted link target id to the real evidence item(s).
-
-    Handles the prefix mismatch: wrappers link to `proc_<pid>` while the actual
-    process item id is `proc_<pid>_<name>`. Exact id wins; otherwise any id
-    under the `<target>_` boundary matches (so `proc_59` never grabs
-    `proc_596_...`).
-    """
+    """Resolve a link target id to the real item(s): exact id wins, else the `<target>_` prefix
+    boundary (wrappers link `proc_<pid>` but the item id is `proc_<pid>_<name>`; the boundary
+    keeps proc_59 from grabbing proc_596)."""
     exact = by_id.get(target)
     if exact is not None:
         return [exact]
@@ -710,18 +807,10 @@ def _build_linked_artifact_findings(
     items: list[dict],
     existing_findings: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Promote wrapper-emitted `linked_artifacts` into correlation findings.
-
-    Wrappers declare authoritative cross-references the signal-based grouping
-    can't reconstruct from free text — e.g. a `process_relation` value names the
-    parent/child process *names*, not their PIDs, so `same_pid` never ties it to
-    the concrete `process` items; a malfind `injected_code` item links to its
-    host process. This reads those declared links, resolves each target to a
-    real item (incl. the `proc_<pid>` -> `proc_<pid>_<name>` prefix), and emits a
-    `linked_artifact` finding per link group — skipping any whose artifact set is
-    already fully covered by an existing signal finding, so already-correlated
-    pairs (e.g. injected_code/process sharing a PID) aren't duplicated.
-    """
+    """Promote wrapper-declared `linked_artifacts` into findings (4.6) — links the signal
+    grouping can't reconstruct from free text (process_relation names processes, not PIDs). Skips
+    groups an existing signal finding already fully covers, so correlated pairs aren't
+    duplicated."""
     by_id: dict[str, dict] = {}
     for item in items:
         aid = item.get("artifact_id", "")
@@ -816,10 +905,11 @@ def build_correlations(items: list[dict], signals: dict[str, dict[str, Any]]) ->
     findings.extend(_group_items_by_signal(items, signals, "ips"))
     findings.extend(_group_items_by_signal(items, signals, "file_keys"))
     findings.extend(_group_items_by_signal(items, signals, "domains", require_cross_source=True))
-    findings.extend(_group_items_by_signal(items, signals, "timestamp_bucket"))
+    # Same-minute groups confined to one tool+type are noise (measured 100% on dev01/ubnist — F4b).
+    findings.extend(_group_items_by_signal(items, signals, "timestamp_bucket", require_cross_source=True))
     findings.extend(_build_exfiltration_findings(items, signals))
-    # Merge wrapper-declared explicit links (issue 4.6), after the signal-based
-    # findings so already-covered link sets can be skipped.
+    # Merge wrapper-declared explicit links (issue 4.6), after the signal-based findings so
+    # already-covered link sets can be skipped.
     findings.extend(_build_linked_artifact_findings(items, findings))
 
     findings = sorted(
@@ -846,6 +936,10 @@ def build_bulk_summary(unified: dict) -> dict[str, Any]:
     }
 
 
+_BULK_PROGRESS_EVERY = 25  # print a progress line every N machines — silence for 1200 machines
+                            # otherwise gives an operator no sense the batch is alive at all
+
+
 def aggregate_bulk_evidence(
     machine_runs: dict[str, dict[str, Any]],
     output_root: str = "output/bulk"
@@ -857,9 +951,15 @@ def aggregate_bulk_evidence(
       - case_context: dict
       - raw_outputs_dir: str
       - output_path: optional str
+
+    One machine's raw outputs being malformed, unreadable, or otherwise fatal to
+    aggregate_evidence() must not lose every other machine's results in the same batch — at
+    fleet scale (hundreds to low-thousands of machines) some fraction of collections are always
+    going to be bad. Each machine's aggregation is isolated; failures are recorded, not raised.
     """
     summary = {
         "machines": [],
+        "failed_machines": [],
         "total_items": 0,
         "total_findings": 0,
         "output_root": output_root,
@@ -867,20 +967,36 @@ def aggregate_bulk_evidence(
 
     Path(output_root).mkdir(parents=True, exist_ok=True)
 
-    for machine_name, machine_spec in machine_runs.items():
+    total = len(machine_runs)
+    for i, (machine_name, machine_spec) in enumerate(machine_runs.items(), start=1):
+        if total >= _BULK_PROGRESS_EVERY and i % _BULK_PROGRESS_EVERY == 0:
+            print(f"  [BULK] {i}/{total} machines processed "
+                  f"({len(summary['failed_machines'])} failed so far)")
+
         machine_case_context = machine_spec.get("case_context") or {"case_id": machine_name}
         machine_raw_dir = machine_spec.get("raw_outputs_dir")
         machine_output_path = machine_spec.get("output_path") or str(
             Path(output_root) / f"{machine_name}_unified_evidence.json"
         )
         if not machine_raw_dir:
+            summary["failed_machines"].append({
+                "machine_name": machine_name, "error": "no raw_outputs_dir specified",
+            })
             continue
 
-        unified = aggregate_evidence(
-            case_context=machine_case_context,
-            raw_outputs_dir=machine_raw_dir,
-            output_path=machine_output_path,
-        )
+        try:
+            unified = aggregate_evidence(
+                case_context=machine_case_context,
+                raw_outputs_dir=machine_raw_dir,
+                output_path=machine_output_path,
+            )
+        except Exception as e:
+            print(f"  [BULK ERROR] {machine_name} failed to aggregate: {e}")
+            summary["failed_machines"].append({
+                "machine_name": machine_name, "error": str(e),
+            })
+            continue
+
         summary["machines"].append({
             "machine_name": machine_name,
             "case_id": unified.get("case_id", "unknown"),
@@ -891,6 +1007,10 @@ def aggregate_bulk_evidence(
         summary["total_items"] += unified.get("total_items", 0)
         summary["total_findings"] += len(unified.get("findings", []))
 
+    if summary["failed_machines"]:
+        print(f"  [BULK] Done — {len(summary['machines'])} succeeded, "
+              f"{len(summary['failed_machines'])} failed, out of {total}")
+
     return summary
 
 
@@ -899,49 +1019,17 @@ def aggregate_evidence(
     raw_outputs_dir: str = "output/raw",
     output_path: str = "output/unified_evidence.json"
 ) -> dict:
-    """
-    Main aggregation pipeline.
-    
-    Args:
-        case_context: Output from P1 intent classifier (for case_id)
-        raw_outputs_dir: Directory containing raw tool outputs
-        output_path: Where to write unified_evidence.json
-        
-    Returns:
-        The unified_evidence dict that was written.
-    """
+    """THE P4 driver: load → dedupe → reconcile → rescore → enrich → correlate → index → write.
+    Returns the unified_evidence dict that was written."""
     print(f"\n  [AGGREGATOR] Reading from: {raw_outputs_dir}")
     
     # Step 1: Load all raw outputs
     all_by_tool = load_raw_outputs(raw_outputs_dir)
     
+    # No raw outputs: fall through with zero items — the normal pipeline produces the empty shape from the same Step-7 builder
     if not all_by_tool:
-        print(f"  [WARN] No raw outputs found. Writing empty unified_evidence.json")
-        unified = {
-            "case_id": case_context.get("case_id", "unknown"),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "tools_aggregated": [],
-            "total_items": 0,
-            "deduplication_stats": {
-                "raw_items_before": 0,
-                "duplicates_removed": 0
-            },
-            "evidence_items": [],
-            "evidence_by_type": {},
-            "evidence_by_tool": {},
-            "evidence_by_machine": {},
-            "findings": [],
-            "exfiltration_findings": [],
-            "bulk_summary": {
-                "machines_analyzed": 0,
-                "machine_ids": [],
-                "findings_detected": 0,
-                "exfiltration_findings": 0,
-            }
-        }
-        write_json(output_path, unified)
-        return unified
-    
+        print("  [WARN] No raw outputs found. Writing empty unified_evidence.json")
+
     # Step 2: Flatten all items into one list
     all_items = []
     raw_count = 0
@@ -955,20 +1043,26 @@ def aggregate_evidence(
     unique_items, removed_count = deduplicate_items(all_items)
     print(f"  [DEDUP] Removed {removed_count} duplicates → {len(unique_items)} unique")
 
-    # Step 3a: Cross-tool process reconciliation (issue D6) — drop MemProcFS
-    # process items that merely duplicate Volatility's richer process list.
+    # Step 3a: Cross-tool process reconciliation (issue D6) — drop MemProcFS process items that
+    # merely duplicate Volatility's richer process list.
     unique_items, memprocfs_dropped = reconcile_memprocfs_processes(unique_items)
     if memprocfs_dropped:
         print(f"  [RECONCILE] Dropped {memprocfs_dropped} MemProcFS process "
               f"item(s) duplicating Volatility → {len(unique_items)} items")
 
-    # Step 3b: IOC re-scoring (boost severity on known indicators).
-    # Must run BEFORE sort, which keys on severity.
+    # Step 3b: IOC re-scoring (boost severity on known indicators). Must run BEFORE sort, which keys
+    # on severity.
     unique_items, boosted_count = rescore_items(unique_items, _IOC_CATALOG, case_context)
     print(f"  [IOC] Re-scored severity on {boosted_count} item(s)")
 
     # Step 4: Enrich items with normalized values and machine grouping
     enriched_items, signals_by_artifact = enrich_evidence_items(unique_items, case_context)
+
+    # Step 4b: Session co-occurrence — elevate a compromised host's other external domain contacts
+    # low -> medium (issue B1). Runs after enrich (needs machine_id) and after IOC re-scoring (needs
+    # the bad_host tags), before sort.
+    cooccurrence_count = apply_session_cooccurrence(enriched_items)
+    print(f"  [IOC] Session co-occurrence elevated {cooccurrence_count} item(s)")
 
     # Step 5: Sort by severity and confidence
     sorted_items = sort_evidence_items(enriched_items)
@@ -999,13 +1093,21 @@ def aggregate_evidence(
     }
 
     # Step 8: Validate output schema
-    if _UNIFIED_EVIDENCE_SCHEMA:
+    if _UNIFIED_EVIDENCE_SCHEMA and _EVIDENCE_ITEM_SCHEMA:
         try:
-            resolver = jsonschema.RefResolver(
-                base_uri=_SCHEMAS_DIR.as_uri() + "/",
-                referrer=_UNIFIED_EVIDENCE_SCHEMA,
+            # unified_evidence.json $refs sibling evidence_item.json; RefResolver is deprecated
+            # since jsonschema 4.18, so resolve via a referencing.Registry with the schemas-dir base
+            # URI stamped as $id.
+            base_uri = _SCHEMAS_DIR.as_uri() + "/"
+            registry = Registry().with_resource(
+                uri=base_uri + "evidence_item.json",
+                resource=Resource.from_contents(_EVIDENCE_ITEM_SCHEMA),
             )
-            jsonschema.validate(instance=unified, schema=_UNIFIED_EVIDENCE_SCHEMA, resolver=resolver)
+            validator = jsonschema.Draft7Validator(
+                {**_UNIFIED_EVIDENCE_SCHEMA, "$id": base_uri + "unified_evidence.json"},
+                registry=registry,
+            )
+            validator.validate(unified)
         except jsonschema.ValidationError as ve:
             print(f"  [WARN] Output schema violation: {ve.message}")
 
@@ -1033,7 +1135,7 @@ if __name__ == "__main__":
         output_path=str(ROOT_DIR / "output" / "unified_evidence.json")
     )
 
-    print(f"\n  [DONE] Aggregator complete")
+    print("\n  [DONE] Aggregator complete")
     print(f"        Case ID: {result.get('case_id')}")
     print(f"        Tools: {', '.join(result.get('tools_aggregated', []))}")
     print(f"        Total evidence items: {result.get('total_items')}")

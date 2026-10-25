@@ -35,11 +35,25 @@
       "category": "c2"
     },
     {
+      "id": "wannacry_c2",
+      "_comment": "Attribution layer over tor_hidden_service (PF-1a): WannaCry's five hard-coded c.wnry Tor C2 onions (public threat intel). A known onion matches both rules — the generic one detects, this one names the family and floors it to critical.",
+      "match": ["gx7ekbenv2riucmf.onion", "57g7spgrzlojinas.onion", "xxlvbrloxvriy2c5.onion", "76jdd2ir2embyv47.onion", "cwwnhwhlz52maqm7.onion"],
+      "severity": "critical",
+      "category": "known_malware"
+    },
+    {
       "id": "wannacry_ransom_wallet",
       "_comment": "WannaCry hard-coded BTC ransom wallets (lowercased for case-insensitive substring match against the lowercased haystack).",
       "match": ["13am4vw2dhxygxeqepohkhsquy6ngaeb94", "12t9ydpgwuez9nymgw519p7aa8isjr6smw", "115p7ummngoj1pmvkphijcrdfjnxj6lrln"],
       "severity": "critical",
       "category": "ransomware_marker"
+    },
+    {
+      "id": "r2d2_bundestrojaner",
+      "_comment": "R2D2/Bundestrojaner published IOCs (0zapftis case, BUGS 1.1): mfc42ul.dll injected module (name-squats the legit mfc42.dll), winsys32.sys kernel driver, hard-coded C2 IP.",
+      "match": ["mfc42ul.dll", "winsys32.sys", "207.158.22.134"],
+      "severity": "critical",
+      "category": "known_malware"
     },
     {
       "id": "ransomware_family",
@@ -90,10 +104,7 @@
     "ips": ["165.245.215.18"],
     "severity": "high"
   },
-  "c2_ports": {
-    "ports": [4444, 4445, 1337, 31337, 8888, 9999, 6667, 6668, 6669],
-    "severity": "critical"
-  },
+  "_c2_ports_note": "C2 ports moved to src/data/threat_intel.py (issue D1) as the single source of truth, tiered into high-confidence (critical floor) and dual-use watch (medium floor). The rescorer builds the c2_port / c2_port_watch indicators from there.",
   "exfil_keywords": {
     "keywords": ["exfil", "dns tunnel", "covert post", "data staged", "rclone", "megacmd", "outbound upload", "/api/metrics/run", "/api/join/"],
     "severity": "critical"

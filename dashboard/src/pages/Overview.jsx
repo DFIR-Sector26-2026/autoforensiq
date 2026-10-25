@@ -3,6 +3,7 @@ import {
   Pie,
   Cell,
   Tooltip,
+  Legend,
   ResponsiveContainer,
   BarChart,
   Bar,
@@ -12,32 +13,41 @@ import {
 
 import StatCard from "../components/StatCard";
 
-import ThreatFeed from "../components/panels/ThreatFeed";
+import useEvidence from "../hooks/useEvidence";
 
-import { summary } from "../data/mockData";
+import { SEVERITY_HEX, SEVERITY_TEXT } from "../data/severity";
 
-const severityData = [
-  { name: "Critical", value: 6 },
-  { name: "High", value: 12 },
-  { name: "Medium", value: 20 },
-  { name: "Low", value: 40 },
-];
+import { humanize } from "../utils/format";
 
-const timelineData = [
-  { stage: "Processes", count: 14 },
-  { stage: "Network", count: 31 },
-  { stage: "Injected", count: 2 },
-  { stage: "Threats", count: 6 },
-];
-
-const COLORS = [
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-];
+// Dark tooltip so recharts' default white popover doesn't clash with the theme.
+const TOOLTIP_STYLE = {
+  backgroundColor: "#1e293b",
+  border: "1px solid #334155",
+  borderRadius: "0.5rem",
+  color: "#e2e8f0",
+};
 
 export default function Overview() {
+
+  const { summary, byTool, reconciliation } = useEvidence();
+
+  if (!summary) {
+
+    return <div className="text-white">No run data found.</div>;
+  }
+
+  const sd = summary.severity_distribution;
+
+  const severityData = [
+    { name: "Critical", value: sd.critical },
+    { name: "High", value: sd.high },
+    { name: "Medium", value: sd.medium },
+    { name: "Low", value: sd.low },
+  ];
+
+  const toolData = Object.entries(byTool).map(
+    ([stage, count]) => ({ stage, count })
+  );
 
   return (
 
@@ -51,25 +61,25 @@ export default function Overview() {
 
         <StatCard
           title="Total Evidence"
-          value={summary.totalEvidence}
+          value={summary.total_items}
           color="#38bdf8"
         />
 
         <StatCard
-          title="Critical Alerts"
-          value={summary.criticalAlerts}
+          title="Critical"
+          value={summary.critical_count}
           color="#ef4444"
         />
 
         <StatCard
-          title="Suspicious Processes"
-          value={summary.suspiciousProcesses}
+          title="High"
+          value={sd.high}
           color="#f97316"
         />
 
         <StatCard
-          title="Injected Code"
-          value={summary.injectedCode}
+          title="IOC Indicators"
+          value={summary.ioc_count}
           color="#eab308"
         />
 
@@ -97,21 +107,33 @@ export default function Overview() {
                 <Pie
                   data={severityData}
                   dataKey="value"
-                  outerRadius={120}
+                  outerRadius={110}
                 >
 
-                  {severityData.map((entry, index) => (
+                  {severityData.map((entry) => (
 
                     <Cell
-                      key={index}
-                      fill={COLORS[index % COLORS.length]}
+                      key={entry.name}
+                      fill={SEVERITY_HEX[entry.name.toLowerCase()]}
                     />
 
                   ))}
 
                 </Pie>
 
-                <Tooltip />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  itemStyle={{ color: "#38bdf8" }}
+                  isAnimationActive={false}
+                  wrapperStyle={{ transition: "none" }}
+                />
+
+                <Legend
+                  layout="vertical"
+                  align="left"
+                  verticalAlign="middle"
+                  formatter={(value, entry) => `${value}: ${entry.payload.value}`}
+                />
 
               </PieChart>
 
@@ -129,20 +151,26 @@ export default function Overview() {
         ">
 
           <h2 className="text-2xl font-bold mb-6">
-            Evidence Timeline
+            Evidence by Tool
           </h2>
 
           <div className="h-80">
 
             <ResponsiveContainer width="100%" height="100%">
 
-              <BarChart data={timelineData}>
+              <BarChart data={toolData}>
 
-                <XAxis dataKey="stage" />
+                <XAxis dataKey="stage" tickFormatter={humanize} />
 
                 <YAxis />
 
-                <Tooltip />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  cursor={{ fill: "rgba(56, 189, 248, 0.1)" }}
+                  isAnimationActive={false}
+                  wrapperStyle={{ transition: "none" }}
+                  labelFormatter={humanize}
+                />
 
                 <Bar
                   dataKey="count"
@@ -159,11 +187,48 @@ export default function Overview() {
 
       </div>
 
-      <div className="mt-10">
+      {reconciliation && (
 
-        <ThreatFeed />
+        <div className="
+          bg-slate-900/70
+          border border-slate-700
+          rounded-2xl
+          p-6 mt-10
+        ">
 
-      </div>
+          <div className="text-sm uppercase tracking-wide text-slate-400 mb-3">
+            Case Verdict
+          </div>
+
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+
+            <span className={`text-3xl font-bold ${SEVERITY_TEXT[summary.overall_severity] || "text-white"}`}>
+              {summary.overall_severity.toUpperCase()}
+            </span>
+
+            <span className="text-2xl text-slate-300">·</span>
+
+            <span className="text-2xl text-slate-200 capitalize">
+              {humanize(reconciliation.narrative_case_type)}
+            </span>
+
+            <span className="text-2xl text-slate-300">·</span>
+
+            <span className="text-xl text-slate-400">
+              {Math.round((reconciliation.reconciled_confidence || 0) * 100)}% confidence
+            </span>
+
+          </div>
+
+          {reconciliation.notes && reconciliation.notes.length > 0 && (
+            <p className="text-slate-400 mt-4">
+              {humanize(reconciliation.notes[0])}
+            </p>
+          )}
+
+        </div>
+
+      )}
 
     </div>
   );

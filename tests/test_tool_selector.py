@@ -102,3 +102,25 @@ def test_browser_history_case_selects_browser_tool():
     ctx = _classify(["browser_history"])
     selected = {t["name"] for t in select_tools(ctx, _ONTOLOGY)}
     assert selected == {"browser"}
+
+
+def test_selector_failure_falls_back_to_all_wrappers(monkeypatch, tmp_path):
+    # A broken ontology must degrade to running EVERY wrapper (DFIR over-collect),
+    # sourced from WRAPPER_MAP (the old hardcoded stub had drifted: no memprocfs).
+    import autoforensiq as af
+    import src.agents.tool_selector as ts
+    from src.orchestrator import WRAPPER_MAP
+
+    monkeypatch.setattr(af, "ROOT_DIR", tmp_path)
+    (tmp_path / "output").mkdir()
+    monkeypatch.setattr(ts, "load_json", lambda path: {})
+    monkeypatch.setattr(ts, "generate_execution_plan",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("ontology broken")))
+
+    plan = af.run_tool_selector({"case_type": "unknown"})
+    assert plan["fallback"] is True
+    assert "ontology broken" in plan["fallback_reason"]
+    assert [t["name"] for t in plan["tools"]] == list(WRAPPER_MAP)
+    # the audit trail on disk records the fallback too
+    on_disk = json.loads((tmp_path / "output" / "execution_plan.json").read_text())
+    assert on_disk["fallback"] is True

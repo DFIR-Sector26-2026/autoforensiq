@@ -1,0 +1,48 @@
+"""Drift guard for the two hand-maintained extension-routing maps (cross-cutting ⚪ item):
+GUI `_EXT_MAP` vs CLI `_map_evidence_files` (.vmem had already drifted when this was added)."""
+
+from autoforensiq import _map_evidence_files, _EVIDENCE_KEY_TO_ARTIFACT_TYPE
+from src.gui.launcher import _EXT_MAP, _detect_type
+
+# Every extension either map routes; the union catches an extension added to only one side.
+_ALL_EXTS = sorted(set(_EXT_MAP) | {
+    ".dmp", ".mem", ".raw", ".vmem", ".pcap", ".pcapng", ".img", ".dd", ".e01",
+    ".dmg", ".dat", ".hiv", ".eml", ".msg", ".log", ".evtx",
+})
+
+
+def test_gui_ext_map_agrees_with_cli_evidence_mapping():
+    for ext in _ALL_EXTS:
+        mapped = _map_evidence_files([f"sample{ext}"])
+        assert len(mapped) == 1, f"CLI does not route {ext}"
+        cli_key = next(iter(mapped))
+        cli_type = _EVIDENCE_KEY_TO_ARTIFACT_TYPE.get(cli_key, cli_key)
+        assert _EXT_MAP.get(ext) == cli_type, (
+            f"{ext}: GUI badges {_EXT_MAP.get(ext)!r} but the CLI routes it to {cli_type!r} — "
+            "sync launcher._EXT_MAP with autoforensiq._map_evidence_files"
+        )
+
+
+def test_evtx_extension_wins_over_registry_filename_heuristic():
+    # "System.evtx" is the natural, even default, name for an exported Windows System event log —
+    # but REGISTRY's "system" in lower filename check used to run before the .evtx extension
+    # check, misrouting it to registry_hive (RegRipper) instead of log_files (Plaso). An
+    # unambiguous extension must always win over a filename substring guess.
+    for name in ("System.evtx", "system_events.evtx", "NTUSER_history.evtx"):
+        mapped = _map_evidence_files([name])
+        assert set(mapped) == {"log_files"}, f"{name} routed to {set(mapped)}, expected log_files"
+
+
+def test_gui_name_based_routing_agrees_with_cli():
+    # F8e: the CLI also routes on filename (SYSTEM/NTUSER/SOFTWARE hives, browser History,
+    # memory dumps) with no extension — the GUI badge must agree for those too.
+    for name in ("SYSTEM", "NTUSER.DAT", "SOFTWARE", "History", "memory_capture",
+                 "phishing_emails.csv"):
+        mapped = _map_evidence_files([name])
+        assert len(mapped) == 1, f"CLI does not route {name}"
+        cli_key = next(iter(mapped))
+        cli_type = _EVIDENCE_KEY_TO_ARTIFACT_TYPE.get(cli_key, cli_key)
+        assert _detect_type(name) == cli_type, (
+            f"{name}: GUI badges {_detect_type(name)!r} but the CLI routes it to {cli_type!r} — "
+            "sync launcher._detect_type with autoforensiq._map_evidence_files"
+        )
